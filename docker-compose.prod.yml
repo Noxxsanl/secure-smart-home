@@ -1,0 +1,108 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: iot-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: iot_managerDeviceIoT
+      MYSQL_USER: iot_managerIoT
+      MYSQL_PASSWORD: iot_managerIoTpassword
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - iot-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "iot_managerIoT", "-piot_managerIoTpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Broker 1: Sensor Node → Gateway Node (port 1883)
+  mqtt-broker-1:
+    image: eclipse-mosquitto:2
+    container_name: iot-mosquitto-1
+    restart: always
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/broker1/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto1_data:/mosquitto/data
+      - mosquitto1_logs:/mosquitto/log
+    networks:
+      - iot-network
+
+  # Broker 2: Gateway Node → Backend (port 1884)
+  mqtt-broker-2:
+    image: eclipse-mosquitto:2
+    container_name: iot-mosquitto-2
+    restart: always
+    ports:
+      - "1884:1883"
+    volumes:
+      - ./mosquitto/broker2/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto2_data:/mosquitto/data
+      - mosquitto2_logs:/mosquitto/log
+    networks:
+      - iot-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: iot-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - DB_HOST=mysql
+      # Backend chỉ kết nối Broker 2 (gateway → backend layer)
+      - MQTT_HOST=mqtt-broker-2
+      - MQTT_PORT=1883
+      - FRONTEND_URL=http://localhost
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mqtt-broker-2:
+        condition: service_started
+    networks:
+      - iot-network
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: iot-frontend
+    environment:
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - iot-network
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    container_name: iot-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - iot-network
+    restart: always
+
+volumes:
+  mysql_data:
+  mosquitto1_data:
+  mosquitto1_logs:
+  mosquitto2_data:
+  mosquitto2_logs:
+
+networks:
+  iot-network:
+    driver: bridge
