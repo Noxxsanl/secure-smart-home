@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../about/presentation/pages/about_page.dart';
 import '../../../auth/models/mock_user.dart';
+import '../../../door/presentation/pages/door_page.dart';
 import '../../../home/presentation/pages/home_page.dart';
 import '../../../notifications/presentation/pages/notification_page.dart';
 import '../../../profile/presentation/pages/profile_page.dart';
@@ -32,6 +33,11 @@ class _AppShellPageState extends State<AppShellPage> {
       selectedIcon: Icons.meeting_room,
     ),
     BottomNavItem(
+      label: 'Door',
+      icon: Icons.sensor_door_outlined,
+      selectedIcon: Icons.sensor_door,
+    ),
+    BottomNavItem(
       label: 'Notifications',
       icon: Icons.notifications_outlined,
       selectedIcon: Icons.notifications,
@@ -53,10 +59,12 @@ class _AppShellPageState extends State<AppShellPage> {
       case 1:
         return const RoomListPage();
       case 2:
-        return const NotificationPage();
+        return const DoorPage();
       case 3:
-        return const AboutPage();
+        return const NotificationPage();
       case 4:
+        return const AboutPage();
+      case 5:
         return ProfilePage(user: widget.user);
       default:
         return HomePage(user: widget.user);

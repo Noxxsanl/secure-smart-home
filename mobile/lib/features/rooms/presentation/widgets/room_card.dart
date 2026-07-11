@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/theme/app_theme.dart';
+import '../../../devices/data/mock_devices.dart';
 import '../../models/room.dart';
 
 class RoomCard extends StatelessWidget {
@@ -10,26 +12,76 @@ class RoomCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.primary;
+    final deviceCount = MockDevices.forRoom(room.id).length;
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(24),
       child: InkWell(
+        borderRadius: BorderRadius.circular(24),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(18),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(room.icon, size: 48, color: color),
-              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceTint,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(room.icon, size: 26, color: AppColors.primary),
+                  ),
+                  if (room.hasClimateData)
+                    Text(
+                      '${room.temperature.round()}°',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                ],
+              ),
+              const Spacer(),
               Text(
                 room.name,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
               ),
+              const SizedBox(height: 2),
+              if (room.hasClimateData) ...[
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.water_drop_outlined,
+                      size: 12,
+                      color: AppColors.textSecondary,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${room.humidity}% · $deviceCount devices',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ] else
+                Text(
+                  '$deviceCount devices',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
             ],
           ),
         ),
