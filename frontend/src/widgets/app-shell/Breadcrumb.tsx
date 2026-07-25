@@ -10,6 +10,23 @@ const ROUTE_LABELS: Record<string, string> = {
   users: "Users",
   logs: "Logs",
   new: "New",
+  "smart-homes": "Smart Homes",
+  customers: "Customers",
+  gateways: "Gateways",
+  automation: "Automation",
+  ota: "OTA & Firmware",
+  notifications: "Notification Center",
+  team: "Team & Roles",
+  access: "Operator Access",
+  settings: "Settings",
+  gateway: "Gateway Log",
+  device: "Device Log",
+  provision: "Provision Log",
+  mqtt: "MQTT Log",
+  security: "Security Log",
+  auth: "Authentication Log",
+  activity: "User Activity Log",
+  error: "Error Log",
 };
 
 function buildCrumbs(pathname: string) {

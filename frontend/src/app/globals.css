@@ -7,17 +7,53 @@
   color-scheme: light;
   --background: #F6F8FB;
   --foreground: #111827;
+
+  /* Smart Home Platform design tokens — §11.2 FRONTEND_REFACTOR_SMARTHOME.md */
+  --brand: #F4600E;
+  --brand-soft: #FFF1E8;
+  --critical: #D92D20;
+  --critical-soft: #FEF3F2;
+  --warning: #F79009;
+  --warning-soft: #FFFAEB;
+  --success: #079455;
+  --success-soft: #ECFDF3;
+  --info: #4B5563;
+  --surface: #FFFFFF;
+  --canvas: #F7F7F8;
 }
 
 .dark {
   color-scheme: dark;
   --background: #0f172a;
   --foreground: #f1f5f9;
+
+  --brand: #FB8A45;
+  --brand-soft: #3A2416;
+  --critical: #F97066;
+  --critical-soft: #4C1D1B;
+  --warning: #FDB022;
+  --warning-soft: #4A2E05;
+  --success: #47CD89;
+  --success-soft: #0D3321;
+  --info: #9CA3AF;
+  --surface: #111827;
+  --canvas: #0B0F17;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-critical: var(--critical);
+  --color-critical-soft: var(--critical-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+  --color-surface: var(--surface);
+  --color-canvas: var(--canvas);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

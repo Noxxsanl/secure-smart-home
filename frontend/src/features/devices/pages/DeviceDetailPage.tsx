@@ -4,16 +4,16 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  Server, Cpu, Lock, Unlock, Trash2,
-  MapPin, Hash, Activity, RefreshCw, ArrowLeft,
-  Thermometer, Droplets,
+  Lock, Unlock, Trash2, MapPin, Hash, Activity, RefreshCw, ArrowLeft,
+  Thermometer, Droplets, Home as HomeIcon,
 } from "lucide-react";
 import OnlineIndicator from "@/features/devices/components/OnlineIndicator";
-import DeviceStatusBadge from "@/features/devices/components/DeviceStatusBadge";
+import StatusBadge from "@/shared/ui/StatusBadge";
 import ConfirmDialog from "@/shared/ui/ConfirmDialog";
 import SensorChart from "@/features/devices/components/SensorChart";
 import { useDeviceDetail } from "@/features/devices/hooks/useDeviceDetail";
 import { useSensorData } from "@/features/devices/hooks/useSensorData";
+import { smartHomeStore, roomStore } from "@/shared/mock/store";
 import type { ApiDeviceStatus } from "@/shared/types/api";
 
 type PendingAction = "lock" | "unlock" | "delete" | null;
@@ -37,10 +37,10 @@ function formatDateTime(iso: string): string {
 function InfoCell({ label, icon, children }: { label: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1 p-3.5">
-      <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400">{label}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">{label}</p>
       <div className="flex items-center gap-2">
-        {icon && <span className="shrink-0 text-gray-400">{icon}</span>}
-        <span className="text-sm font-semibold text-gray-900">{children}</span>
+        {icon && <span className="shrink-0 text-gray-400 dark:text-slate-500">{icon}</span>}
+        <span className="text-sm font-semibold text-gray-900 dark:text-slate-100">{children}</span>
       </div>
     </div>
   );
@@ -51,9 +51,7 @@ export default function DeviceDetailPage() {
   const router = useRouter();
 
   const { device, isLoading, isError, updateStatus, deleteDevice } = useDeviceDetail(id);
-  const isSensor = device?.device_type === "sensor";
-  // Chỉ fetch dữ liệu sensor cho thiết bị loại sensor; truyền null để tắt SWR polling
-  // cho gateway vì gateway không có hàng nào trong bảng sensor_data.
+  const isSensor = device?.category === "sensor";
   const { sensorData, isLoading: chartLoading } = useSensorData(isSensor ? id : null);
 
   const [pending, setPending]             = useState<PendingAction>(null);
@@ -76,18 +74,14 @@ export default function DeviceDetailPage() {
     }
   };
 
-  // Hiển thị 20 bản ghi gần nhất trong bảng (biểu đồ dùng toàn bộ 200 bản ghi)
   const recentData = [...sensorData]
     .sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())
     .slice(0, 20);
 
-  // Suy ra gateway liên kết từ bản ghi mới nhất; có thể null trước khi có dữ liệu đầu tiên
-  const linkedGateway = recentData[0]?.gateway_id;
-
   if (isLoading) {
     return (
       <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center">
-        <div className="flex items-center gap-2 text-sm text-gray-400">
+        <div className="flex items-center gap-2 text-sm text-gray-400 dark:text-slate-500">
           <RefreshCw className="h-4 w-4 animate-spin" />
           Đang tải thiết bị…
         </div>
@@ -98,15 +92,18 @@ export default function DeviceDetailPage() {
   if (isError || !device) {
     return (
       <div className="flex min-h-[calc(100vh-5rem)] flex-col items-center justify-center gap-4">
-        <p className="text-red-500">Không có quyền truy cập hoặc thiết bị không tồn tại.</p>
+        <p className="text-critical">Không có quyền truy cập hoặc thiết bị không tồn tại.</p>
         <Link href="/devices"
-          className="inline-flex items-center gap-2 rounded border border-gray-200 bg-white px-3.5 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50">
+          className="inline-flex items-center gap-2 rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3.5 py-1.5 text-sm font-medium text-gray-700 dark:text-slate-300 transition hover:bg-gray-50 dark:hover:bg-slate-700">
           <ArrowLeft className="h-4 w-4" />
           Trở về Devices
         </Link>
       </div>
     );
   }
+
+  const home = smartHomeStore.get(device.home_id);
+  const room = roomStore.get(device.room_id);
 
   const dialogProps =
     pending === "delete"
@@ -123,25 +120,30 @@ export default function DeviceDetailPage() {
         <div className="space-y-2.5">
           <Link
             href="/devices"
-            className="inline-flex items-center gap-1.5 rounded border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 transition hover:bg-gray-50"
+            className="inline-flex items-center gap-1.5 rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-slate-300 transition hover:bg-gray-50 dark:hover:bg-slate-700"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             Trở về Devices
           </Link>
 
+          {home && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-slate-500">
+              <HomeIcon size={12} />
+              <Link href={`/smart-homes/${home.id}`} className="hover:text-brand">{home.name}</Link>
+              {room && <span>/ {room.name}</span>}
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
-            <div className={`flex h-9 w-9 items-center justify-center rounded ${isSensor ? "bg-violet-50" : "bg-blue-50"}`}>
-              {isSensor
-                ? <Cpu    className="h-4 w-4 text-violet-600" />
-                : <Server className="h-4 w-4 text-blue-600" />
-              }
+            <div className="flex h-9 w-9 items-center justify-center rounded bg-gray-100 dark:bg-slate-700">
+              <Hash className="h-4 w-4 text-gray-500 dark:text-slate-400" />
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h1 className="text-lg font-semibold text-gray-900">{device.device_name}</h1>
-                <DeviceStatusBadge status={device.status} />
+                <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">{device.device_name}</h1>
+                <StatusBadge status={device.status} />
               </div>
-              <p className="mt-0.5 font-mono text-xs text-gray-400">{device.device_id}</p>
+              <p className="mt-0.5 font-mono text-xs text-gray-400 dark:text-slate-500">{device.device_id}</p>
             </div>
           </div>
         </div>
@@ -149,19 +151,19 @@ export default function DeviceDetailPage() {
         <div className="flex items-center gap-2">
           {device.status === "blocked" ? (
             <button type="button" onClick={() => setPending("unlock")}
-              className="inline-flex items-center gap-1.5 rounded border border-emerald-200 bg-emerald-50 px-3.5 py-1.5 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100">
+              className="inline-flex items-center gap-1.5 rounded border border-success/30 bg-success-soft px-3.5 py-1.5 text-sm font-medium text-success transition hover:brightness-95">
               <Unlock className="h-3.5 w-3.5" />
               Mở khóa
             </button>
           ) : (
             <button type="button" onClick={() => setPending("lock")}
-              className="inline-flex items-center gap-1.5 rounded border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-sm font-medium text-amber-700 transition hover:bg-amber-100">
+              className="inline-flex items-center gap-1.5 rounded border border-warning/30 bg-warning-soft px-3.5 py-1.5 text-sm font-medium text-warning transition hover:brightness-95">
               <Lock className="h-3.5 w-3.5" />
               Khóa
             </button>
           )}
           <button type="button" onClick={() => setPending("delete")}
-            className="inline-flex items-center gap-1.5 rounded border border-red-200 bg-red-50 px-3.5 py-1.5 text-sm font-medium text-red-700 transition hover:bg-red-100">
+            className="inline-flex items-center gap-1.5 rounded border border-critical/20 bg-critical-soft px-3.5 py-1.5 text-sm font-medium text-critical transition hover:brightness-95">
             <Trash2 className="h-3.5 w-3.5" />
             Xóa
           </button>
@@ -169,17 +171,16 @@ export default function DeviceDetailPage() {
       </div>
 
       {/* Device info grid */}
-      <div className="overflow-hidden rounded-md border border-[#E5EAF0] bg-white">
-        <div className="border-b border-gray-200 bg-[#F4F5F7] px-4 py-2">
-          <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">Thông tin thiết bị</p>
+      <div className="overflow-hidden rounded-md border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800">
+        <div className="border-b border-gray-200 dark:border-slate-700 bg-[#F4F5F7] dark:bg-slate-900 px-4 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-400">Thông tin thiết bị</p>
         </div>
-        <div className="grid divide-y divide-gray-100 sm:grid-cols-2 xl:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <InfoCell label="Loại"
-            icon={isSensor ? <Cpu size={14} className="text-violet-500" /> : <Server size={14} className="text-blue-500" />}>
-            <span className="capitalize">{isSensor ? "Sensor" : "Gateway"}</span>
+        <div className="grid divide-y divide-gray-100 dark:divide-slate-700 sm:grid-cols-2 xl:grid-cols-4 sm:divide-x sm:divide-y-0 dark:sm:divide-x-slate-700">
+          <InfoCell label="Loại">
+            <span className="capitalize">{device.category.replace("_", " ")}</span>
           </InfoCell>
           <InfoCell label="Trạng thái">
-            <DeviceStatusBadge status={device.status} />
+            <StatusBadge status={device.status} />
           </InfoCell>
           <InfoCell label="Kết nối">
             <OnlineIndicator lastSeen={device.last_seen} />
@@ -189,19 +190,14 @@ export default function DeviceDetailPage() {
           </InfoCell>
         </div>
 
-        <div className="grid divide-y divide-gray-100 border-t border-gray-100 sm:grid-cols-2 xl:grid-cols-4 sm:divide-x sm:divide-y-0">
+        <div className="grid divide-y divide-gray-100 dark:divide-slate-700 border-t border-gray-100 dark:border-slate-700 sm:grid-cols-2 xl:grid-cols-4 sm:divide-x sm:divide-y-0">
           {device.location && (
             <InfoCell label="Vị trí" icon={<MapPin size={14} />}>
               {device.location}
             </InfoCell>
           )}
-          {isSensor && linkedGateway != null && (
-            <InfoCell label="Gateway liên kết" icon={<Server size={14} className="text-blue-400" />}>
-              <span className="font-mono text-xs">{String(linkedGateway)}</span>
-            </InfoCell>
-          )}
           <InfoCell label="Fail Count" icon={<Activity size={14} />}>
-            <span className={device.fail_count > 0 ? "text-amber-600" : "text-gray-900"}>
+            <span className={device.fail_count > 0 ? "text-warning" : "text-gray-900 dark:text-slate-100"}>
               {device.fail_count}
             </span>
           </InfoCell>
@@ -216,51 +212,47 @@ export default function DeviceDetailPage() {
         <>
           <SensorChart data={sensorData} isLoading={chartLoading} />
 
-          <div className="overflow-hidden rounded-md border border-[#E5EAF0] bg-white">
-            <div className="border-b border-gray-200 bg-[#F4F5F7] px-4 py-2">
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500">Dữ liệu gần nhất</p>
+          <div className="overflow-hidden rounded-md border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800">
+            <div className="border-b border-gray-200 dark:border-slate-700 bg-[#F4F5F7] dark:bg-slate-900 px-4 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-gray-500 dark:text-slate-400">Dữ liệu gần nhất</p>
             </div>
 
             {recentData.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center">
-                <Activity className="mb-3 h-8 w-8 text-gray-200" />
-                <p className="text-sm text-gray-400">Chưa có dữ liệu cảm biến.</p>
+                <Activity className="mb-3 h-8 w-8 text-gray-200 dark:text-slate-700" />
+                <p className="text-sm text-gray-400 dark:text-slate-500">Chưa có dữ liệu cảm biến.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full table-auto text-left text-sm">
                   <thead>
-                    <tr className="border-b border-gray-200 bg-[#F4F5F7]">
-                      <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Thời gian</th>
-                      <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    <tr className="border-b border-gray-200 dark:border-slate-700 bg-[#F4F5F7] dark:bg-slate-900">
+                      <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Thời gian</th>
+                      <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
                         <span className="flex items-center gap-1"><Thermometer size={11} /> Nhiệt độ (°C)</span>
                       </th>
-                      <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">
                         <span className="flex items-center gap-1"><Droplets size={11} /> Độ ẩm (%)</span>
                       </th>
-                      <th className="px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Gateway</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                     {recentData.map((record) => (
-                      <tr key={record.id} className="bg-white transition-colors hover:bg-blue-50/40">
-                        <td className="px-4 py-2.5 font-mono text-xs text-gray-500">
+                      <tr key={record.id} className="bg-white dark:bg-slate-800 transition-colors hover:bg-brand-soft/30">
+                        <td className="px-4 py-2.5 font-mono text-xs text-gray-500 dark:text-slate-400">
                           {formatDateTime(record.received_at)}
                         </td>
-                        <td className="px-4 py-2.5 font-semibold text-orange-500">
+                        <td className="px-4 py-2.5 font-semibold text-warning">
                           {record.payload?.temperature !== undefined
                             ? `${record.payload.temperature}°C`
-                            : <span className="text-gray-300">—</span>
+                            : <span className="text-gray-300 dark:text-slate-600">—</span>
                           }
                         </td>
-                        <td className="px-4 py-2.5 font-semibold text-blue-500">
+                        <td className="px-4 py-2.5 font-semibold text-info">
                           {record.payload?.humidity !== undefined
                             ? `${record.payload.humidity}%`
-                            : <span className="text-gray-300">—</span>
+                            : <span className="text-gray-300 dark:text-slate-600">—</span>
                           }
-                        </td>
-                        <td className="px-4 py-2.5 font-mono text-xs text-gray-500">
-                          {String(record.gateway_id)}
                         </td>
                       </tr>
                     ))}

@@ -56,11 +56,11 @@ export default function SensorChart({ data, isLoading }: SensorChartProps) {
     }));
 
   return (
-    <div className="rounded-2xl border border-[#E5EAF0] bg-white p-6 shadow-sm">
+    <div className="rounded-2xl border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800 p-6 shadow-sm">
       <div className="mb-5 flex items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400">Sensor Chart</p>
-          <h3 className="mt-1 text-lg font-semibold text-gray-900">Temperature &amp; Humidity</h3>
+          <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Sensor Chart</p>
+          <h3 className="mt-1 text-lg font-semibold text-gray-900 dark:text-slate-100">Temperature &amp; Humidity</h3>
         </div>
         <div className="flex gap-1.5">
           {(["1h", "6h", "24h"] as TimeRange[]).map((r) => (
@@ -70,8 +70,8 @@ export default function SensorChart({ data, isLoading }: SensorChartProps) {
               onClick={() => setRange(r)}
               className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
                 range === r
-                  ? "bg-blue-600 text-white"
-                  : "border border-gray-200 text-gray-500 hover:bg-gray-50"
+                  ? "bg-brand text-white"
+                  : "border border-gray-200 dark:border-slate-600 text-gray-500 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700"
               }`}
             >
               {r}
@@ -81,11 +81,11 @@ export default function SensorChart({ data, isLoading }: SensorChartProps) {
       </div>
 
       {isLoading ? (
-        <div className="flex h-52 items-center justify-center text-sm text-gray-400">
+        <div className="flex h-52 items-center justify-center text-sm text-gray-400 dark:text-slate-500">
           Loading chart data…
         </div>
       ) : chartData.length === 0 ? (
-        <div className="flex h-52 items-center justify-center text-sm text-gray-400">
+        <div className="flex h-52 items-center justify-center text-sm text-gray-400 dark:text-slate-500">
           No data in the last {range}.
         </div>
       ) : (

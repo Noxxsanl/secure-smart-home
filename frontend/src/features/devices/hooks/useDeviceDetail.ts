@@ -1,29 +1,21 @@
 import useSWR from "swr";
-import type { ApiDevice, ApiDeviceDetail, ApiDeviceStatus, ApiSensorData } from "@/shared/types/api";
-import api from "@/shared/api/client";
-
-type RawDeviceDetail = { device: ApiDevice; recent_data: ApiSensorData[] };
-
-const fetcher = (url: string) =>
-  api.get<RawDeviceDetail>(url).then((r) => ({
-    ...r.data.device,
-    recent_data: r.data.recent_data,
-  }));
+import { mockDelay, deviceStore } from "@/shared/mock/store";
+import type { ApiDeviceStatus } from "@/shared/types/api";
 
 export function useDeviceDetail(id: string | number) {
-  const { data, error, isLoading, mutate } = useSWR<ApiDeviceDetail>(
-    `/api/devices/${id}`,
-    fetcher,
-    { refreshInterval: 10000 }
+  const numericId = Number(id);
+  const { data, error, isLoading, mutate } = useSWR(
+    Number.isFinite(numericId) ? `/mock/devices/${numericId}` : null,
+    () => mockDelay(deviceStore.get(numericId))
   );
 
   const updateStatus = async (status: ApiDeviceStatus) => {
-    await api.patch(`/api/devices/${id}/status`, { status });
-    mutate();
+    deviceStore.updateStatus(numericId, status);
+    await mutate();
   };
 
   const deleteDevice = async () => {
-    await api.delete(`/api/devices/${id}`);
+    deviceStore.delete(numericId);
   };
 
   return {

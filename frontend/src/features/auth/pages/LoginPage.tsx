@@ -119,6 +119,13 @@ export default function LoginPage() {
               </button>
             </div>
           </form>
+
+          {/* Demo accounts — no backend required, login runs entirely on mock data */}
+          <div className="mt-6 rounded-2xl bg-[#f4f4f4] px-5 py-3 text-center text-xs text-[#888888]">
+            <p className="font-semibold text-[#666666]">Tài khoản demo</p>
+            <p className="mt-1">Admin: <span className="font-mono">admin / admin123</span></p>
+            <p>Operator: <span className="font-mono">operator01 / operator123</span></p>
+          </div>
         </div>
 
       </div>

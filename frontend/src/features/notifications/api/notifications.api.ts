@@ -1,15 +1,25 @@
-import api from "@/shared/api/client";
-import type { NotificationsResponse } from "@/shared/types/api";
+import { mockDelay, notificationStore } from "@/shared/mock/store";
+import type { MockNotification } from "@/shared/mock/types";
 
-export async function fetchNotifications(): Promise<NotificationsResponse> {
-  const { data } = await api.get<NotificationsResponse>("/api/notifications");
-  return data;
+export type NotificationsResponse = {
+  notifications: MockNotification[];
+  unread_count: number;
+};
+
+export async function fetchNotifications(role: "admin" | "operator"): Promise<NotificationsResponse> {
+  const notifications = notificationStore.listForRole(role);
+  return mockDelay({
+    notifications,
+    unread_count: notifications.filter((n) => !n.is_read).length,
+  });
 }
 
 export async function markNotificationRead(id: number): Promise<void> {
-  await api.patch<void>(`/api/notifications/${id}/read`, {});
+  notificationStore.markRead(id);
+  return mockDelay(undefined, 100);
 }
 
-export async function markAllNotificationsRead(): Promise<void> {
-  await api.patch<void>("/api/notifications/read-all", {});
+export async function markAllNotificationsRead(role: "admin" | "operator"): Promise<void> {
+  notificationStore.markAllRead(role);
+  return mockDelay(undefined, 100);
 }
