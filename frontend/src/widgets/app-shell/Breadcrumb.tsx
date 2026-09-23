@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 const ROUTE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
+  "ai-dashboard": "AI Dashboard",
   devices: "Devices",
   audit: "Audit Log",
   users: "Users",

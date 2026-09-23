@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard, Home, UserCircle, QrCode, Server, Cpu, UploadCloud,
   Zap, Bell, ShieldAlert, Users, KeyRound, Settings, Radio, Fingerprint,
-  Activity, Workflow, AlertOctagon,
+  Activity, Workflow, AlertOctagon, BrainCircuit,
 } from "lucide-react";
 import type { LogCategory } from "@/shared/mock/types";
 
@@ -69,6 +69,12 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Notification Center", href: "/notifications", icon: Bell, roles: ["admin", "operator"], badgeKey: "unreadNotifications" },
       { label: "Logs", href: "/logs/gateway", icon: ShieldAlert, roles: ["admin", "operator"] },
+    ],
+  },
+  {
+    section: "Trí tuệ nhân tạo",
+    items: [
+      { label: "AI Dashboard", href: "/ai-dashboard", icon: BrainCircuit, roles: ["admin", "operator"] },
     ],
   },
   {
