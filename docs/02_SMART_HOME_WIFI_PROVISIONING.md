@@ -1,8 +1,8 @@
 
-# SMART_HOME_WIFI_PROVISIONING.md
+# 02_SMART_HOME_WIFI_PROVISIONING.md
 
 > Kiến trúc Device Provisioning cho nền tảng Smart Home thương mại — mục tiêu: **khách hàng chỉ nhập WiFi đúng 1 lần**, mọi thiết bị còn lại tự động online mà không cần thao tác mạng thêm.
-> Tài liệu này là tầng **kỹ thuật mạng & embedded**, bổ sung cho [`PROJECT_ANALYSIS_SMARTHOME.md`](PROJECT_ANALYSIS_SMARTHOME.md) (mô hình dữ liệu Home/Room/Device) và [`SMART_HOME_PRODUCT_ARCHITECTURE.md`](SMART_HOME_PRODUCT_ARCHITECTURE.md) (Claim/Activation, RBAC, business flow bán hàng).
+> Tài liệu này là tầng **kỹ thuật mạng & embedded**, bổ sung cho [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md) (mô hình dữ liệu Home/Room/Device) và [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) (Claim/Activation, RBAC, business flow bán hàng).
 >
 > Thiết kế hướng tới quy mô: **hàng chục nghìn Gateway, hàng trăm nghìn Node, multi-tenant**.
 
@@ -187,10 +187,10 @@ sequenceDiagram
 | **Device Secret** | Sinh tại xưởng hoặc lúc Operator cấu hình, gắn với từng Node | NVS (mã hoá bằng flash encryption của ESP32), bản sao trên Cloud (mã hoá tại rest) | Dùng cho HMAC ký dữ liệu telemetry vận hành hàng ngày (giữ nguyên nguyên lý HMAC hiện có của hệ thống) |
 | **Gateway Secret** | Tương tự Device Secret nhưng cho Gateway | NVS (mã hoá) + Cloud (mã hoá tại rest) | HMAC cho lớp xác thực Gateway↔Backend |
 | **Node Secret** | Bí danh khác của Device Secret khi Node là thiết bị vệ tinh (không phải Gateway) | Như Device Secret | Ký challenge-response lúc pairing để Gateway xác minh Node đúng là thiết bị đã đăng ký cho Home này (không phải thiết bị lạ) |
-| **Activation Token** | Sinh lúc Operator tạo Smart Home (xem `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5) | Hash trong DB | Liên kết khách hàng ↔ Smart Home, không liên quan trực tiếp tới lớp mạng nhưng là điều kiện tiên quyết trước khi cho phép bắt đầu WiFi Provisioning (Gateway chỉ được provision khi Home đã ở trạng thái đang-claim hợp lệ) |
+| **Activation Token** | Sinh lúc Operator tạo Smart Home (xem `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5) | Hash trong DB | Liên kết khách hàng ↔ Smart Home, không liên quan trực tiếp tới lớp mạng nhưng là điều kiện tiên quyết trước khi cho phép bắt đầu WiFi Provisioning (Gateway chỉ được provision khi Home đã ở trạng thái đang-claim hợp lệ) |
 | **AES (AES-256-GCM)** | — | — | Thuật toán mã hoá đối xứng dùng cho: (1) mã hoá WiFi credential trong phiên provisioning, (2) mã hoá cấu hình Local AP gửi cho Camera, (3) mã hoá tại rest cho Device/Gateway Secret trong DB |
 | **ECDH (Curve25519)** | Mỗi phiên provisioning/pairing | — | Thiết lập Session Key giữa 2 bên **mà không cần truyền bất kỳ secret nào qua sóng** — chống nghe lén dù kênh truyền (BLE/SoftAP/ESP-NOW) không có mã hoá sẵn |
-| **TLS** | Kết nối Gateway↔Backend (HTTP/MQTT over TLS) | — | Bảo vệ kênh truyền tầng transport giữa Gateway và Cloud (khắc phục điểm yếu hiện tại: Mosquitto đang chạy không TLS — xem `PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#12) |
+| **TLS** | Kết nối Gateway↔Backend (HTTP/MQTT over TLS) | — | Bảo vệ kênh truyền tầng transport giữa Gateway và Cloud (khắc phục điểm yếu hiện tại: Mosquitto đang chạy không TLS — xem `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#12) |
 | **Challenge-Response** | Lúc Node join Pairing Mode | — | Gateway gửi nonce ngẫu nhiên, Node phải trả lời bằng chữ ký tính từ Node Secret — chứng minh Node sở hữu đúng secret mà không truyền secret đó qua sóng |
 
 ### 6.1. Nguyên tắc bất biến
@@ -210,7 +210,7 @@ flowchart LR
     C --> D["Ghi vào NVS\n(flash encryption bật ở bản production)"]
     D --> E["Self-test nội bộ\n(boot check, đo dòng tiêu thụ,\nkiểm tra cảm biến/camera hoạt động)"]
     E --> F["Đồng bộ metadata lên Cloud\n(gateway_secret/device_secret table — Phần 14)"]
-    F --> G["Sinh QR + Activation Code\n(gắn với Smart Home unclaimed —\nliên kết SMART_HOME_PRODUCT_ARCHITECTURE.md)"]
+    F --> G["Sinh QR + Activation Code\n(gắn với Smart Home unclaimed —\nliên kết 01_SMART_HOME_PRODUCT_ARCHITECTURE.md)"]
     G --> H["In QR lên tem/hộp"]
     H --> I["Đóng gói theo Kit\n(Gateway + Door-CAM + Living Room +\nBedroom + Kitchen)"]
     I --> J["Xuất kho\n(status: unclaimed, ready-to-sell)"]
@@ -298,7 +298,7 @@ sequenceDiagram
 
 ### 9.2. Đặc điểm quan trọng
 
-- **Whitelist theo `home_id`, không phải whitelist toàn cục** — vá đúng lỗ hổng "rò rỉ secret toàn hệ thống" đã nêu ở `PROJECT_ANALYSIS_SMARTHOME.md` (mục 1.5.#1): Gateway chỉ nhận diện được Node thuộc đúng Home của nó.
+- **Whitelist theo `home_id`, không phải whitelist toàn cục** — vá đúng lỗ hổng "rò rỉ secret toàn hệ thống" đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md` (mục 1.5.#1): Gateway chỉ nhận diện được Node thuộc đúng Home của nó.
 - **Cửa sổ Pairing có thời hạn** (60 giây, có thể gia hạn thủ công qua app) — chống kẻ tấn công chờ sẵn để giả mạo Node.
 - **Node tự động quay lại trạng thái "lắng nghe pairing"** nếu không nhận được heartbeat hợp lệ từ Gateway đã pair trong X giờ (mặc định 24h) — đây là cơ chế **then chốt giúp Replace Gateway không cần factory reset từng Node** (xem Phần 12).
 
@@ -311,7 +311,7 @@ flowchart TD
     A["Khách hàng mua Smart Home Kit"] --> B["Tải Mobile App"]
     B --> C["Đăng ký tài khoản"]
     C --> D["Đăng nhập"]
-    D --> E["Claim Smart Home\n(quét QR / nhập Activation Code —\nxem SMART_HOME_PRODUCT_ARCHITECTURE.md)"]
+    D --> E["Claim Smart Home\n(quét QR / nhập Activation Code —\nxem 01_SMART_HOME_PRODUCT_ARCHITECTURE.md)"]
     E --> F["Setup WiFi cho Gateway\n(Phần 8)"]
     F --> G["Gateway Online"]
     G --> H["Pair Node\n(Phần 9 — tự động dò từng node\ntrong kit: Door-CAM, Living Room,\nBedroom, Kitchen)"]
@@ -344,7 +344,7 @@ flowchart TD
 
 ## 12. REPLACE GATEWAY FLOW
 
-> Tầng nghiệp vụ/ownership của quy trình này đã mô tả tại `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 15. Phần dưới đây bổ sung **chi tiết kỹ thuật tầng mạng**.
+> Tầng nghiệp vụ/ownership của quy trình này đã mô tả tại `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 15. Phần dưới đây bổ sung **chi tiết kỹ thuật tầng mạng**.
 
 ```mermaid
 sequenceDiagram
@@ -373,7 +373,7 @@ sequenceDiagram
     API-->>APP: "Thay thế Gateway hoàn tất — không mất dữ liệu"
 ```
 
-**Không mất dữ liệu vì:** lịch sử `telemetry` gắn với `device_sensor_id` (không đổi), `devices.gateway_id` chỉ được **UPDATE** sang Gateway mới trong 1 transaction (xem `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 15) — không xoá/tạo lại bản ghi thiết bị. Node/Camera vật lý **không cần factory reset thủ công** nhờ cơ chế tự động quay lại "chế độ lắng nghe pairing" sau khi mất heartbeat.
+**Không mất dữ liệu vì:** lịch sử `telemetry` gắn với `device_sensor_id` (không đổi), `devices.gateway_id` chỉ được **UPDATE** sang Gateway mới trong 1 transaction (xem `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 15) — không xoá/tạo lại bản ghi thiết bị. Node/Camera vật lý **không cần factory reset thủ công** nhờ cơ chế tự động quay lại "chế độ lắng nghe pairing" sau khi mất heartbeat.
 
 ---
 
@@ -384,7 +384,7 @@ sequenceDiagram
 | **Reset Node** | Xoá cấu hình pairing (Session/LMK) của đúng 1 Node | Lệnh từ App qua Gateway (nếu còn kết nối) hoặc nhấn giữ nút vật lý trên Node | Không — chỉ ảnh hưởng tầng mạng, `devices` record trên cloud giữ nguyên, chờ pair lại |
 | **Reset Gateway (network reset)** | Xoá WiFi NVS + toàn bộ bảng pairing Node/Camera trên Gateway | Nhấn giữ nút vật lý Gateway hoặc lệnh App "Reset mạng Gateway" | Không unclaim Home — Gateway quay lại Provisioning Mode, sau khi setup WiFi lại, tự động re-pair toàn bộ Node/Camera đã biết (giống Phần 12) |
 | **Reset Camera** | Xoá cấu hình Local AP đã lưu + trạng thái pairing | Nút vật lý trên Camera hoặc lệnh App | Không — Camera quay lại "chưa provision", chờ Gateway pair lại |
-| **Reset toàn bộ Smart Home (Factory Reset ở tầng Cloud)** | Gỡ toàn bộ thành viên trừ Owner, vô hiệu hoá secret mọi thiết bị, buộc cấu hình lại vật lý | Owner chọn trong App (xem `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 16) **+ đồng thời kích hoạt Reset Gateway/Node/Camera ở tầng mạng** | **Có** — dùng cho warranty return hoặc sang nhượng thiết bị cho chủ hoàn toàn mới (không giữ owner cũ) |
+| **Reset toàn bộ Smart Home (Factory Reset ở tầng Cloud)** | Gỡ toàn bộ thành viên trừ Owner, vô hiệu hoá secret mọi thiết bị, buộc cấu hình lại vật lý | Owner chọn trong App (xem `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 16) **+ đồng thời kích hoạt Reset Gateway/Node/Camera ở tầng mạng** | **Có** — dùng cho warranty return hoặc sang nhượng thiết bị cho chủ hoàn toàn mới (không giữ owner cũ) |
 
 ---
 
@@ -470,7 +470,7 @@ Cấu trúc tương tự `device_secret`, khoá theo `gateway_id UNIQUE`.
 | created_at | DATETIME | DEFAULT CURRENT_TIMESTAMP | |
 
 #### `activation_logs`
-Giữ nguyên thiết kế tại `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 8.2 — bổ sung cột `provisioning_session_id` (FK → `gateway_provision.id`, nullable) để liên kết 1 lượt activation với đúng phiên provisioning WiFi tương ứng khi cần điều tra sự cố.
+Giữ nguyên thiết kế tại `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 8.2 — bổ sung cột `provisioning_session_id` (FK → `gateway_provision.id`, nullable) để liên kết 1 lượt activation với đúng phiên provisioning WiFi tương ứng khi cần điều tra sự cố.
 
 ---
 
@@ -497,7 +497,7 @@ Giữ nguyên thiết kế tại `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 8.2 
 | GET | `/mobile/gateway/status` | Trạng thái tổng quan Gateway (online/offline, fw version, SSID đã mask 1 phần) |
 | POST | `/mobile/reset-gateway` | Reset mạng Gateway (không unclaim Home) |
 | POST | `/mobile/reset-node/:deviceId` | Reset pairing 1 Node |
-| POST | `/mobile/reset-home` | Factory reset toàn bộ (đã đặc tả ở `SMART_HOME_PRODUCT_ARCHITECTURE.md`) |
+| POST | `/mobile/reset-home` | Factory reset toàn bộ (đã đặc tả ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md`) |
 
 > **Nguyên tắc:** không có endpoint Cloud nào nhận `password` WiFi dạng plaintext — bước 6 (App gửi WiFi credential) trong Phần 8 luôn đi qua **Local API**, không bao giờ qua Cloud API.
 
@@ -599,6 +599,6 @@ sequenceDiagram
 6. **Đừng để cửa sổ pairing/provisioning mở vô thời hạn** — luôn có timeout, luôn log lại toàn bộ lượt thử.
 7. **Đừng gộp lẫn "Reset mạng" và "Reset quyền sở hữu"** — nhầm lẫn giữa 2 khái niệm này là nguyên nhân phổ biến khiến khách hàng mất dữ liệu ngoài ý muốn hoặc mất quyền truy cập nhà đang dùng.
 8. **Đừng bỏ qua trường hợp khách đổi router thường xuyên** — đây là tình huống thực tế xảy ra thường xuyên hơn "thay Gateway hỏng", phải có luồng UX mượt mà, không bắt phải pair lại từ đầu.
-9. **Đừng hard-code danh sách loại phòng/thiết bị** — mọi mở rộng (Garage, Garden, Office...) phải là thêm dữ liệu, không phải sửa code/schema (nhắc lại nguyên tắc đã nêu ở `PROJECT_ANALYSIS_SMARTHOME.md`).
+9. **Đừng hard-code danh sách loại phòng/thiết bị** — mọi mở rộng (Garage, Garden, Office...) phải là thêm dữ liệu, không phải sửa code/schema (nhắc lại nguyên tắc đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md`).
 10. **Đừng bỏ qua log điều tra bảo mật cho tầng provisioning** — đây là nơi hacker thực tế hay nhắm tới nhất trong vòng đời sản phẩm IoT (giai đoạn onboarding thường có nhiều giả định lỏng lẻo hơn giai đoạn vận hành ổn định).
-11. **Đừng triển khai MQTT không TLS ở bản production thương mại** — cấu hình `allow_anonymous true` không TLS hiện tại chỉ chấp nhận được ở giai đoạn phát triển/demo, phải bật TLS + ACL theo `home_id` trước khi bán ra thị trường thật (kế thừa khuyến nghị đã nêu ở `PROJECT_ANALYSIS_SMARTHOME.md` mục 4.4.5).
+11. **Đừng triển khai MQTT không TLS ở bản production thương mại** — cấu hình `allow_anonymous true` không TLS hiện tại chỉ chấp nhận được ở giai đoạn phát triển/demo, phải bật TLS + ACL theo `home_id` trước khi bán ra thị trường thật (kế thừa khuyến nghị đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.4, điểm 5).

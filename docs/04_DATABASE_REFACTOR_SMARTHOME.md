@@ -1,13 +1,13 @@
 
-# DATABASE_REFACTOR_SMARTHOME.md
+# 04_DATABASE_REFACTOR_SMARTHOME.md
 
 > Thiết kế lại Database — từ **schema demo 5 bảng (users/devices/sensor_data/device_tokens/audit_log)** sang **Database chuẩn cho Commercial Smart Home Platform** hỗ trợ hàng nghìn khách hàng, hàng chục nghìn thiết bị.
 > Vai trò biên soạn: Principal Database Architect / Senior Solution Architect / Data Architect / Backend Architect.
 > Tài liệu **chỉ thiết kế — không viết SQL, không sửa code**. Ràng buộc chặt với các tài liệu đã có, không lặp lại mà **hệ thống hoá + bổ sung** phần Index/Partition/Retention/Naming còn thiếu:
-> - [`PROJECT_ANALYSIS_SMARTHOME.md`](PROJECT_ANALYSIS_SMARTHOME.md) — đề xuất schema sơ bộ Phần 4 (nguồn tham chiếu chính cho các bảng nghiệp vụ lõi).
-> - [`SMART_HOME_PRODUCT_ARCHITECTURE.md`](SMART_HOME_PRODUCT_ARCHITECTURE.md) — Claim/Activation, `smart_home_members`, RBAC theo Home.
-> - [`SMART_HOME_WIFI_PROVISIONING.md`](SMART_HOME_WIFI_PROVISIONING.md) — `gateway_provision`, `wifi_profiles`, `device_pairing`, Key Hierarchy.
-> - [`BACKEND_REFACTOR_SMARTHOME.md`](BACKEND_REFACTOR_SMARTHOME.md) — ranh giới domain/service sở hữu từng nhóm bảng (Phần 5, 6).
+> - [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md) — đề xuất schema sơ bộ Phần 4 (nguồn tham chiếu chính cho các bảng nghiệp vụ lõi).
+> - [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) — Claim/Activation, `smart_home_members`, RBAC theo Home.
+> - [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — `gateway_provision`, `wifi_profiles`, `device_pairing`, Key Hierarchy.
+> - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) — ranh giới domain/service sở hữu từng nhóm bảng (Phần 5, 6).
 >
 > Toàn bộ Database thực tế trong workspace đã được đọc đầy đủ: `database/migrations/001_schema.sql` (file DB duy nhất tồn tại — đã xác nhận bằng liệt kê toàn bộ thư mục `database/`, không có ERD, không có ORM/ entity/model, không có seed SQL riêng — seed dữ liệu được thực hiện bằng script TypeScript `backend/src/scripts/seed.ts`), đối chiếu thêm với `backend/src/config/migrate.ts` (2 bảng phát sinh runtime: `notifications`, `_migrations`).
 
@@ -93,7 +93,7 @@ Tồn tại trong schema nhưng **không thấy route/service nào trong `backen
 
 | Cột | Kiểu | Ràng buộc | Đánh giá |
 |---|---|---|---|
-| `event_type` | VARCHAR(64) | NOT NULL | Text tự do — không có bảng danh mục `event_types`, danh sách hợp lệ hard-code trong `routes/audit.ts:8-18` (đã nêu ở `BACKEND_REFACTOR_SMARTHOME.md` mục 1.7) |
+| `event_type` | VARCHAR(64) | NOT NULL | Text tự do — không có bảng danh mục `event_types`, danh sách hợp lệ hard-code trong `routes/audit.ts:8-18` (đã nêu ở `03_BACKEND_REFACTOR_SMARTHOME.md` mục 1.7) |
 | `details` | JSON | NULL | Chấp nhận được cho log (không cần chuẩn hoá triệt để dữ liệu log biến thiên theo loại sự kiện) |
 
 **Vấn đề gốc rễ:** 1 bảng duy nhất gánh **3 mục đích khác nhau về vòng đời**: sự kiện bảo mật (`GATEWAY_AUTH_FAIL`, cần giữ lâu để điều tra), sự kiện nghiệp vụ (`DEVICE_REGISTER`, tần suất thấp), và sự kiện dữ liệu tần suất cao (`DATA_RECV`, bị giới hạn cứng 150 bản ghi/thiết bị qua transaction trong `auditLogger.ts:23-64` — **về bản chất đây là dữ liệu vận hành/monitoring, không phải "log kiểm toán"**, nhưng bị nhét chung bảng).
@@ -174,7 +174,7 @@ Tồn tại trong schema nhưng **không thấy route/service nào trong `backen
 2. **Danh mục (device_type, sensor_type, room_type, permission, event_type log...) luôn là bảng, không bao giờ là ENUM cứng cho giá trị có thể mở rộng bởi nghiệp vụ** — ENUM chỉ dùng cho tập giá trị **cố định về mặt kỹ thuật** và hiếm khi đổi (ví dụ `status ENUM('pending','active','suspended')` là trạng thái vòng đời cố định, chấp nhận ENUM).
 3. **Tách bảng theo tần suất ghi (write frequency), không chỉ theo ý nghĩa nghiệp vụ** — bảng ghi hiếm (`devices` — đăng ký) tách khỏi bảng ghi liên tục (`device_status` — heartbeat mỗi 15-30s) để tránh lock contention và cho phép chiến lược index/cache khác nhau.
 4. **Time-series (Telemetry, Log tần suất cao) luôn có chiến lược Partition + Retention rõ ràng ngay từ thiết kế**, không phải "thêm sau khi bảng đã phình to" như cách xử lý tạm thời hiện tại (xoá thủ công 150 bản ghi/thiết bị).
-5. **Secret/credential nhạy cảm tách bảng riêng, giới hạn quyền SELECT ở tầng DB** — không nằm chung bảng với dữ liệu thường xuyên được SELECT cho hiển thị (đúng khuyến nghị đã nêu ở `SMART_HOME_WIFI_PROVISIONING.md` mục 14 cho `device_secret`/`gateway_secret`).
+5. **Secret/credential nhạy cảm tách bảng riêng, giới hạn quyền SELECT ở tầng DB** — không nằm chung bảng với dữ liệu thường xuyên được SELECT cho hiển thị (đúng khuyến nghị đã nêu ở `02_SMART_HOME_WIFI_PROVISIONING.md` mục 14 cho `device_secret`/`gateway_secret`).
 6. **Log tách theo mục đích và vòng đời (retention)**, không gộp 1 bảng.
 7. **Naming Convention nhất quán toàn schema** (Phần 6) — kế thừa đúng quy ước tốt đã có (`snake_case`, số ít, `_id` cho FK, `created_at`/`updated_at`).
 
@@ -206,7 +206,7 @@ So sánh trực tiếp với mô hình cũ:
 
 ## 5. ERD TỔNG THỂ
 
-> ERD được tách thành 4 sơ đồ theo domain để giữ khả năng đọc được (1 sơ đồ duy nhất ~45 bảng sẽ không thể đọc) — đúng nguyên tắc đã áp dụng ở `PROJECT_ANALYSIS_SMARTHOME.md`.
+> ERD được tách thành 4 sơ đồ theo domain để giữ khả năng đọc được (1 sơ đồ duy nhất ~45 bảng sẽ không thể đọc) — đúng nguyên tắc đã áp dụng ở `00_PROJECT_ANALYSIS_SMARTHOME.md`.
 
 ### 5.1. ERD — Identity, Customer & Smart Home (lõi nghiệp vụ)
 
@@ -1044,7 +1044,7 @@ erDiagram
 
 ### 7.12. Domain: AI / Behavior Logging (AI-Ready)
 
-> Bổ sung 17 bảng phục vụ **học thói quen sử dụng Smart Home và đề xuất Automation** (không phải Chatbot). Nguyên tắc bất biến: AI không bao giờ tự động điều khiển thiết bị — chỉ quan sát → phát hiện mẫu hành vi → dự đoán → đề xuất → chờ người dùng xác nhận → khi đó mới tạo `automation_rules`. Thiết kế Service/Pipeline tương ứng ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 18.
+> Bổ sung 17 bảng phục vụ **học thói quen sử dụng Smart Home và đề xuất Automation** (không phải Chatbot). Nguyên tắc bất biến: AI không bao giờ tự động điều khiển thiết bị — chỉ quan sát → phát hiện mẫu hành vi → dự đoán → đề xuất → chờ người dùng xác nhận → khi đó mới tạo `automation_rules`. Thiết kế Service/Pipeline tương ứng ở `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 18.
 
 #### `events` (Event Store)
 **Purpose:** Lưu toàn bộ sự kiện hệ thống dạng append-only, nguồn nguyên liệu thô duy nhất cho AI pipeline.
@@ -1053,7 +1053,7 @@ erDiagram
 |---|---|---|---|
 | id | BIGINT UNSIGNED | PK, AUTO_INCREMENT | |
 | event_id | CHAR(36) | UNIQUE NOT NULL | UUID — cho phép idempotency khi replay/retry |
-| event_type | VARCHAR(64) | NOT NULL | Xem Event Catalog `BACKEND_REFACTOR_SMARTHOME.md` mục 18.2 — không ràng buộc ENUM |
+| event_type | VARCHAR(64) | NOT NULL | Xem Event Catalog `03_BACKEND_REFACTOR_SMARTHOME.md` mục 18.2 — không ràng buộc ENUM |
 | schema_version | SMALLINT UNSIGNED | DEFAULT 1 | |
 | occurred_at | DATETIME(3) | NOT NULL | |
 | recorded_at | DATETIME(3) | DEFAULT CURRENT_TIMESTAMP(3) | |
@@ -1329,7 +1329,7 @@ flowchart TD
 1. **Mọi Repository method thao tác bảng thuộc phạm vi Home đều bắt buộc nhận `homeId` làm tham số** (không optional) — vá đúng lỗ hổng `GET /api/devices` hiện tại trả toàn bộ hệ thống không lọc.
 2. **`home_id` được denormalize xuống `devices`/`device_status` dù đã có `room_id`** (route gián tiếp qua `rooms.home_id`) — đánh đổi 1 chút dư thừa dữ liệu để tránh JOIN thêm 1 bảng trên **mọi** truy vấn lọc theo nhà, vốn là truy vấn phổ biến nhất trong hệ thống.
 3. **Bảng danh mục (`device_types`, `sensor_types`, `room_types`, `roles`, `permissions`) là dữ liệu toàn cục (global), không có `home_id`** — đây là dữ liệu dùng chung mọi khách hàng, không phải dữ liệu cần cô lập.
-4. **Operator chỉ truy vấn được `home_id` có trong `operator_home_access` còn hiệu lực** — kiểm tra ở tầng Repository/Service (Phần 8 của `BACKEND_REFACTOR_SMARTHOME.md`), không phải chỉ dựa vào role tĩnh.
+4. **Operator chỉ truy vấn được `home_id` có trong `operator_home_access` còn hiệu lực** — kiểm tra ở tầng Repository/Service (Phần 8 của `03_BACKEND_REFACTOR_SMARTHOME.md`), không phải chỉ dựa vào role tĩnh.
 
 ---
 
@@ -1496,7 +1496,7 @@ flowchart TD
 | **Phase 1 — Customer/Home/Room** | `smart_homes`, `smart_home_members`, `operator_home_access`, `rooms` + migrate dữ liệu `devices.location` cũ | Vá lỗ hổng tenant isolation nghiêm trọng nhất — ưu tiên cao nhất trong toàn bộ 15 phase |
 | **Phase 2 — Gateway/Device tách bảng** | `gateways`, `gateway_secret`, `devices` (schema mới), `device_secret`, `device_status`, `device_sensors` | Tách đúng 2 khái niệm Gateway/Sensor đã gộp sai ở schema cũ; tách bảng ghi-hiếm/ghi-liên tục |
 | **Phase 3 — Telemetry** | `telemetry` (partition theo tháng), `telemetry_history`, `alerts` + migrate `sensor_data` cũ | Giải quyết vấn đề giới hạn cứng 150 bản ghi/thiết bị, mở khả năng báo cáo dài hạn |
-| **Phase 4 — Log Database** | 8 bảng log tách theo mục đích + migrate `audit_log` cũ | Đáp ứng yêu cầu Logs Center (đã thiết kế ở `FRONTEND_REFACTOR_SMARTHOME.md`) |
+| **Phase 4 — Log Database** | 8 bảng log tách theo mục đích + migrate `audit_log` cũ | Đáp ứng yêu cầu Logs Center (đã thiết kế ở `05_FRONTEND_REFACTOR_SMARTHOME.md`) |
 | **Phase 5 — Provisioning** | `activation_tokens`, `activation_logs`, `gateway_activation`, `device_pairing`, `wifi_profiles` | Điều kiện để vận hành mô hình bán hàng Claim/Activation |
 | **Phase 6 — Notification nâng cấp** | `notifications` (thêm `user_id`,`home_id`,`severity`), `notification_logs` | Vá hard-code `target_role='admin'` |
 | **Phase 7 — OTA** | `firmware`, `ota_jobs`, `ota_history` | Cần khi fleet đủ lớn để cập nhật hàng loạt |

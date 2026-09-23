@@ -1,13 +1,13 @@
 
-# BACKEND_REFACTOR_SMARTHOME.md
+# 03_BACKEND_REFACTOR_SMARTHOME.md
 
 > Kiến trúc Backend — từ **IoT Demo (Gateway → Device → Sensor → Dashboard)** sang **Commercial Smart Home Platform** vận hành hàng nghìn Smart Home.
 > Vai trò biên soạn: Principal Software Architect / Senior Backend Engineer / IoT Solution Architect / Cloud Architect / Technical Lead.
 > Tài liệu **chỉ thiết kế — không viết code, không sửa code**. Ràng buộc chặt với 3 tài liệu đã có trong repo — tài liệu này **không lặp lại toàn bộ chi tiết DB/RBAC/Provisioning** đã đặc tả ở đó mà **tham chiếu + bổ sung lớp Service/Module/API/Event Flow** còn thiếu:
-> - [`PROJECT_ANALYSIS_SMARTHOME.md`](PROJECT_ANALYSIS_SMARTHOME.md) — schema DB đề xuất, RBAC 3 role, so sánh mô hình cũ/mới.
-> - [`SMART_HOME_PRODUCT_ARCHITECTURE.md`](SMART_HOME_PRODUCT_ARCHITECTURE.md) — Claim/Activation flow, tách namespace API Mobile/Dashboard, RBAC theo Home.
-> - [`SMART_HOME_WIFI_PROVISIONING.md`](SMART_HOME_WIFI_PROVISIONING.md) — Gateway/Node/Camera provisioning, Key Hierarchy, ESP-NOW/Local-AP topology.
-> - [`FRONTEND_REFACTOR_SMARTHOME.md`](FRONTEND_REFACTOR_SMARTHOME.md) — IA/Dashboard Admin-Operator, để đối chiếu API nào Dashboard cần gọi.
+> - [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md) — schema DB đề xuất, RBAC 3 role, so sánh mô hình cũ/mới.
+> - [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) — Claim/Activation flow, tách namespace API Mobile/Dashboard, RBAC theo Home.
+> - [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — Gateway/Node/Camera provisioning, Key Hierarchy, ESP-NOW/Local-AP topology.
+> - [`05_FRONTEND_REFACTOR_SMARTHOME.md`](05_FRONTEND_REFACTOR_SMARTHOME.md) — IA/Dashboard Admin-Operator, để đối chiếu API nào Dashboard cần gọi.
 >
 > Toàn bộ source code backend thực tế đã được đọc: `backend/src/{app.ts,server.ts}`, `config/{db,env,migrate}.ts`, `middleware/{verifyJWT,rbac,validateDevice}.ts`, `routes/{index,auth,devices,data.routes,sensors.routes,dashboard,audit,users,notifications,health.routes}.ts`, `services/{hmacService,mqttDataService,mqttTracker,deviceStatus,notificationService,auditLogger}.ts`, `scripts/seed.ts`, `database/migrations/001_schema.sql`, `backend/package.json`.
 
@@ -104,7 +104,7 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 
 | Vấn đề | Vị trí |
 |---|---|
-| 1 namespace API duy nhất cho mọi client (Dashboard nội bộ + Firmware thiết bị) | `routes/index.ts:24-32` — `/api/devices`, `/api/dashboard`, `/api/users` (session cookie) và `/api/device/data`, `/api/device/sensors` (HMAC) tồn tại chung 1 router `/api`, không tách namespace theo kênh xác thực như `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 1.1 yêu cầu (`/api/dashboard/**` vs `/api/mobile/**` vs `/api/device/**`). |
+| 1 namespace API duy nhất cho mọi client (Dashboard nội bộ + Firmware thiết bị) | `routes/index.ts:24-32` — `/api/devices`, `/api/dashboard`, `/api/users` (session cookie) và `/api/device/data`, `/api/device/sensors` (HMAC) tồn tại chung 1 router `/api`, không tách namespace theo kênh xác thực như `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 1.1 yêu cầu (`/api/dashboard/**` vs `/api/mobile/**` vs `/api/device/**`). |
 | `GET /api/devices` không phân trang, không lọc theo chủ sở hữu | `devices.ts:90-110` — trả **toàn bộ** thiết bị hệ thống trong 1 response, `ORDER BY created_at DESC` không `LIMIT`. Ở quy mô hàng chục nghìn thiết bị sẽ vừa chậm vừa rò rỉ dữ liệu chéo khách hàng. |
 | SQL nội suy trực tiếp `LIMIT`/`OFFSET` | `devices.ts:139` — `LIMIT ${limit} OFFSET ${offset}` dùng template string thay vì parameter binding. Vì `limit`/`offset` đã ép kiểu số nên **không khai thác được SQL injection**, nhưng là anti-pattern nguy hiểm nếu code sau này copy sang chỗ chưa ép kiểu. |
 | REST không nhất quán response envelope | Có route trả `{ devices: [...] }`, có route trả `{ device: {...}, recent_data: [...] }`, có route trả `{ success: true }` — không có chuẩn envelope (`{ data, meta, error }`) thống nhất. |
@@ -115,7 +115,7 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 
 | Vấn đề | Chi tiết |
 |---|---|
-| 2 broker, không TLS, `allow_anonymous true` | Đã xác nhận qua đường dẫn `mosquitto/broker1/mosquitto.conf`, `mosquitto/broker2/mosquitto.conf` (nội dung đã thẩm định ở `SMART_HOME_WIFI_PROVISIONING.md` mục 20.11) — chấp nhận được cho demo, **không chấp nhận được cho production thương mại**. |
+| 2 broker, không TLS, `allow_anonymous true` | Đã xác nhận qua đường dẫn `mosquitto/broker1/mosquitto.conf`, `mosquitto/broker2/mosquitto.conf` (nội dung đã thẩm định ở `02_SMART_HOME_WIFI_PROVISIONING.md` mục 20, điểm 11) — chấp nhận được cho demo, **không chấp nhận được cho production thương mại**. |
 | Topic không namespace theo khách hàng | `gateway/+/data` (broker2), `local/sensors/+/data` (broker1) — không có `home_id` trong topic, không thể áp ACL theo khách hàng ở tầng broker (`mqttDataService.ts:174`). |
 | Chỉ có 1 topic ("data") — không có `command`/`status`/`heartbeat`/`ota`/`provision` | Toàn bộ giao tiếp hiện tại là **1 chiều** (thiết bị → cloud). Không có cơ chế gửi lệnh xuống thiết bị (bật/tắt relay), không có OTA qua MQTT, không có heartbeat riêng biệt (trạng thái online suy ra từ `last_seen` cập nhật mỗi lần có dữ liệu — không phân biệt được "thiết bị mất kết nối" và "thiết bị active nhưng không có gì để gửi"). |
 | `mqttTracker.ts` phụ thuộc vào định dạng log `$SYS` của Mosquitto | Regex parse chuỗi log (`CONNECT_RE` ở `mqttTracker.ts:6`) — cách lấy IP thiết bị **rất giòn** (brittle), phụ thuộc định dạng log nội bộ của 1 phiên bản broker cụ thể, gãy ngay khi đổi broker (EMQX/VerneMQ) hoặc đổi cấu hình log level. |
@@ -126,9 +126,9 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 | Vấn đề | Chi tiết |
 |---|---|
 | 1 cơ chế JWT duy nhất cho mọi role | `auth.ts:52-56` — JWT ký bằng `JWT_SECRET`, hết hạn cứng 8h, lưu trong cookie `HttpOnly`/`SameSite=strict` — đúng chuẩn cho Dashboard nội bộ, nhưng **không có Refresh Token**, không có cơ chế đăng xuất phía server (không có bảng token blacklist/revocation — `logout` chỉ xoá cookie phía client, JWT vẫn hợp lệ đến khi hết hạn nếu bị đánh cắp). |
-| Không phân biệt Mobile/Dashboard auth | Toàn bộ thiết kế hiện tại giả định **chỉ có nhân viên nội bộ đăng nhập** — đúng với `SMART_HOME_PRODUCT_ARCHITECTURE.md` (User dùng Mobile, không dùng cookie này) nhưng cơ chế Mobile Auth (JWT Bearer + Refresh Token) **hoàn toàn chưa tồn tại** trong code. |
-| Gateway/Device Authentication đã tốt về nguyên lý, hẹp về phạm vi | `hmacService.ts` — HMAC-SHA256, `timingSafeEqual`, cửa sổ chống replay ±300s là thiết kế **đúng chuẩn ngành** (tương đương AWS SigV4). Tuy nhiên secret key được lưu **plaintext trong cột `devices.secret_key`** (`001_schema.sql:34`) — đủ dùng để backend tự tính lại HMAC nhưng vi phạm nguyên tắc "không lưu secret dạng đọc được trực tiếp"; nên mã hoá tại rest (theo đúng khuyến nghị `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.3: "encrypted-at-rest bằng KMS/Vault", không phải plaintext như hiện tại). |
-| Không có Activation Token nào | Toàn bộ cơ chế Claim/Activation đặc tả ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5 **chưa có bất kỳ dòng code nào** — cần xây từ đầu. |
+| Không phân biệt Mobile/Dashboard auth | Toàn bộ thiết kế hiện tại giả định **chỉ có nhân viên nội bộ đăng nhập** — đúng với `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` (User dùng Mobile, không dùng cookie này) nhưng cơ chế Mobile Auth (JWT Bearer + Refresh Token) **hoàn toàn chưa tồn tại** trong code. |
+| Gateway/Device Authentication đã tốt về nguyên lý, hẹp về phạm vi | `hmacService.ts` — HMAC-SHA256, `timingSafeEqual`, cửa sổ chống replay ±300s là thiết kế **đúng chuẩn ngành** (tương đương AWS SigV4). Tuy nhiên secret key được lưu **plaintext trong cột `devices.secret_key`** (`001_schema.sql:34`) — đủ dùng để backend tự tính lại HMAC nhưng vi phạm nguyên tắc "không lưu secret dạng đọc được trực tiếp"; nên mã hoá tại rest (theo đúng khuyến nghị `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.3: "encrypted-at-rest bằng KMS/Vault", không phải plaintext như hiện tại). |
+| Không có Activation Token nào | Toàn bộ cơ chế Claim/Activation đặc tả ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5 **chưa có bất kỳ dòng code nào** — cần xây từ đầu. |
 | Chống user-enumeration tốt | `auth.ts:28-31` — dùng `dummyHash` compare khi username không tồn tại để giữ thời gian phản hồi hằng định — **điểm cộng bảo mật đáng giữ nguyên**, hiếm gặp trong đồ án sinh viên. |
 
 ### 1.7. Authorization (RBAC)
@@ -137,7 +137,7 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 |---|---|
 | 2 role cứng ở tầng DB | `users.role ENUM('admin','operator')` (`001_schema.sql:19`) — không có role `USER` (khách hàng), không có bảng `roles`/`permissions` tách rời — thêm 1 permission mới phải sửa ENUM + deploy lại. |
 | `requireRole()` chỉ kiểm tra role hệ thống, không kiểm tra phạm vi tài nguyên | `middleware/rbac.ts:7-16` — Operator có `requireRole("admin","operator")` thì có quyền **ngang Admin trên MỌI thiết bị của MỌI khách hàng** (`devices.ts:196-199`, `271-274`) — không có khái niệm "quyền truy cập theo `home_id` có thời hạn" (`operator_home_access` đã thiết kế ở tài liệu DB nhưng chưa có middleware nào thực thi). |
-| Danh sách event-type/role trùng lặp cứng ở 2 nơi | `audit.ts:8-25` định nghĩa `VALID_EVENT_TYPES`/`ALLOWED_EVENT_TYPES_BY_ROLE` hard-code trong file route — **và** frontend `AuditPage.tsx` có bản sao chép tay y hệt (đã nêu ở `FRONTEND_REFACTOR_SMARTHOME.md` mục 1.8) — không có nguồn sự thật duy nhất (single source of truth), rủi ro drift cao khi thêm loại log mới. |
+| Danh sách event-type/role trùng lặp cứng ở 2 nơi | `audit.ts:8-25` định nghĩa `VALID_EVENT_TYPES`/`ALLOWED_EVENT_TYPES_BY_ROLE` hard-code trong file route — **và** frontend `AuditPage.tsx` có bản sao chép tay y hệt (đã nêu ở `05_FRONTEND_REFACTOR_SMARTHOME.md` mục 1.8) — không có nguồn sự thật duy nhất (single source of truth), rủi ro drift cao khi thêm loại log mới. |
 
 ### 1.8. Logging
 
@@ -155,7 +155,7 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 | `connectionLimit: 10` cứng | `config/db.ts:16` — không cấu hình theo tải thực tế, không dùng biến môi trường; ở quy mô nhiều instance backend, tổng connection tới MySQL có thể vượt giới hạn `max_connections` nếu scale ngang mà không kiểm soát. |
 | Rate limiter in-memory (`express-rate-limit`) | `app.ts:29-55` — đúng cho 1 instance duy nhất, **sai hoàn toàn khi chạy nhiều pod/container** (mỗi instance đếm rate limit riêng, kẻ tấn công có thể vượt giới hạn thật bằng cách round-robin qua nhiều instance) — cần chuyển sang Redis-backed store (`rate-limit-redis`) khi scale ngang. |
 | Cache "online device" in-memory (`Set<number>`) | `deviceStatus.ts:6` — cùng vấn đề: chỉ đúng khi có 1 instance backend; nhiều instance sẽ có nhiều cache lệch nhau, dashboard các client khác nhau thấy trạng thái khác nhau tuỳ instance nào phục vụ request. |
-| `sensor_data` giới hạn cứng 150 bản ghi/thiết bị | `data.routes.ts:91-97`, `mqttDataService.ts:115-121` — đủ cho biểu đồ realtime ngắn hạn, **không đủ cho báo cáo lịch sử dài hạn** (30/90 ngày) mà sản phẩm thương mại cần — cần kiến trúc rollup/partition riêng (đã phác thảo ở `PROJECT_ANALYSIS_SMARTHOME.md` mục 4.4, sẽ cụ thể hoá thêm ở Phần 11/14 bên dưới cho phần Log). |
+| `sensor_data` giới hạn cứng 150 bản ghi/thiết bị | `data.routes.ts:91-97`, `mqttDataService.ts:115-121` — đủ cho biểu đồ realtime ngắn hạn, **không đủ cho báo cáo lịch sử dài hạn** (30/90 ngày) mà sản phẩm thương mại cần — cần kiến trúc rollup/partition riêng (đã phác thảo ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.4, sẽ cụ thể hoá thêm ở Phần 11/14 bên dưới cho phần Log). |
 | Không có message queue ngoài MQTT | Không có Kafka/RabbitMQ/Redis Streams cho các luồng nghiệp vụ nội bộ (OTA rollout hàng loạt, gửi notification hàng loạt) — mọi xử lý hàng loạt hiện tại phải làm tuần tự trong 1 request HTTP, dễ timeout khi số lượng thiết bị lớn. |
 
 ### 1.10. Maintainability / Code Smell
@@ -206,7 +206,7 @@ flowchart TB
 
 ### 1.13. Domain Separation
 
-**Không có domain nào được phân tách.** `devices` là bảng duy nhất gánh cả 2 khái niệm hoàn toàn khác nhau về vòng đời và quyền sở hữu: **Gateway** (hạ tầng mạng, thuộc về 1 Smart Home) và **Sensor** (thiết bị đo lường, thuộc về 1 Room trong Smart Home) — được phân biệt chỉ bằng 1 cột ENUM `device_type`. Không có khái niệm `Customer`, `SmartHome`, `Room` ở bất kỳ đâu trong code — đúng như tài liệu `PROJECT_ANALYSIS_SMARTHOME.md` Phần 2 đã kết luận, đây là vấn đề gốc rễ cần giải quyết trước mọi vấn đề khác.
+**Không có domain nào được phân tách.** `devices` là bảng duy nhất gánh cả 2 khái niệm hoàn toàn khác nhau về vòng đời và quyền sở hữu: **Gateway** (hạ tầng mạng, thuộc về 1 Smart Home) và **Sensor** (thiết bị đo lường, thuộc về 1 Room trong Smart Home) — được phân biệt chỉ bằng 1 cột ENUM `device_type`. Không có khái niệm `Customer`, `SmartHome`, `Room` ở bất kỳ đâu trong code — đúng như tài liệu `00_PROJECT_ANALYSIS_SMARTHOME.md` Phần 2 đã kết luận, đây là vấn đề gốc rễ cần giải quyết trước mọi vấn đề khác.
 
 ### 1.14. Đánh giá theo góc nhìn AI-Ready
 
@@ -260,7 +260,7 @@ flowchart TB
 2. **1 domain = 1 module.** Mỗi module trong Phần 6 sở hữu route/controller/service/repository riêng, giao tiếp với module khác qua interface rõ ràng (không import chéo repository của module khác).
 3. **Tenant isolation là ràng buộc ở tầng Repository, không phải "nhớ lọc" ở tầng route.** Mọi query trên bảng thuộc phạm vi 1 Smart Home bắt buộc nhận `home_id` làm tham số bắt buộc (compile-time), không optional.
 4. **1 nguồn sự thật cho logic xác thực thiết bị.** `DeviceIngestService` dùng chung cho cả đường HTTP fallback và đường MQTT chính — xoá bỏ duplicate logic đã nêu ở vấn đề #5.
-5. **Namespace API tách theo kênh xác thực**, không tách theo tài nguyên: `/api/dashboard/**` (session cookie, Admin/Operator), `/api/mobile/**` (JWT Bearer, User), `/api/device/**` (HMAC, firmware) — đúng nguyên tắc đã chốt ở `SMART_HOME_PRODUCT_ARCHITECTURE.md`.
+5. **Namespace API tách theo kênh xác thực**, không tách theo tài nguyên: `/api/dashboard/**` (session cookie, Admin/Operator), `/api/mobile/**` (JWT Bearer, User), `/api/device/**` (HMAC, firmware) — đúng nguyên tắc đã chốt ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md`.
 6. **Danh mục (device_type, sensor_type, room_type, event_type log, permission) đều là dữ liệu trong bảng, không hard-code trong code.**
 7. **Mọi hành động Operator trên 1 Smart Home cụ thể đi qua Policy Check `operator_home_access`** — không có "quyền ngầm định" theo role hệ thống đơn thuần.
 8. **Log được phân loại theo mục đích và vòng đời (retention) khác nhau**, không gộp chung 1 bảng.
@@ -321,7 +321,7 @@ flowchart TB
     end
 
     subgraph DATA["Data Layer"]
-        SQLDB[("MySQL 8\nSchema mới — xem DATABASE_REFACTOR_SMARTHOME.md")]
+        SQLDB[("MySQL 8\nSchema mới — xem 04_DATABASE_REFACTOR_SMARTHOME.md")]
         TSDB[("Time-series Store\n(rollup/partition — Telemetry)")]
         OBJSTORE[("Object Storage\nFirmware binary, Camera snapshot")]
     end
@@ -357,7 +357,7 @@ flowchart TB
 
 ## 5. DOMAIN DESIGN
 
-> Chi tiết đầy đủ từng bảng/cột đã đặc tả ở `PROJECT_ANALYSIS_SMARTHOME.md` Phần 4 và `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 8 — phần này chỉ tóm tắt **ranh giới domain** để phân định phạm vi của 22 service ở Phần 6, tránh 2 service đọc/ghi chồng lấn cùng 1 bảng.
+> Chi tiết đầy đủ từng bảng/cột đã đặc tả ở `00_PROJECT_ANALYSIS_SMARTHOME.md` Phần 4 và `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 8 — phần này chỉ tóm tắt **ranh giới domain** để phân định phạm vi của 22 service ở Phần 6, tránh 2 service đọc/ghi chồng lấn cùng 1 bảng.
 
 ```mermaid
 erDiagram
@@ -406,9 +406,9 @@ erDiagram
 | 4 | **Smart Home Service** | CRUD Smart Home, quản lý `smart_home_members`, chuyển quyền sở hữu | Smart Home Repository, Room Service | Module hoàn toàn mới — thay thế tư duy "devices phẳng" |
 | 5 | **Room Service** | CRUD Room trong 1 Smart Home, gán/di chuyển Device giữa các Room | Room Repository, Device Service (interface) | Module hoàn toàn mới |
 | 6 | **Gateway Service** | CRUD Gateway, cập nhật trạng thái/firmware/RSSI, factory reset, replace gateway | Gateway Repository, Monitoring Service | Kế thừa 1 phần logic status từ `devices.ts` (khi `device_type='gateway'`) |
-| 7 | **Provision Service** | Tạo Smart Home `unclaimed`, sinh cấu trúc Room/Device theo template Package, xuất kho | Smart Home Service, Room Service, Gateway Service, Activation Service | Module hoàn toàn mới (đặc tả đầy đủ ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5) |
+| 7 | **Provision Service** | Tạo Smart Home `unclaimed`, sinh cấu trúc Room/Device theo template Package, xuất kho | Smart Home Service, Room Service, Gateway Service, Activation Service | Module hoàn toàn mới (đặc tả đầy đủ ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5) |
 | 8 | **Activation Service** | Sinh/validate Activation Token + QR, xử lý Claim Home, Gateway Replace, Ownership Transfer | Activation Token Repository, Smart Home Service | Module hoàn toàn mới |
-| 9 | **Pairing Service** | Xử lý Node/Camera Pairing (ESP-NOW/Local-AP), whitelist theo `home_id`, cửa sổ pairing có thời hạn | Device Pairing Repository, MQTT Client | Module hoàn toàn mới, đặc tả kỹ thuật ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 9 |
+| 9 | **Pairing Service** | Xử lý Node/Camera Pairing (ESP-NOW/Local-AP), whitelist theo `home_id`, cửa sổ pairing có thời hạn | Device Pairing Repository, MQTT Client | Module hoàn toàn mới, đặc tả kỹ thuật ở `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 9 |
 | 10 | **Device Service** | CRUD Device (Sensor/Relay/Camera/Door Contact...), đổi tên, gán Room, đổi trạng thái | Device Repository, Device Type Repository | Kế thừa phần lớn logic `devices.ts` GET/PATCH/DELETE, tổng quát hoá khỏi ENUM cứng |
 | 11 | **Telemetry Service** | Nhận dữ liệu cảm biến chuẩn hoá theo `sensor_type`, query lịch sử, trigger rollup | Telemetry Repository, Time-series Store | Thay thế `sensor_data` phẳng — tổng quát hoá khỏi `temperature`/`humidity` hard-code |
 | 12 | **Notification Service** | Nhận event từ mọi service khác, quyết định kênh gửi (Push/Email/In-app), lưu lịch sử | Notification Repository, Push Gateway (FCM/APNs), Email Provider | Mở rộng từ `notificationService.ts` — bỏ hard-code `target_role='admin'`, gửi theo `user_id` |
@@ -417,7 +417,7 @@ erDiagram
 | 15 | **Schedule Service** | Trigger theo thời gian (cron-like) cho Automation/Scene | Schedule Repository, job scheduler (node-cron/BullMQ repeatable job) | Module hoàn toàn mới |
 | 16 | **OTA Service** | Điều phối rollout firmware, theo dõi tiến trình, rollback | OTA Job Repository, Firmware Service, MQTT Client, Job Queue | Module hoàn toàn mới |
 | 17 | **Firmware Service** | CRUD phiên bản firmware, checksum, lưu trữ binary | Firmware Repository, Object Storage | Module hoàn toàn mới |
-| 18 | **Camera Service** | Quản lý metadata Camera, snapshot request, motion event | Camera Repository, Object Storage, MQTT Client | Module hoàn toàn mới (theo `cameras` table ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 8.2) |
+| 18 | **Camera Service** | Quản lý metadata Camera, snapshot request, motion event | Camera Repository, Object Storage, MQTT Client | Module hoàn toàn mới (theo `cameras` table ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 8.2) |
 | 19 | **Monitoring Service** | Tổng hợp trạng thái realtime: Gateway online/offline, RSSI, CPU/Memory (nếu firmware báo cáo), MQTT connection, heartbeat | Redis Cache, MQTT Client (subscribe heartbeat topic) | Thay thế `deviceStatus.ts` (cache in-memory 1-instance) bằng Redis-backed, thêm chỉ số mới |
 | 20 | **Audit Service** | Ghi & truy vấn sự kiện bảo mật/nghiệp vụ quan trọng cần bằng chứng (ai làm gì, khi nào) | Audit Log Repository | Kế thừa `auditLogger.ts` — tách khỏi `DATA_RECV` tần suất cao (chuyển log đó sang Log Service/Monitoring) |
 | 21 | **Log Service** | Ghi & truy vấn 9 loại log vận hành (Gateway/Provision/Device/API/MQTT/Automation/OTA/System/Error), quản lý retention | Log Repository (nhiều bảng), tuỳ chọn ELK/Loki | Mở rộng khỏi 1 bảng `audit_log` hiện tại — xem Phần 14 |
@@ -475,9 +475,9 @@ flowchart LR
 |---|---|---|
 | **ADMIN** | Dashboard | Không — quản trị toàn nền tảng |
 | **OPERATOR** | Dashboard | Không — chỉ truy cập tạm thời qua `operator_home_access` (có `reason`+`expires_at`) |
-| **USER** | Mobile | Có (Owner/Controller/Viewer/Guest trong từng Home — RBAC 2 tầng, xem `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 7) |
+| **USER** | Mobile | Có (Owner/Controller/Viewer/Guest trong từng Home — RBAC 2 tầng, xem `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 7) |
 
-### 8.2. Permission Matrix (rút gọn theo module — chi tiết đầy đủ ở `PROJECT_ANALYSIS_SMARTHOME.md` mục 5.2)
+### 8.2. Permission Matrix (rút gọn theo module — chi tiết đầy đủ ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 5.2)
 
 | Permission | ADMIN | OPERATOR (có access) | USER (Owner) |
 |---|:---:|:---:|:---:|
@@ -552,7 +552,7 @@ Theo đúng yêu cầu, phân nhóm namespace (thay thế hoàn toàn `routes/in
 | GET/POST/DELETE | `/dashboard/team`, `/dashboard/team/access` (operator_home_access) | ADMIN | RBAC Service |
 | GET | `/dashboard/stats` | ADMIN, OPERATOR (biến thể khác nhau) | tổng hợp nhiều service |
 
-### 9.3. `/api/mobile/**` (User) — tóm tắt, chi tiết đầy đủ ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 9.1
+### 9.3. `/api/mobile/**` (User) — tóm tắt, chi tiết đầy đủ ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 9.1
 
 | Method | Endpoint | Service |
 |---|---|---|
@@ -613,7 +613,7 @@ Mọi topic đều bắt đầu bằng `home_id` — đây là thay đổi quan 
 | **OTA** | `home/{home_id}/gateway/{gw}/ota/{command\|progress\|result}` và `.../device/{dev}/ota/{...}` | 2 chiều | 1 (command/result), 0 (progress) | Không | Progress tần suất cao nên QoS0 chấp nhận mất gói |
 | **Notification (local)** | `home/{home_id}/gateway/{gw}/notification` | Cloud → Gateway | 1 | Không | Dùng cho cảnh báo cục bộ (còi báo động), không thay thế Push Notification cho Mobile |
 | **Camera** | `home/{home_id}/gateway/{gw}/device/{dev}/camera/{snapshot\|event}` | Device → Cloud | 1 | Không | `event` cho motion detection, `snapshot` cho ảnh đính kèm (metadata, ảnh thật lưu Object Storage) |
-| **Pairing** | `home/{home_id}/gateway/{gw}/pairing/{request\|response}` | 2 chiều nội bộ (chủ yếu ESP-NOW, không qua MQTT cloud) | — | — | Ghi ở đây để đối chiếu — pairing thật diễn ra local (Phần 9 `SMART_HOME_WIFI_PROVISIONING.md`), MQTT chỉ nhận **kết quả** pairing báo cáo lên (`provision/node_pair_result`) |
+| **Pairing** | `home/{home_id}/gateway/{gw}/pairing/{request\|response}` | 2 chiều nội bộ (chủ yếu ESP-NOW, không qua MQTT cloud) | — | — | Ghi ở đây để đối chiếu — pairing thật diễn ra local (Phần 9 `02_SMART_HOME_WIFI_PROVISIONING.md`), MQTT chỉ nhận **kết quả** pairing báo cáo lên (`provision/node_pair_result`) |
 | **System** | `$SYS/broker/#` | Broker → nội bộ | 0 | — | Chỉ dùng cho Monitoring Service theo dõi health broker, **không dùng để suy luận IP thiết bị bằng regex** như `mqttTracker.ts` hiện tại (thay bằng field `ip` tự báo trong Heartbeat payload) |
 
 ### 10.3. QoS & Retain — nguyên tắc chọn
@@ -628,14 +628,14 @@ Mọi topic đều bắt đầu bằng `home_id` — đây là thay đổi quan 
 
 | Hiện tại | Mới | Ghi chú |
 |---|---|---|
-| `local/sensors/+/data` (Broker 1) | Giữ nguyên tầng vật lý Sensor↔Gateway (ESP-NOW nội bộ, không qua MQTT cloud theo `SMART_HOME_WIFI_PROVISIONING.md`) | Không đổi — đây là giao tiếp cục bộ, không phải MQTT cloud |
+| `local/sensors/+/data` (Broker 1) | Giữ nguyên tầng vật lý Sensor↔Gateway (ESP-NOW nội bộ, không qua MQTT cloud theo `02_SMART_HOME_WIFI_PROVISIONING.md`) | Không đổi — đây là giao tiếp cục bộ, không phải MQTT cloud |
 | `gateway/+/data` (Broker 2) | `home/{home_id}/gateway/{gw}/device/{dev}/telemetry` | Cần script migrate: gateway cũ phải update firmware để publish theo topic mới có `home_id` |
 
 ---
 
 ## 11. OTA DESIGN
 
-### 11.1. Domain Model tóm tắt (chi tiết bảng ở `PROJECT_ANALYSIS_SMARTHOME.md` mục 4.2.20-21)
+### 11.1. Domain Model tóm tắt (chi tiết bảng ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.2.20-21)
 
 - **Firmware**: `id, device_type_id, version (semver), binary_url, checksum_sha256, release_notes, is_stable`.
 - **OTA Job**: 1 lần rollout, phạm vi (toàn hệ thống / theo home / theo gateway/device cụ thể), trạng thái tổng (`pending/running/completed/failed_partial`).
@@ -717,7 +717,7 @@ flowchart LR
 | **In-app (System)** | Toàn bộ thông báo hiển thị trong Notification Center (Dashboard) và Mobile | Lưu bảng `notifications`, đọc qua polling/WebSocket |
 | **Local (MQTT notification topic)** | Còi báo động cục bộ tại nhà (không cần Internet để kêu) | Xem Phần 10.2 |
 
-### 13.2. Phân loại Severity (thống nhất với thiết kế Notification Center ở `FRONTEND_REFACTOR_SMARTHOME.md` mục 9.10)
+### 13.2. Phân loại Severity (thống nhất với thiết kế Notification Center ở `05_FRONTEND_REFACTOR_SMARTHOME.md` mục 9.10)
 
 | Severity | Ví dụ sự kiện | Kênh mặc định |
 |---|---|---|
@@ -791,7 +791,7 @@ flowchart LR
 
 ## 16. EVENT FLOW / SEQUENCE DIAGRAMS
 
-### 16.1. Provision Flow (tóm tắt — chi tiết đầy đủ ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5)
+### 16.1. Provision Flow (tóm tắt — chi tiết đầy đủ ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5)
 
 ```mermaid
 sequenceDiagram
@@ -805,7 +805,7 @@ sequenceDiagram
     ACTSVC-->>OP: QR + Activation Code để in tem
 ```
 
-### 16.2. Claim/Activation Flow — tham chiếu nguyên vẹn `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 6.1 (không lặp lại ở đây).
+### 16.2. Claim/Activation Flow — tham chiếu nguyên vẹn `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 6.1 (không lặp lại ở đây).
 
 ### 16.3. Telemetry Ingest Flow — hợp nhất HTTP + MQTT qua 1 Service duy nhất (vá vấn đề #5)
 
@@ -868,12 +868,12 @@ sequenceDiagram
 
 | Hạng mục | Thiết kế |
 |---|---|
-| **TLS cho MQTT** | Broker 2 (Gateway↔Backend) bắt buộc TLS 1.2+ trong production — vá vấn đề #9 (hiện tại `allow_anonymous true`, không TLS). Broker 1 (Sensor↔Gateway nội bộ qua ESP-NOW) không bắt buộc TLS vì không phải giao thức IP/MQTT thật theo `SMART_HOME_WIFI_PROVISIONING.md`. |
+| **TLS cho MQTT** | Broker 2 (Gateway↔Backend) bắt buộc TLS 1.2+ trong production — vá vấn đề #9 (hiện tại `allow_anonymous true`, không TLS). Broker 1 (Sensor↔Gateway nội bộ qua ESP-NOW) không bắt buộc TLS vì không phải giao thức IP/MQTT thật theo `02_SMART_HOME_WIFI_PROVISIONING.md`. |
 | **HTTPS** | Toàn bộ API (`/api/dashboard`, `/api/mobile`, `/api/device`) bắt buộc TLS ở tầng Nginx/Load Balancer, không có ngoại lệ. |
 | **JWT** | 2 secret riêng biệt cho Dashboard/Mobile (Phần 7.3), thời hạn ngắn cho Mobile Access Token (15 phút). |
 | **Refresh Token** | Random 256-bit, chỉ lưu hash trong DB, rotate mỗi lần dùng, phát hiện reuse → thu hồi toàn bộ session (Phần 7.3). |
 | **Gateway Secret / Device Secret** | Mã hoá tại rest (KMS/Vault) — vá vấn đề #6 (hiện đang lưu plaintext ở cột `devices.secret_key`). |
-| **Activation Token** | Chỉ lưu hash SHA-256, 1 lần dùng, hết hạn, rate-limit theo mã & theo tài khoản (đầy đủ ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.2). |
+| **Activation Token** | Chỉ lưu hash SHA-256, 1 lần dùng, hết hạn, rate-limit theo mã & theo tài khoản (đầy đủ ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.2). |
 | **Audit Log** | Ghi 100% hành động nhạy cảm (đăng nhập, đổi quyền, cấp `operator_home_access`, xoá thiết bị) — không thể xoá bởi chính actor đã thực hiện hành động đó (chỉ Admin khác mới xoá được, và bản thân hành động xoá log cũng phải được ghi lại — "log của việc xoá log"). |
 | **Rate Limiting** | Chuyển từ in-memory (`express-rate-limit` hiện tại — vấn đề #14) sang Redis-backed store để đúng khi scale ngang nhiều instance. |
 | **Input Validation** | Chuẩn hoá bằng schema validation library (zod/joi) ở tầng Controller — thay thế các hàm `sanitize()` tự viết rải rác (`devices.ts:9-12`) bằng 1 lớp validation nhất quán cho toàn bộ 22 module. |
@@ -882,7 +882,7 @@ sequenceDiagram
 
 ## 18. AI-READY DESIGN
 
-> Thiết kế Backend theo hướng **AI-Ready** — không phải Chatbot, mà là hệ thống học thói quen sử dụng Smart Home và đề xuất/tự tạo Automation. **Nguyên tắc bất biến:** AI **không bao giờ tự động điều khiển thiết bị** — chỉ quan sát → phát hiện mẫu hành vi → dự đoán thói quen → đề xuất → chờ người dùng xác nhận → khi đó mới tạo `automation_rules`. Bảng dữ liệu đầy đủ (17 bảng) đặc tả ở `DATABASE_REFACTOR_SMARTHOME.md` Phần 7.12 — phần dưới đây là thiết kế **Service/Pipeline/Event Flow** tương ứng.
+> Thiết kế Backend theo hướng **AI-Ready** — không phải Chatbot, mà là hệ thống học thói quen sử dụng Smart Home và đề xuất/tự tạo Automation. **Nguyên tắc bất biến:** AI **không bao giờ tự động điều khiển thiết bị** — chỉ quan sát → phát hiện mẫu hành vi → dự đoán thói quen → đề xuất → chờ người dùng xác nhận → khi đó mới tạo `automation_rules`. Bảng dữ liệu đầy đủ (17 bảng) đặc tả ở `04_DATABASE_REFACTOR_SMARTHOME.md` Phần 7.12 — phần dưới đây là thiết kế **Service/Pipeline/Event Flow** tương ứng.
 
 ### 18.1. Dữ liệu còn thiếu để phục vụ AI
 
@@ -902,7 +902,7 @@ sequenceDiagram
 Hệ thống dùng mô hình **lai (hybrid)**, không phải Event Sourcing thuần (tái tạo state hoàn toàn từ replay — quá phức tạp cho hệ thống vận hành thiết bị vật lý thời gian thực):
 
 - **Bảng trạng thái hiện tại** (`device_status`, `smart_homes`, `devices`...) vẫn là nguồn sự thật cho state hiện tại — API đọc trạng thái luôn đọc từ đây, nhanh, không cần replay event.
-- **Event Store** (bảng `events` — `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12) là nguồn sự thật bổ sung, bất biến (append-only), đầy đủ lịch sử — phục vụ (a) audit/replay khi điều tra, (b) nguồn nguyên liệu thô duy nhất cho toàn bộ pipeline AI.
+- **Event Store** (bảng `events` — `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12) là nguồn sự thật bổ sung, bất biến (append-only), đầy đủ lịch sử — phục vụ (a) audit/replay khi điều tra, (b) nguồn nguyên liệu thô duy nhất cho toàn bộ pipeline AI.
 - Mọi thay đổi state đều **ghi đồng thời** vào bảng trạng thái (đọc nhanh) **và** Event Store (AI/audit) trong cùng 1 transaction ở tầng Service — không có trường hợp nào state đổi mà không sinh event.
 
 ```mermaid
@@ -938,7 +938,7 @@ flowchart LR
 
 ### 18.3. Behavior Logging
 
-**Nguyên tắc:** Event Store lưu sự kiện thô, tối giản. **Behavior Log Projector** (1 subscriber của Event Bus) nhận event thô, **làm giàu thêm ngữ cảnh** (tra `weekday`/`is_holiday`/`season`, tra `ambient_light`/`motion` gần nhất nếu có cảm biến, tính `latency` cho notification...) rồi ghi vào `user_behavior_logs` (bảng trung tâm — đặc tả đầy đủ ở `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12) — 1 bảng phẳng, tối ưu cho feature engineering đọc trực tiếp mà không cần join/parse JSON lồng nhau.
+**Nguyên tắc:** Event Store lưu sự kiện thô, tối giản. **Behavior Log Projector** (1 subscriber của Event Bus) nhận event thô, **làm giàu thêm ngữ cảnh** (tra `weekday`/`is_holiday`/`season`, tra `ambient_light`/`motion` gần nhất nếu có cảm biến, tính `latency` cho notification...) rồi ghi vào `user_behavior_logs` (bảng trung tâm — đặc tả đầy đủ ở `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12) — 1 bảng phẳng, tối ưu cho feature engineering đọc trực tiếp mà không cần join/parse JSON lồng nhau.
 
 ```mermaid
 flowchart LR
@@ -957,7 +957,7 @@ Song song `user_behavior_logs`, hệ thống chiếu tiếp sang các bảng **h
 
 **Feature Store — Generic Entity-Attribute-Value (EAV), không phải bảng cột cứng:** nếu mỗi feature là 1 cột riêng (`preferred_brightness`, `average_sleep_time`...), thêm feature mới sẽ phải `ALTER TABLE`. Do đó `feature_store` thiết kế dạng EAV mở rộng `(entity_type, entity_id, feature_name, feature_value, value_type, computed_at)` — thêm feature mới chỉ là thêm dòng dữ liệu. Tách `feature_definitions` (catalog, đọc bởi Data Scientist, thay đổi hiếm) khỏi `feature_store` (giá trị đã tính, ghi bởi batch job, đổi liên tục) để versioning độc lập.
 
-Danh mục feature chính (tính batch hàng ngày, xem đầy đủ ở `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12): `daily_usage`, `room_usage`, `device_usage`, `preferred_brightness`/`preferred_temperature` (theo khung giờ, rolling 30 ngày), `average_sleep_time`/`average_wakeup_time`, `average_home_arrival`/`average_home_leave`, `night_mode_usage`, `energy_usage`, `automation_usage`, `scene_usage`.
+Danh mục feature chính (tính batch hàng ngày, xem đầy đủ ở `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12): `daily_usage`, `room_usage`, `device_usage`, `preferred_brightness`/`preferred_temperature` (theo khung giờ, rolling 30 ngày), `average_sleep_time`/`average_wakeup_time`, `average_home_arrival`/`average_home_leave`, `night_mode_usage`, `energy_usage`, `automation_usage`, `scene_usage`.
 
 **Dataset — "view export", không phải nguồn dữ liệu gốc:** `training_dataset` chỉ lưu metadata (khoảng thời gian, phiên bản feature set, loại model, `storage_uri` trỏ Object Storage dạng Parquet) — dữ liệu thật do ETL job xuất từ `user_behavior_logs` + `feature_store`, tách khỏi MySQL để không tải OLTP bằng truy vấn phân tích nặng. Hai hình dạng xuất, cùng 1 nguồn, không cần đổi schema khi đổi loại model:
 
@@ -1159,7 +1159,7 @@ flowchart TB
 | **Phase 2 — Domain Customer/Home/Room** | Customer Service, Smart Home Service, Room Service, Device Service tổng quát hoá khỏi ENUM cứng | Nền tảng nghiệp vụ cốt lõi — mọi API/MQTT/Automation sau này đều tham chiếu `home_id`/`room_id` |
 | **Phase 3 — Provisioning & Activation** | Provision Service, Activation Service, Pairing Service, RBAC Service (`operator_home_access`) | Điều kiện để bắt đầu bán hàng loạt theo mô hình Claim đã thiết kế |
 | **Phase 4 — MQTT redesign** | Topic mới có `home_id`, TLS Broker 2, tách Heartbeat khỏi Telemetry, bỏ `mqttTracker.ts` regex giòn | Cần thiết trước khi scale số lượng gateway lớn |
-| **Phase 5 — Gateway/Monitoring/Auth Mobile** | Gateway Service đầy đủ, Monitoring Service (Redis + WebSocket thật, tận dụng `ws`), Auth Service Mobile (Refresh Token) | Đáp ứng yêu cầu Dashboard mới (`FRONTEND_REFACTOR_SMARTHOME.md`) và Mobile App bắt đầu nối API thật |
+| **Phase 5 — Gateway/Monitoring/Auth Mobile** | Gateway Service đầy đủ, Monitoring Service (Redis + WebSocket thật, tận dụng `ws`), Auth Service Mobile (Refresh Token) | Đáp ứng yêu cầu Dashboard mới (`05_FRONTEND_REFACTOR_SMARTHOME.md`) và Mobile App bắt đầu nối API thật |
 | **Phase 6 — OTA & Firmware** | OTA Service, Firmware Service, Job Queue (BullMQ/Redis) | Cần thiết khi fleet đủ lớn để phải cập nhật hàng loạt |
 | **Phase 7 — Logging tách bảng** | Log Service với 9+ loại log riêng, retention riêng, tách khỏi `audit_log` gộp hiện tại | Dọn nợ kỹ thuật logging, đáp ứng yêu cầu Logs Center mới ở Dashboard |
 | **Phase 8 — Automation/Scene/Schedule** | Automation Service (MVP rule engine đơn giản), Scene Service, Schedule Service | Tính năng giá trị cao, nhưng phụ thuộc Phase 2 (Device/Room) đã ổn định |

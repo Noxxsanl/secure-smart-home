@@ -1,6 +1,6 @@
-# FRONTEND_REFACTOR_PROGRESS.md
+# 06_FRONTEND_REFACTOR_PROGRESS.md
 
-> Tiến độ refactor `frontend/` theo `FRONTEND_REFACTOR_SMARTHOME.md`. Cập nhật theo từng module hoàn thành.
+> Tiến độ refactor `frontend/` theo `05_FRONTEND_REFACTOR_SMARTHOME.md`. Cập nhật theo từng module hoàn thành.
 > Phạm vi đã thực hiện: **Phase 0–7** của roadmap trong tài liệu gốc (Design Foundation → Sidebar/Dashboard tách role → Smart Home/Room/Device → Customer/Provisioning → Gateway/OTA → Logs/Notification Center → Team/Operator Access → Automation MVP).
 > **Quyết định phạm vi dữ liệu:** toàn bộ Dashboard — **kể cả đăng nhập** — chạy trên Mock Data, không cần backend chạy nền. `features/auth/api/auth.api.ts` dùng 2 tài khoản demo cố định (`admin`/`admin123`, `operator01`/`operator123`), phiên đăng nhập lưu ở `localStorage` (khoá `mock_auth_session`) thay vì cookie thật. (Quyết định ban đầu là giữ auth thật — đã đổi theo yêu cầu sau đó của user để không cần chạy backend.) Route proxy `app/api/[...path]/route.ts` và `shared/api/client.ts` đã bị xoá vì không còn nơi nào gọi tới backend thật nữa.
 

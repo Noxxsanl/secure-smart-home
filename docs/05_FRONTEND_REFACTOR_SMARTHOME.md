@@ -1,14 +1,16 @@
 
-# FRONTEND_REFACTOR_SMARTHOME.md
+# 05_FRONTEND_REFACTOR_SMARTHOME.md
 
 > Thiết kế lại toàn diện Frontend — từ **IoT Device Management Console** sang **Commercial Smart Home Platform (Admin/Operator Web Console)**.
 > Vai trò biên soạn: Principal Product Designer / Senior UX / Senior Frontend Architect / Smart Home PM / Solution Architect.
 > Tài liệu này **chỉ thiết kế — không viết code, không sửa code**. Nó ràng buộc chặt với 3 tài liệu kiến trúc đã có trong repo:
-> - [`PROJECT_ANALYSIS_SMARTHOME.md`](PROJECT_ANALYSIS_SMARTHOME.md) — mô hình dữ liệu `Customer → Smart Home → Room → Device → Sensor → Telemetry`, RBAC 3 role.
-> - [`SMART_HOME_PRODUCT_ARCHITECTURE.md`](SMART_HOME_PRODUCT_ARCHITECTURE.md) — nguyên tắc **User = Mobile only, Dashboard = Admin/Operator only**, Claim/Activation flow.
-> - [`SMART_HOME_WIFI_PROVISIONING.md`](SMART_HOME_WIFI_PROVISIONING.md) — Gateway/Node/Camera provisioning, không thuộc phạm vi UI Dashboard nhưng Dashboard cần màn hình theo dõi (Provision Status, OTA).
+> - [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md) — mô hình dữ liệu `Customer → Smart Home → Room → Device → Sensor → Telemetry`, RBAC 3 role.
+> - [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) — nguyên tắc **User = Mobile only, Dashboard = Admin/Operator only**, Claim/Activation flow.
+> - [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — Gateway/Node/Camera provisioning, không thuộc phạm vi UI Dashboard nhưng Dashboard cần màn hình theo dõi (Provision Status, OTA).
 >
 > Toàn bộ source code frontend thực tế đã được đọc: `frontend/src/app/**`, `frontend/src/features/{auth,dashboard,devices,users,audit,logs,notifications}/**`, `frontend/src/widgets/app-shell/**`, `frontend/src/shared/**`, `frontend/src/app/globals.css`.
+>
+> **Ghi chú (2026-09-23):** Phần review hiện trạng (Phần 1–2) phản ánh code frontend tại commit `407eb1d` (2026-07-11), **trước** đợt refactor ở `06_FRONTEND_REFACTOR_PROGRESS.md` (commit `ccdfb89`). Nhiều file được trích dẫn đã bị xoá/viết lại sau đó — số dòng `file:line` có thể không còn khớp với code hiện tại.
 
 ---
 
@@ -47,13 +49,13 @@ Ba thay đổi tư duy cốt lõi của tài liệu này:
 | 2 | 1 Dashboard chung cho mọi role đăng nhập được | **2 Dashboard tách biệt hoàn toàn**: Admin Dashboard (business + system health) và Operator Dashboard (operations + support) |
 | 3 | 1 bảng Device phẳng, phân loại Gateway/Sensor | Phân cấp **Customer → Smart Home → Room → Device → Sensor → Telemetry**, Device luôn thuộc 1 Room |
 
-Dashboard này **không phục vụ khách hàng cuối** — người dùng cuối dùng Mobile App (đã thiết kế ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 12). Mọi màn hình trong tài liệu này được thiết kế thuần cho **ADMIN** (vận hành nền tảng) và **OPERATOR** (hỗ trợ kỹ thuật/kho vận).
+Dashboard này **không phục vụ khách hàng cuối** — người dùng cuối dùng Mobile App (đã thiết kế ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 12). Mọi màn hình trong tài liệu này được thiết kế thuần cho **ADMIN** (vận hành nền tảng) và **OPERATOR** (hỗ trợ kỹ thuật/kho vận).
 
 ---
 
 ## 1. REVIEW TOÀN BỘ GIAO DIỆN HIỆN TẠI
 
-### 1.1. Sidebar & Navigation — [`Sidebar.tsx`](frontend/src/widgets/app-shell/Sidebar.tsx)
+### 1.1. Sidebar & Navigation — [`Sidebar.tsx`](../frontend/src/widgets/app-shell/Sidebar.tsx)
 
 | Tiêu chí | Đánh giá |
 |---|---|
@@ -62,19 +64,19 @@ Dashboard này **không phục vụ khách hàng cuối** — người dùng cu�
 | Navigation | Không hỗ trợ collapse, không hỗ trợ nhóm con (section header), không hỗ trợ badge số lượng (ví dụ "Alerts (3)"). |
 | Information Architecture | Sai gốc rễ: điều hướng theo **loại thiết bị kỹ thuật** (`Cpu` icon dùng chung cho mọi "Thiết bị") thay vì theo **đơn vị kinh doanh** (Nhà/Khách hàng/Phòng). |
 | Khả năng mở rộng | Thêm mục mới phải sửa cứng mảng `NAV_LINKS` (không đọc từ RBAC), không phân biệt nav theo role — Operator thấy y hệt Admin. |
-| Vấn đề | `NAV_LINKS` trong `Sidebar.tsx:10-15` và `NAV_ITEMS` trong [`constants.ts`](frontend/src/widgets/app-shell/constants.ts) là **hai danh sách điều hướng trùng lặp, không đồng bộ** (constants.ts có thêm "Logs" nhưng Sidebar.tsx thì không dùng nó) — dấu hiệu rõ của kiến trúc đang được sửa dở dang. |
+| Vấn đề | `NAV_LINKS` trong `Sidebar.tsx:10-15` và `NAV_ITEMS` trong [`constants.ts`](../frontend/src/widgets/app-shell/constants.ts) là **hai danh sách điều hướng trùng lặp, không đồng bộ** (constants.ts có thêm "Logs" nhưng Sidebar.tsx thì không dùng nó) — dấu hiệu rõ của kiến trúc đang được sửa dở dang. |
 
-### 1.2. Header — [`Header.tsx`](frontend/src/widgets/app-shell/Header.tsx)
+### 1.2. Header — [`Header.tsx`](../frontend/src/widgets/app-shell/Header.tsx)
 
 | Tiêu chí | Đánh giá |
 |---|---|
 | UX | Đồng hồ realtime to bản chiếm chỗ (`ClockDisplay`) — trang trí hơn là hữu ích cho vận hành; giống dashboard "trình chiếu" hơn dashboard làm việc. |
 | Notification | Chỉ hiện với `isAdmin` (`Header.tsx:116`) — Operator **không thấy được thông báo nào**, dù Operator là người trực tiếp xử lý cảnh báo/ticket hỗ trợ theo yêu cầu mới. Đây là lỗi thiết kế cần sửa ngay. |
-| Breadcrumb | [`Breadcrumb.tsx`](frontend/src/widgets/app-shell/Breadcrumb.tsx) dùng bảng tra cứu cứng `ROUTE_LABELS` — không tự sinh được breadcrumb cho cấu trúc lồng sâu mới (`Smart Homes / Nhà Quận 7 / Rooms / Phòng khách / Đèn trần`). |
+| Breadcrumb | [`Breadcrumb.tsx`](../frontend/src/widgets/app-shell/Breadcrumb.tsx) dùng bảng tra cứu cứng `ROUTE_LABELS` — không tự sinh được breadcrumb cho cấu trúc lồng sâu mới (`Smart Homes / Nhà Quận 7 / Rooms / Phòng khách / Đèn trần`). |
 | Thiếu | Không có ô tìm kiếm toàn cục (global search) — với hàng nghìn Smart Home/Device, Admin/Operator cần tìm nhanh theo `home_id`, `gateway_uid`, tên khách hàng, số điện thoại. |
 | Thiếu | Không có bộ chọn ngữ cảnh (ví dụ "đang xem theo quyền hỗ trợ nhà nào" cho Operator có `operator_home_access`). |
 
-### 1.3. Login — [`LoginPage.tsx`](frontend/src/features/auth/pages/LoginPage.tsx)
+### 1.3. Login — [`LoginPage.tsx`](../frontend/src/features/auth/pages/LoginPage.tsx)
 
 | Tiêu chí | Đánh giá |
 |---|---|
@@ -82,7 +84,7 @@ Dashboard này **không phục vụ khách hàng cuối** — người dùng cu�
 | Business | Form chỉ có `username`/`password` — đúng cho Admin/Operator nội bộ (không cần OTP/social login vì đây không phải Mobile App khách hàng) — **giữ nguyên tinh thần đơn giản là đúng**, chỉ cần đổi lại thẩm mỹ. |
 | Thiếu | Không phân biệt "Đây là Dashboard nội bộ — khách hàng vui lòng dùng Mobile App" — nếu 1 khách hàng lỡ vào nhầm URL dashboard, không có thông điệp định hướng. |
 
-### 1.4. Dashboard — [`DashboardPage.tsx`](frontend/src/features/dashboard/pages/DashboardPage.tsx)
+### 1.4. Dashboard — [`DashboardPage.tsx`](../frontend/src/features/dashboard/pages/DashboardPage.tsx)
 
 | Tiêu chí | Đánh giá |
 |---|---|
@@ -93,26 +95,26 @@ Dashboard này **không phục vụ khách hàng cuối** — người dùng cu�
 | Thiếu | "Recent events" (`DashboardPage.tsx:113-121`) là card rỗng cứng — không nối dữ liệu thật (dead UI). |
 | Role-check | Dùng `canCreateDevice` để hiện nút "+ Add Device" ngay trên Dashboard (`DashboardPage.tsx:40-47`) — hành động tạo thiết bị bị trộn lẫn vào trang tổng quan, sai nguyên tắc "Dashboard = xem tổng quan, không phải nơi thao tác nghiệp vụ chi tiết". |
 
-### 1.5. Devices List — [`DevicesPage.tsx`](frontend/src/features/devices/pages/DevicesPage.tsx)
+### 1.5. Devices List — [`DevicesPage.tsx`](../frontend/src/features/devices/pages/DevicesPage.tsx)
 
 | Tiêu chí | Đánh giá |
 |---|---|
-| UX | Tab Gateway/Sensor (`DevicesPage.tsx:42,188-213`) đúng bản chất "Device/Gateway/Node Manager" đã bị `PROJECT_ANALYSIS_SMARTHOME.md` Phần 2 chỉ ra là **sai đơn vị quản lý**. Khách hàng/Operator không nghĩ theo "danh sách Gateway toàn hệ thống" mà nghĩ theo "nhà nào có gateway gì". |
-| Data model | Bảng liệt kê thiết bị **không có cột Nhà/Khách hàng/Phòng sở hữu** — đúng như lỗ hổng tenant isolation đã nêu ở `PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#6. Nếu giữ nguyên UI này khi có nhiều khách hàng, Admin sẽ thấy **một bảng khổng lồ trộn lẫn thiết bị của mọi nhà** không lọc được theo `home_id`. |
+| UX | Tab Gateway/Sensor (`DevicesPage.tsx:42,188-213`) đúng bản chất "Device/Gateway/Node Manager" đã bị `00_PROJECT_ANALYSIS_SMARTHOME.md` Phần 2 chỉ ra là **sai đơn vị quản lý**. Khách hàng/Operator không nghĩ theo "danh sách Gateway toàn hệ thống" mà nghĩ theo "nhà nào có gateway gì". |
+| Data model | Bảng liệt kê thiết bị **không có cột Nhà/Khách hàng/Phòng sở hữu** — đúng như lỗ hổng tenant isolation đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#6. Nếu giữ nguyên UI này khi có nhiều khách hàng, Admin sẽ thấy **một bảng khổng lồ trộn lẫn thiết bị của mọi nhà** không lọc được theo `home_id`. |
 | Thao tác | Khóa/Mở khóa/Xóa/Kích hoạt (`DevicesPage.tsx:299-323`) là hành động **cấp hệ thống** phù hợp Admin, nhưng Operator hiện có quyền y hệt (`canUpdateDeviceStatus`) trên **mọi thiết bị của mọi khách hàng** — vi phạm nguyên tắc least-privilege (`operator_home_access` có `expires_at`/`reason` chưa được phản ánh ở UI này chút nào). |
-| Đăng ký thiết bị | [`AddDeviceModal.tsx`](frontend/src/features/devices/components/AddDeviceModal.tsx) chỉ hỏi Tên/Loại(sensor|gateway)/Vị trí tự do (text) — không có bước chọn **Smart Home** hoặc **Room**, khớp với lỗi thiết kế `devices.location VARCHAR` tự do đã nêu ở tài liệu DB. |
-| Bảo mật UI | [`RegisterModal.tsx`](frontend/src/features/devices/components/RegisterModal.tsx) hiển thị **Secret Key dạng plaintext trên UI** để copy — đúng với thiết kế backend hiện tại nhưng **mâu thuẫn trực tiếp** với `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.3 ("API không có bất kỳ endpoint nào trả `gateway_secret` cho client") — UI này phải bị loại bỏ hoàn toàn trong mô hình mới (secret chỉ tồn tại lúc Operator flash tại kho, không qua Dashboard). |
+| Đăng ký thiết bị | `AddDeviceModal.tsx` _(đã xoá ở commit `ccdfb89`)_ chỉ hỏi Tên/Loại(sensor|gateway)/Vị trí tự do (text) — không có bước chọn **Smart Home** hoặc **Room**, khớp với lỗi thiết kế `devices.location VARCHAR` tự do đã nêu ở tài liệu DB. |
+| Bảo mật UI | `RegisterModal.tsx` _(đã xoá ở commit `ccdfb89`)_ hiển thị **Secret Key dạng plaintext trên UI** để copy — đúng với thiết kế backend hiện tại nhưng **mâu thuẫn trực tiếp** với `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.3 ("API không có bất kỳ endpoint nào trả `gateway_secret` cho client") — UI này phải bị loại bỏ hoàn toàn trong mô hình mới (secret chỉ tồn tại lúc Operator flash tại kho, không qua Dashboard). |
 
-### 1.6. Device Detail — [`DeviceDetailPage.tsx`](frontend/src/features/devices/pages/DeviceDetailPage.tsx)
+### 1.6. Device Detail — [`DeviceDetailPage.tsx`](../frontend/src/features/devices/pages/DeviceDetailPage.tsx)
 
 | Tiêu chí | Đánh giá |
 |---|---|
 | UX | Trang chi tiết 1 thiết bị đơn lẻ, không có breadcrumb ngữ cảnh "thuộc nhà nào/phòng nào" — khi có Room, trang này phải nằm *trong* ngữ cảnh Nhà → Phòng, không phải đứng độc lập theo `/devices/:id`. |
-| Data | Hard-code field `payload?.temperature`/`payload?.humidity` (`DeviceDetailPage.tsx:251,257`) — không mở rộng được cho camera, relay, cảm biến khói/gas như đã cảnh báo ở `PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#10. Component [`SensorChart.tsx`](frontend/src/features/devices/components/SensorChart.tsx) cùng vấn đề (dòng 52-55 chỉ đọc 2 field cố định). |
+| Data | Hard-code field `payload?.temperature`/`payload?.humidity` (`DeviceDetailPage.tsx:251,257`) — không mở rộng được cho camera, relay, cảm biến khói/gas như đã cảnh báo ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#10. Component [`SensorChart.tsx`](../frontend/src/features/devices/components/SensorChart.tsx) cùng vấn đề (dòng 52-55 chỉ đọc 2 field cố định). |
 | Thiếu | Không có UI điều khiển thiết bị (bật/tắt relay) — đúng vì Admin/Operator hiếm khi cần điều khiển trực tiếp, nhưng cũng không có nút "Yêu cầu snapshot camera để debug" hay "Xem lịch sử OTA của thiết bị này" mà Operator cần khi hỗ trợ. |
 | CSS bug nhỏ | Toàn trang này **không có class `dark:` nào** (khác hẳn các trang còn lại đã có dark mode đầy đủ) — ví dụ `text-gray-900` ở dòng 141 không có `dark:text-slate-100` — bằng chứng code đã "chạy trước, dark mode thêm sau" nhưng bỏ sót trang này. |
 
-### 1.7. Users — [`UsersPage.tsx`](frontend/src/features/users/pages/UsersPage.tsx)
+### 1.7. Users — `UsersPage.tsx` _(đã xoá ở commit `ccdfb89`)_
 
 | Tiêu chí | Đánh giá |
 |---|---|
@@ -120,7 +122,7 @@ Dashboard này **không phục vụ khách hàng cuối** — người dùng cu�
 | RBAC | Chỉ `admin` mới thấy trang (check phía client dòng 229) — đúng hướng, nhưng thiếu vai trò "gán Operator vào Smart Home cụ thể" (`operator_home_access`) — đây mới là màn hình RBAC quan trọng nhất cần bổ sung trong mô hình mới, hiện chưa tồn tại ở đâu cả. |
 | UI | Modal đổi mật khẩu & tạo tài khoản làm tốt (validate rõ ràng, có empty state) — **giữ nguyên pattern component này**, chỉ cần thêm field "Role" (Admin/Operator) khi tạo thay vì ngầm định operator. |
 
-### 1.8. Audit Log — [`AuditPage.tsx`](frontend/src/features/audit/pages/AuditPage.tsx) & [`LogsPage.tsx`](frontend/src/features/logs/pages/LogsPage.tsx)
+### 1.8. Audit Log — `AuditPage.tsx` _(đã xoá ở commit `ccdfb89`)_ & `LogsPage.tsx` _(đã xoá ở commit `ccdfb89`)_
 
 | Tiêu chí | Đánh giá |
 |---|---|
@@ -129,7 +131,7 @@ Dashboard này **không phục vụ khách hàng cuối** — người dùng cu�
 | Vấn đề bảo mật UI | `EVENT_TYPES_BY_ROLE` (`AuditPage.tsx:18-27`) là **bản sao chép tay từ backend**, tự nhận trong comment là "chỉ để UX, backend vẫn thực thi" — chấp nhận được nhưng rủi ro drift cao khi thêm nhiều loại log mới; cần cân nhắc lấy danh mục này qua API thay vì hard-code 2 nơi. |
 | Thiếu | Không có阈 phân loại theo cấp độ nghiêm trọng kiểu Notification Center (Critical/Warning/Info/Success) — `EVENT_STYLES` (`AuditLogTable.tsx:15-25`) chỉ tô màu theo loại sự kiện cụ thể, không theo severity chuẩn hoá. |
 
-### 1.9. Notification — [`useNotifications.ts`](frontend/src/features/notifications/hooks/useNotifications.ts) + dropdown trong Header
+### 1.9. Notification — [`useNotifications.ts`](../frontend/src/features/notifications/hooks/useNotifications.ts) + dropdown trong Header
 
 | Tiêu chí | Đánh giá |
 |---|---|
@@ -137,7 +139,7 @@ Dashboard này **không phục vụ khách hàng cuối** — người dùng cu�
 | Data | `TYPE_META` (`Header.tsx:41-48`) chỉ có 6 loại gắn với thiết bị (LOGIN/DEVICE_REGISTER/DEVICE_BLOCKED/...) — không có notification cấp độ **kinh doanh** (khách hàng mới kích hoạt, warranty request, OTA fleet thất bại hàng loạt). |
 | RBAC | Giới hạn `isAdmin` mới thấy (đã nêu ở 1.2) — cần mở cho Operator với tập loại thông báo phù hợp vai trò (ticket hỗ trợ, cảnh báo thiết bị được cấp quyền). |
 
-### 1.10. Design Tokens hiện tại — [`globals.css`](frontend/src/app/globals.css)
+### 1.10. Design Tokens hiện tại — [`globals.css`](../frontend/src/app/globals.css)
 
 | Tiêu chí | Đánh giá |
 |---|---|
@@ -179,7 +181,7 @@ Dashboard này **không phục vụ khách hàng cuối** — người dùng cu�
 2. **Đơn vị điều hướng là thực thể kinh doanh, không phải thiết bị mạng.** Cây thông tin luôn đi theo `Customer → Smart Home → Room → Device → Sensor`, Gateway là chi tiết kỹ thuật nằm *bên trong* 1 Smart Home, không phải mục ngang hàng với Home.
 3. **Admin nhìn Business + System Health. Operator nhìn Operations + Support.** Không dùng chung 1 Dashboard, không dùng chung 1 bộ KPI.
 4. **RBAC phải hiện diện trên UI, không chỉ ở backend.** Mọi hành động Operator thực hiện trên 1 Smart Home cụ thể phải thể hiện rõ "đang thao tác trong phạm vi quyền truy cập tạm thời, hết hạn lúc X, lý do Y" — phản ánh đúng bảng `operator_home_access`.
-5. **Không hiển thị secret/credential nhạy cảm qua Dashboard.** Gateway Secret/Device Secret không bao giờ xuất hiện trên bất kỳ màn hình nào (kế thừa nguyên tắc bảo mật ở `SMART_HOME_PRODUCT_ARCHITECTURE.md`).
+5. **Không hiển thị secret/credential nhạy cảm qua Dashboard.** Gateway Secret/Device Secret không bao giờ xuất hiện trên bất kỳ màn hình nào (kế thừa nguyên tắc bảo mật ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md`).
 6. **Mọi danh mục (loại phòng, loại thiết bị, loại log, loại sự kiện) phải là dữ liệu có thể mở rộng qua UI quản trị, không hard-code trong component.**
 7. **Thẩm mỹ: Enterprise IoT Dashboard — sạch, ít màu, nhiều khoảng trắng/xám, màu nhấn (đỏ/cam/vàng) chỉ dùng cho trạng thái và hành động, không dùng để trang trí.**
 
@@ -401,7 +403,7 @@ flowchart LR
 
 ### 6.3. User Flow (tham chiếu — thực thi trên Mobile App, không thuộc Dashboard)
 
-> Đã đặc tả đầy đủ ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 12. Dashboard **không có bất kỳ màn hình nào** trong luồng này — chỉ liệt kê ở đây để Admin/Operator hiểu rõ ranh giới trách nhiệm giữa 2 kênh:
+> Đã đặc tả đầy đủ ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 12. Dashboard **không có bất kỳ màn hình nào** trong luồng này — chỉ liệt kê ở đây để Admin/Operator hiểu rõ ranh giới trách nhiệm giữa 2 kênh:
 
 ```
 Khách hàng: Tải App → Đăng ký → Claim Home (QR/Code) → Setup WiFi → Pair Node → Điều khiển nhà
@@ -765,7 +767,7 @@ frontend/src/
   - Thêm cột **Smart Home** và **Room** (click điều hướng ngược lên Home Detail).
   - Bỏ tab Gateway/Sensor cứng, thay bằng filter theo `device_type` (danh mục mở, không ENUM cứng): Sensor, Relay, Camera, Door Contact...
   - Bỏ hoàn toàn modal "Đăng ký thiết bị" kiểu sinh secret key hiển thị plaintext (`RegisterModal.tsx`) — thay bằng luồng Provisioning (9.8) diễn ra ở khâu kho vận, không phải thao tác tự do trên Dashboard vận hành hàng ngày.
-- Trang chi tiết Device: tổng quát hoá theo `sensor_type` thay vì hard-code `temperature`/`humidity` — hiển thị đúng biểu đồ/đơn vị cho loại cảm biến của thiết bị đó (kế thừa bảng `sensor_types`/`device_sensors` trong `PROJECT_ANALYSIS_SMARTHOME.md`).
+- Trang chi tiết Device: tổng quát hoá theo `sensor_type` thay vì hard-code `temperature`/`humidity` — hiển thị đúng biểu đồ/đơn vị cho loại cảm biến của thiết bị đó (kế thừa bảng `sensor_types`/`device_sensors` trong `00_PROJECT_ANALYSIS_SMARTHOME.md`).
 
 ### 9.7. Gateway Management
 
@@ -777,7 +779,7 @@ frontend/src/
 
 - 5 bước tuyến tính, có thanh tiến trình (stepper) trên cùng — đúng chuỗi: **Create Smart Home → Generate Gateway → Generate Activation Code → Generate QR Code → Ready to Sell**.
 - Bước 2 hiển thị **preview cây Room/Device tự sinh theo template Package** (KIT_A/KIT_B) — cho Operator xác nhận trước khi chốt, không phải nhập tay từng thiết bị.
-- Bước 4: hiển thị QR để Operator in — **không hiển thị Gateway Secret dạng chữ ở bước này** (đúng nguyên tắc `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.3 — secret chỉ tồn tại lúc flash firmware qua công cụ nội bộ riêng, không qua Dashboard).
+- Bước 4: hiển thị QR để Operator in — **không hiển thị Gateway Secret dạng chữ ở bước này** (đúng nguyên tắc `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.3 — secret chỉ tồn tại lúc flash firmware qua công cụ nội bộ riêng, không qua Dashboard).
 - Bước 5: xác nhận "Ready to sell" → Home chuyển trạng thái sẵn sàng xuất kho, xuất hiện trong Provisioning Queue của Operator Dashboard.
 
 ### 9.9. Customer Module
@@ -798,7 +800,7 @@ frontend/src/
 - 1 layout dùng chung, khác nhau ở cột hiển thị theo từng loại log + tập filter tương ứng. Tái sử dụng toàn bộ pattern UI đã tốt của `AuditPage.tsx`/`AuditLogTable.tsx` (filter card, phân trang, bulk action cho Admin, toast).
 - Route con theo category: `/logs/gateway`, `/logs/device`, `/logs/provision`, `/logs/mqtt`, `/logs/security`, `/logs/auth`, `/logs/activity`, `/logs/automation`, `/logs/ota`, `/logs/error`.
 - Operator chỉ thấy 5 route con (Gateway/Device/Provision/Automation/OTA) trong Sidebar (mục 5.3) — Security/Auth/Activity Log là phạm vi điều tra nội bộ, chỉ Admin.
-- **Audit Log hiện tại không biến mất** — nó trở thành hợp phần của "Security Log" + "User Activity Log" mới (tách theo mục đích thay vì gộp 1 bảng như đã phân tích ở `PROJECT_ANALYSIS_SMARTHOME.md` Phần 9).
+- **Audit Log hiện tại không biến mất** — nó trở thành hợp phần của "Security Log" + "User Activity Log" mới (tách theo mục đích thay vì gộp 1 bảng như đã phân tích ở `00_PROJECT_ANALYSIS_SMARTHOME.md` Phần 9).
 
 ### 9.12. Automation Rule Engine
 
@@ -829,10 +831,10 @@ frontend/src/
 
 | Component | Trạng thái | Ghi chú |
 |---|---|---|
-| `Button` | Đã có ([`Button.tsx`](frontend/src/shared/ui/Button.tsx)) | Giữ nguyên API (`variant`/`size`), chỉ đổi màu `default` từ blue sang màu brand mới (Phần 11) |
+| `Button` | Đã có ([`Button.tsx`](../frontend/src/shared/ui/Button.tsx)) | Giữ nguyên API (`variant`/`size`), chỉ đổi màu `default` từ blue sang màu brand mới (Phần 11) |
 | `ConfirmDialog` | Đã có, chất lượng tốt | Giữ nguyên, dùng cho mọi hành động nguy hiểm mới (Factory Reset, Rollback OTA, Thu hồi Operator Access) |
 | `Dialog`, `Input`, `Select` | Đã có (chưa đọc chi tiết nhưng tồn tại trong `shared/ui`) | Chuẩn hoá lại theo token màu/spacing mới |
-| `StatsCard` | Đã có ([`StatsCard.tsx`](frontend/src/features/dashboard/components/StatsCard.tsx)) | Tái sử dụng cho mọi KPI row (Admin/Operator Dashboard, Customer/Home list) |
+| `StatsCard` | Đã có ([`StatsCard.tsx`](../frontend/src/features/dashboard/components/StatsCard.tsx)) | Tái sử dụng cho mọi KPI row (Admin/Operator Dashboard, Customer/Home list) |
 | `DeviceStatusBadge`, `OnlineIndicator` | Đã có | Tổng quát hoá thành `StatusBadge` dùng chung cho Home/Gateway/Device/OTA status |
 | `LogTable` (mới, từ `AuditLogTable`) | Cần tổng quát hoá | Nhận `columns` động theo loại log |
 | `Stepper` (mới) | Chưa có | Dùng cho Provisioning Wizard (5 bước) |
@@ -958,7 +960,7 @@ Grid KPI: `grid gap-3` với breakpoint `sm:grid-cols-2 xl:grid-cols-4|5` — pa
 | Data fetching | SWR (giữ nguyên — pattern `useXxxList`/`useXxxDetail` theo feature-sliced đã tốt, áp dụng lại cho mọi domain mới) |
 | Charting | Recharts (giữ nguyên, tổng quát hoá `SensorChart` theo `sensor_type` thay vì hard-code) |
 | Component primitives | `shared/ui/*` (Button, Dialog, Input, Select, ConfirmDialog) — giữ, bổ sung `StatusBadge`, `SeverityBadge`, `ProgressBar`, `EmptyState`, `Toast provider`, `Stepper`, `Timeline`, `RoleGuard`, `GlobalSearch` |
-| Cấu trúc thư mục | Feature-sliced (`features/<domain>/{api,hooks,pages,components,providers,types}`) — **giữ nguyên nguyên tắc này**, mở rộng thêm domain mới theo đúng khuôn mẫu cũ (đã được `PROJECT_ANALYSIS_SMARTHOME.md` mục 1.4 xác nhận là pattern tốt) |
+| Cấu trúc thư mục | Feature-sliced (`features/<domain>/{api,hooks,pages,components,providers,types}`) — **giữ nguyên nguyên tắc này**, mở rộng thêm domain mới theo đúng khuôn mẫu cũ (đã được `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 1.4 xác nhận là pattern tốt) |
 
 ---
 
@@ -990,8 +992,8 @@ Grid KPI: `grid gap-3` với breakpoint `sm:grid-cols-2 xl:grid-cols-4|5` — pa
 |---|---|---|
 | **Phase 0 — Design Foundation** | Thiết lập token màu/typography/spacing trong `globals.css`; tách `StatusBadge`, `SeverityBadge`, `ProgressBar`, `EmptyState`, `Toast provider` thành component dùng chung; hợp nhất 1 nguồn khai báo Nav (xoá lệch giữa `Sidebar.tsx`/`constants.ts`) | Mọi refactor UI sau này phụ thuộc vào nền tảng token — làm trước để tránh sửa lại 2 lần |
 | **Phase 1 — Sidebar & Dashboard tách role** | Sidebar mới theo Phần 5; tách Admin Dashboard/Operator Dashboard theo Phần 9.1–9.2; thêm `RoleGuard` chặn route theo role | Đây là thay đổi tư duy cốt lõi nhất mà yêu cầu đề bài nhấn mạnh — làm sớm để toàn đội (kể cả backend) thấy rõ hướng đi mới |
-| **Phase 2 — Smart Home / Room / Device phân cấp** | Trang Smart Homes (list + detail + Room tab), tổng quát hoá Device list/detail theo `sensor_type`, xoá bỏ UI hiển thị Secret Key plaintext | Vá đúng lỗ hổng tenant isolation nghiêm trọng nhất đã nêu ở `PROJECT_ANALYSIS_SMARTHOME.md` — vừa là vấn đề UX vừa là vấn đề bảo mật |
-| **Phase 3 — Customer & Provisioning** | Module Customer hoàn toàn mới; Provisioning Wizard 5 bước | Điều kiện tiên quyết để vận hành mô hình bán hàng (Claim/Activation) đã thiết kế ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` |
+| **Phase 2 — Smart Home / Room / Device phân cấp** | Trang Smart Homes (list + detail + Room tab), tổng quát hoá Device list/detail theo `sensor_type`, xoá bỏ UI hiển thị Secret Key plaintext | Vá đúng lỗ hổng tenant isolation nghiêm trọng nhất đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md` — vừa là vấn đề UX vừa là vấn đề bảo mật |
+| **Phase 3 — Customer & Provisioning** | Module Customer hoàn toàn mới; Provisioning Wizard 5 bước | Điều kiện tiên quyết để vận hành mô hình bán hàng (Claim/Activation) đã thiết kế ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` |
 | **Phase 4 — Gateway Console & OTA** | Trang Gateway Detail đầy đủ 8 chỉ số; OTA Console | Cần thiết khi bắt đầu bán hàng loạt — không thể quản lý fleet hàng nghìn thiết bị bằng bảng phẳng hiện tại |
 | **Phase 5 — Logs Center & Notification Center** | Tổng quát hoá `AuditLogTable` thành `LogTable` dùng chung cho 10 loại log; nâng cấp Notification dropdown thành trang đầy đủ, mở cho Operator | Dọn nợ kỹ thuật `LogsPage.tsx` chết + đáp ứng yêu cầu phân loại log chi tiết |
 | **Phase 6 — Team & Operator Access** | Đổi tên "Users" → "Team"; màn hình `OperatorAccessPage` cấp quyền có thời hạn | Hoàn thiện mảnh ghép RBAC cuối cùng — least-privilege cho Operator |

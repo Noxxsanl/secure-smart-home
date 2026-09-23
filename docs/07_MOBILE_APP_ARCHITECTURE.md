@@ -1,15 +1,17 @@
 
-# MOBILE_APP_ARCHITECTURE.md
+# 07_MOBILE_APP_ARCHITECTURE.md
 
 > Thiết kế lại Mobile App — từ **UI mockup tĩnh (Flutter default template + 5 màn hình demo)** sang **ứng dụng chính thức của khách hàng trên nền tảng Smart Home thương mại**.
 > Vai trò biên soạn: Principal Mobile Architect / Principal UX Designer / Senior Flutter Developer / Smart Home Product Manager / Solution Architect.
 > Tài liệu **chỉ thiết kế — không viết code, không sửa code**. Ràng buộc chặt với 4 tài liệu đã có trong repo — **không lặp lại** mà tham chiếu:
-> - [`SMART_HOME_PRODUCT_ARCHITECTURE.md`](SMART_HOME_PRODUCT_ARCHITECTURE.md) — nguyên tắc "User = Mobile only", Claim/Activation Flow (Phần 5-6), RBAC theo Home (Owner/Controller/Viewer/Guest — Phần 7), API `/api/mobile/**` (Phần 9.1).
-> - [`SMART_HOME_WIFI_PROVISIONING.md`](SMART_HOME_WIFI_PROVISIONING.md) — WiFi Provisioning kỹ thuật (BLE/SoftAP, ESP-NOW, Key Hierarchy), Mobile UX (Phần 16).
-> - [`BACKEND_REFACTOR_SMARTHOME.md`](BACKEND_REFACTOR_SMARTHOME.md) — Auth Service (JWT+Refresh Token Mobile), MQTT Topic Design (Phần 10).
-> - [`BACKEND_REFACTOR_SMARTHOME.md`](BACKEND_REFACTOR_SMARTHOME.md) mục 18.6 — Recommendation Engine (Observe→Confirm), nguyên tắc AI không tự điều khiển.
+> - [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) — nguyên tắc "User = Mobile only", Claim/Activation Flow (Phần 5-6), RBAC theo Home (Owner/Controller/Viewer/Guest — Phần 7), API `/api/mobile/**` (Phần 9.1).
+> - [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — WiFi Provisioning kỹ thuật (BLE/SoftAP, ESP-NOW, Key Hierarchy), Mobile UX (Phần 16).
+> - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) — Auth Service (JWT+Refresh Token Mobile), MQTT Topic Design (Phần 10).
+> - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) mục 18.6 — Recommendation Engine (Observe→Confirm), nguyên tắc AI không tự điều khiển.
 >
 > Toàn bộ source code Mobile thực tế đã được đọc: `mobile/pubspec.yaml`, `mobile/lib/main.dart`, `app.dart`, `core/theme/app_theme.dart`, và toàn bộ 7 feature hiện có (`auth`, `home`, `rooms`, `notifications`, `profile`, `about`, `shell`) — tổng cộng 16 file Dart.
+>
+> **Ghi chú (2026-09-23):** Phần 1 (hiện trạng) phản ánh code Mobile tại commit `407eb1d` (2026-07-11). Commit `dee7752` sau đó đã bổ sung mock data (phòng có thiết bị, `devices/`, `door/`, `mock_household`...) — nay là 26 file Dart / 9 feature; một số trích dẫn `file:line` ở mục 1.4–1.5 không còn khớp (VD phòng hard-code đã chuyển sang `rooms/data/mock_rooms.dart`, nút "Đăng xuất 123456" đã được sửa). Các kết luận kiến trúc (chỉ 2 dependency, không state management/networking/MQTT, `MockAuthService` gọi trực tiếp, điều hướng bằng `Navigator.push` thủ công) **vẫn đúng**.
 
 ---
 
@@ -59,7 +61,7 @@ mobile/lib/
 
 ### 1.2. `pubspec.yaml` — bằng chứng rõ nhất về mức độ "mockup"
 
-Toàn bộ dependency: `flutter`, `cupertino_icons`. **Không có bất kỳ package nào** cho: state management (Provider/Riverpod/Bloc), networking (`http`/`dio`), MQTT (`mqtt_client`), push notification (`firebase_messaging`), camera/video (`camera`/`video_player`), biometric (`local_auth`), secure storage (`flutter_secure_storage`), routing (`go_router`), QR scan (`mobile_scanner`), BLE (`flutter_blue_plus`). Đây không phải là thiếu sót cần "sửa" — đây là **bằng chứng xác nhận app hiện tại đúng là 1 bản UI prototype thuần tuý**, đúng như `PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#16 đã kết luận.
+Toàn bộ dependency: `flutter`, `cupertino_icons`. **Không có bất kỳ package nào** cho: state management (Provider/Riverpod/Bloc), networking (`http`/`dio`), MQTT (`mqtt_client`), push notification (`firebase_messaging`), camera/video (`camera`/`video_player`), biometric (`local_auth`), secure storage (`flutter_secure_storage`), routing (`go_router`), QR scan (`mobile_scanner`), BLE (`flutter_blue_plus`). Đây không phải là thiếu sót cần "sửa" — đây là **bằng chứng xác nhận app hiện tại đúng là 1 bản UI prototype thuần tuý**, đúng như `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#16 đã kết luận.
 
 ### 1.3. Architecture
 
@@ -476,7 +478,7 @@ mobile/lib/
 
 ## 10. API FLOW
 
-App chỉ gọi đúng 1 namespace: **`/api/mobile/**`** (JWT Bearer — đã thiết kế đầy đủ ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 9.1 và `BACKEND_REFACTOR_SMARTHOME.md` mục 9.3) — không bao giờ gọi `/api/dashboard/**` hay `/api/device/**` (2 namespace đó dành cho Web Dashboard và Firmware).
+App chỉ gọi đúng 1 namespace: **`/api/mobile/**`** (JWT Bearer — đã thiết kế đầy đủ ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 9.1 và `03_BACKEND_REFACTOR_SMARTHOME.md` mục 9.3) — không bao giờ gọi `/api/dashboard/**` hay `/api/device/**` (2 namespace đó dành cho Web Dashboard và Firmware).
 
 ```mermaid
 sequenceDiagram
@@ -509,7 +511,7 @@ Mọi lệnh điều khiển thiết bị (`POST /mobile/devices/:id/commands`) 
 | Tiêu chí | Phương án A — Mobile kết nối MQTT trực tiếp | Phương án B — Mobile không kết nối MQTT, chỉ qua Backend |
 |---|---|---|
 | Độ trễ | Thấp nhất (1 hop) | Thêm 1 hop qua Backend relay (chục-trăm ms, không đáng kể cho use-case Smart Home) |
-| Bảo mật | Phải mở Broker ra Internet công cộng cho hàng nghìn Mobile client — bề mặt tấn công lớn; cần TLS + ACL theo `home_id` cho **mỗi thiết bị di động** (không chỉ Gateway cố định) | Broker chỉ giao tiếp nội bộ Backend↔Gateway (đã thiết kế TLS+ACL ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 17) — Mobile không bao giờ chạm trực tiếp Broker |
+| Bảo mật | Phải mở Broker ra Internet công cộng cho hàng nghìn Mobile client — bề mặt tấn công lớn; cần TLS + ACL theo `home_id` cho **mỗi thiết bị di động** (không chỉ Gateway cố định) | Broker chỉ giao tiếp nội bộ Backend↔Gateway (đã thiết kế TLS+ACL ở `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 17) — Mobile không bao giờ chạm trực tiếp Broker |
 | Quản lý credential | Cần cấp + xoay vòng MQTT credential riêng cho **hàng nghìn thiết bị di động** (phức tạp hơn nhiều so với quản lý JWT vốn đã có sẵn) | Dùng lại đúng JWT/RBAC đã có — không thêm cơ chế auth mới |
 | Ổn định kết nối | Mobile network chuyển đổi WiFi↔4G liên tục → connect/disconnect dồn dập vào Broker, tốn tài nguyên Broker ở quy mô lớn | Backend (server, mạng ổn định) là client MQTT duy nhất — Mobile chỉ giữ 1 kết nối HTTP/WebSocket bền hơn nhiều so với giữ phiên MQTT trên mạng di động |
 | Kiểm soát/Audit | Khó áp dụng lại toàn bộ RBAC theo Home đã thiết kế ở tầng Backend (phải làm lại ở tầng Broker ACL) | Tái sử dụng 100% RBAC/Audit đã có ở Backend |
@@ -517,7 +519,7 @@ Mọi lệnh điều khiển thiết bị (`POST /mobile/devices/:id/commands`) 
 
 ### 11.2. Quyết định: **Phương án B — Mobile không bao giờ kết nối MQTT trực tiếp**
 
-Backend là **client MQTT duy nhất** (đúng kiến trúc đã chốt ở `BACKEND_REFACTOR_SMARTHOME.md`). Mobile nhận cập nhật realtime qua **kênh WebSocket riêng do chính Backend cung cấp** (tận dụng lại đúng hạ tầng WebSocket Gateway đã thiết kế cho Monitoring Service ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 15 — dùng chung 1 hạ tầng cho cả Dashboard lẫn Mobile, không xây 2 kênh realtime song song).
+Backend là **client MQTT duy nhất** (đúng kiến trúc đã chốt ở `03_BACKEND_REFACTOR_SMARTHOME.md`). Mobile nhận cập nhật realtime qua **kênh WebSocket riêng do chính Backend cung cấp** (tận dụng lại đúng hạ tầng WebSocket Gateway đã thiết kế cho Monitoring Service ở `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 15 — dùng chung 1 hạ tầng cho cả Dashboard lẫn Mobile, không xây 2 kênh realtime song song).
 
 ```mermaid
 flowchart LR
@@ -537,7 +539,7 @@ Mobile tự động **fallback sang polling REST định kỳ** (VD mỗi 10-15 
 
 ## 12. PROVISION FLOW
 
-> Chi tiết kỹ thuật đầy đủ (BLE/SoftAP, ECDH, ESP-NOW) đã có ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 7-9. Phần dưới đây là **luồng UI/UX cụ thể phía Mobile**.
+> Chi tiết kỹ thuật đầy đủ (BLE/SoftAP, ECDH, ESP-NOW) đã có ở `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 7-9. Phần dưới đây là **luồng UI/UX cụ thể phía Mobile**.
 
 ```mermaid
 sequenceDiagram
@@ -566,7 +568,7 @@ sequenceDiagram
     APP-->>U: Danh sách thiết bị trong kit, mỗi cái chuyển "Đang tìm..." → "✅ Đã kết nối"
 ```
 
-**Nguyên tắc UX cốt lõi (kế thừa nguyên vẹn từ `SMART_HOME_WIFI_PROVISIONING.md`):** màn hình nhập WiFi chỉ xuất hiện **đúng 1 lần** trong toàn bộ luồng — Pairing Node/Camera hoàn toàn tự động, không có màn hình nhập thông tin mạng nào khác.
+**Nguyên tắc UX cốt lõi (kế thừa nguyên vẹn từ `02_SMART_HOME_WIFI_PROVISIONING.md`):** màn hình nhập WiFi chỉ xuất hiện **đúng 1 lần** trong toàn bộ luồng — Pairing Node/Camera hoàn toàn tự động, không có màn hình nhập thông tin mạng nào khác.
 
 ---
 
@@ -604,7 +606,7 @@ sequenceDiagram
 
 ## 14. AI RECOMMENDATION FLOW
 
-> Ràng buộc cứng kế thừa từ `BACKEND_REFACTOR_SMARTHOME.md` mục 18.6: **AI không bao giờ tự điều khiển** — Mobile chỉ hiển thị đề xuất và gửi phản hồi người dùng.
+> Ràng buộc cứng kế thừa từ `03_BACKEND_REFACTOR_SMARTHOME.md` mục 18.6: **AI không bao giờ tự điều khiển** — Mobile chỉ hiển thị đề xuất và gửi phản hồi người dùng.
 
 ```mermaid
 sequenceDiagram
@@ -659,7 +661,7 @@ sequenceDiagram
 | **Foreground** | Hiển thị in-app banner tuỳ biến (không dùng notification hệ thống khi app đang mở) — cho phép hành động ngay (VD "Xem Camera" khi có Motion Detected) |
 | **Deep Link** | Payload chứa `route` (VD `/recommendations/17`, `/devices/42`) → `go_router` điều hướng thẳng khi user tap notification, kể cả khi app đã bị kill hoàn toàn (cold start) |
 | **Action Button** | Native notification action: "Xem" / "Bỏ qua" cho Motion; "Đồng ý" / "Từ chối" cho AI Recommendation — xử lý được **ngay trên notification** không cần mở app (Android quick reply actions, iOS notification actions) |
-| **Phân loại theo severity** | Nhất quán với `BACKEND_REFACTOR_SMARTHOME.md` Phần 13 — Critical (Cửa mở bất thường, Khói/Gas) rung + âm thanh riêng; Info/Success chỉ badge, không làm phiền |
+| **Phân loại theo severity** | Nhất quán với `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 13 — Critical (Cửa mở bất thường, Khói/Gas) rung + âm thanh riêng; Info/Success chỉ badge, không làm phiền |
 
 ---
 
@@ -672,7 +674,7 @@ sequenceDiagram
 | **Biometric Login** | `local_auth` — FaceID/Fingerprint **không thay thế** bước đăng nhập đầu tiên bằng mật khẩu, chỉ dùng để **mở khoá lại phiên đã đăng nhập** (unlock refresh token đã lưu) sau khi app bị khoá/thoát |
 | **Remember Login** | Refresh token còn hạn + biometric bật → tự động khôi phục phiên khi mở app, không cần nhập lại mật khẩu |
 | **Certificate Pinning** | Khuyến nghị bật cho production (chống MITM trên mạng công cộng) — không bắt buộc MVP |
-| **Không lưu secret Gateway/Device** | Kế thừa nguyên tắc `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.3 — Mobile không bao giờ nhận/lưu `gateway_secret` dưới bất kỳ hình thức nào |
+| **Không lưu secret Gateway/Device** | Kế thừa nguyên tắc `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.3 — Mobile không bao giờ nhận/lưu `gateway_secret` dưới bất kỳ hình thức nào |
 | **Đăng xuất toàn bộ thiết bị** | Trong Settings → Security — gọi API thu hồi toàn bộ refresh token của user (phát hiện thiết bị lạ đăng nhập) |
 
 ---
@@ -682,11 +684,11 @@ sequenceDiagram
 | Version | Nội dung | Điều kiện |
 |---|---|---|
 | **V0 (hiện tại)** | UI mockup tĩnh, mock auth, không nối Backend | Baseline đang review |
-| **V1 — Nền tảng thật** | Clean Architecture 3 lớp, Riverpod, `go_router`, Auth thật (JWT+Refresh+Biometric), Claim Home, WiFi Provisioning, Device Pairing | Phụ thuộc Backend đã có `/api/mobile/**` (Phần 9 `BACKEND_REFACTOR_SMARTHOME.md` Phase 3) |
+| **V1 — Nền tảng thật** | Clean Architecture 3 lớp, Riverpod, `go_router`, Auth thật (JWT+Refresh+Biometric), Claim Home, WiFi Provisioning, Device Pairing | Phụ thuộc Backend đã có `/api/mobile/**` (Phần 9 `03_BACKEND_REFACTOR_SMARTHOME.md` Phase 3) |
 | **V2 — Điều khiển thiết bị thật** | Room/Device thật (thay hard-code), Device Control theo từng loại, kênh Realtime (WebSocket), Offline handling | Phụ thuộc `device_commands` + MQTT `command` topic đã triển khai ở Backend |
 | **V3 — Automation & Scene** | Rule Builder, Scene, Family/Member (Owner/Controller/Viewer/Guest) | Phụ thuộc `automation_rules`/`scenes` Backend đã có |
 | **V4 — Camera & Notification đầy đủ** | Live View, Snapshot, Push Notification (FCM) với Deep Link + Action Button | Phụ thuộc Camera Service Backend |
-| **V5 — AI Recommendation** | Card đề xuất, Accept/Decline/Later, giải thích "vì sao" | Phụ thuộc đủ dữ liệu hành vi tích luỹ (`BACKEND_REFACTOR_SMARTHOME.md` mục 18 — tối thiểu 30-60 ngày Behavior Log) |
+| **V5 — AI Recommendation** | Card đề xuất, Accept/Decline/Later, giải thích "vì sao" | Phụ thuộc đủ dữ liệu hành vi tích luỹ (`03_BACKEND_REFACTOR_SMARTHOME.md` mục 18 — tối thiểu 30-60 ngày Behavior Log) |
 | **V6 — Hoàn thiện trải nghiệm** | Dark Mode đầy đủ theo Design System (Đỏ/Cam/Vàng/Xám), Responsive Tablet, Certificate Pinning, đa ngôn ngữ | Không chặn tính năng lõi — hoàn thiện sau khi V1-V5 ổn định |
 
 **Nguyên tắc xuyên suốt:** mỗi version phụ thuộc trực tiếp vào 1 phần tương ứng đã sẵn sàng ở Backend (đã thiết kế ở 4 tài liệu trước) — Mobile không nên "đi trước" xây UI cho tính năng mà Backend chưa có API tương ứng, tránh lặp lại đúng sai lầm hiện tại (UI đẹp nhưng rỗng, không nối được gì thật).

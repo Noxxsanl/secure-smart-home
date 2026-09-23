@@ -1,18 +1,18 @@
 
-# SMART_HOME_PRODUCT_ROADMAP.md
+# 10_SMART_HOME_PRODUCT_ROADMAP.md
 
 > Lộ trình phát triển sản phẩm — từ **đồ án tốt nghiệp** đến **nền tảng Smart Home thương mại quy mô Enterprise**.
 > Vai trò biên soạn: Principal Product Manager / Chief Technology Officer / Principal Solution Architect / IoT Product Architect.
-> Đây là **tài liệu tổng hợp cấp cao nhất**, đứng trên toàn bộ 8 tài liệu kiến trúc đã biên soạn trong workspace — không lặp lại chi tiết kỹ thuật đã có, mà **tổng hợp thành lộ trình sản phẩm** với góc nhìn CTO: đánh đổi, rủi ro, ưu tiên, và tính khả thi trong khung thời gian một đồ án tốt nghiệp.
+> Đây là **tài liệu tổng hợp cấp cao nhất**, đứng trên toàn bộ 9 tài liệu kiến trúc đã biên soạn trong workspace — không lặp lại chi tiết kỹ thuật đã có, mà **tổng hợp thành lộ trình sản phẩm** với góc nhìn CTO: đánh đổi, rủi ro, ưu tiên, và tính khả thi trong khung thời gian một đồ án tốt nghiệp.
 >
 > **Nguồn tham chiếu (không lặp lại nội dung, chỉ dẫn chiếu):**
-> - [`PROJECT_ANALYSIS_SMARTHOME.md`](PROJECT_ANALYSIS_SMARTHOME.md), [`SMART_HOME_PRODUCT_ARCHITECTURE.md`](SMART_HOME_PRODUCT_ARCHITECTURE.md), [`SMART_HOME_WIFI_PROVISIONING.md`](SMART_HOME_WIFI_PROVISIONING.md) — mô hình dữ liệu, Claim/Activation, Provisioning kỹ thuật.
-> - [`FRONTEND_REFACTOR_SMARTHOME.md`](FRONTEND_REFACTOR_SMARTHOME.md) — Dashboard Admin/Operator.
-> - [`BACKEND_REFACTOR_SMARTHOME.md`](BACKEND_REFACTOR_SMARTHOME.md) — 22 module Service, API, MQTT, và mục 18 — Event Sourcing/Feature Store/Recommendation Engine (AI-Ready).
-> - [`DATABASE_REFACTOR_SMARTHOME.md`](DATABASE_REFACTOR_SMARTHOME.md) — ~45 bảng nghiệp vụ + mục 7.12 — 17 bảng AI-Ready, Partition/Retention.
-> - [`MOBILE_APP_ARCHITECTURE.md`](MOBILE_APP_ARCHITECTURE.md) — Flutter/Riverpod, Claim/Provisioning UX.
-> - [`EMBEDDED_ARCHITECTURE_ESP_IDF.md`](EMBEDDED_ARCHITECTURE_ESP_IDF.md) — Migrate PlatformIO→ESP-IDF, OTA, Partition.
-> - [`SECURITY_ARCHITECTURE.md`](SECURITY_ARCHITECTURE.md) — 7-layer Security, Threat Model.
+> - [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md), [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md), [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — mô hình dữ liệu, Claim/Activation, Provisioning kỹ thuật.
+> - [`05_FRONTEND_REFACTOR_SMARTHOME.md`](05_FRONTEND_REFACTOR_SMARTHOME.md) — Dashboard Admin/Operator.
+> - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) — 22 module Service, API, MQTT, và mục 18 — Event Sourcing/Feature Store/Recommendation Engine (AI-Ready).
+> - [`04_DATABASE_REFACTOR_SMARTHOME.md`](04_DATABASE_REFACTOR_SMARTHOME.md) — ~45 bảng nghiệp vụ + mục 7.12 — 17 bảng AI-Ready, Partition/Retention.
+> - [`07_MOBILE_APP_ARCHITECTURE.md`](07_MOBILE_APP_ARCHITECTURE.md) — Flutter/Riverpod, Claim/Provisioning UX.
+> - [`08_EMBEDDED_ARCHITECTURE_ESP_IDF.md`](08_EMBEDDED_ARCHITECTURE_ESP_IDF.md) — Migrate PlatformIO→ESP-IDF, OTA, Partition.
+> - [`09_SECURITY_ARCHITECTURE.md`](09_SECURITY_ARCHITECTURE.md) — 7-layer Security, Threat Model.
 
 ---
 
@@ -67,12 +67,12 @@ flowchart LR
 
 | Lớp | Thay đổi |
 |---|---|
-| Firmware | Bắt đầu migrate ESP-IDF (Phase 0-2 của `EMBEDDED_ARCHITECTURE_ESP_IDF.md`): CMake, component hoá, NVS hoá cấu hình, FreeRTOS task thật |
+| Firmware | Bắt đầu migrate ESP-IDF (Phase 0-2 của `08_EMBEDDED_ARCHITECTURE_ESP_IDF.md`): CMake, component hoá, NVS hoá cấu hình, FreeRTOS task thật |
 | Backend | Layered Architecture (Controller/Service/Repository), tách namespace API `/dashboard`, `/mobile`, `/device` |
-| Database | Domain Customer→SmartHome→Room→Device (Phase 0-2 của `DATABASE_REFACTOR_SMARTHOME.md`) |
+| Database | Domain Customer→SmartHome→Room→Device (Phase 0-2 của `04_DATABASE_REFACTOR_SMARTHOME.md`) |
 | Frontend | Sidebar/IA mới theo Home/Room, chưa cần tách hẳn 2 Dashboard |
 | Mobile | Clean Architecture 3 lớp + Riverpod, Auth thật (chưa cần Claim/Provisioning hoàn chỉnh) |
-| Security | **Phase 0 vá khẩn cấp** của `SECURITY_ARCHITECTURE.md` — vá rò rỉ secret, xoá hard-code WiFi/Secret khỏi firmware |
+| Security | **Phase 0 vá khẩn cấp** của `09_SECURITY_ARCHITECTURE.md` — vá rò rỉ secret, xoá hard-code WiFi/Secret khỏi firmware |
 
 ### 1.3. V2 — ĐỒ ÁN (MVP thương mại đầy đủ vòng đời)
 
@@ -251,7 +251,7 @@ flowchart TB
 
 | Thành phần | Vấn đề Prototype/V2 giải quyết |
 |---|---|
-| Load Balancer + nhiều Backend instance | Vấn đề rate-limit/cache in-memory chỉ đúng 1 instance đã nêu ở `BACKEND_REFACTOR_SMARTHOME.md`/`SECURITY_ARCHITECTURE.md` — bắt buộc giải quyết trước khi scale ngang |
+| Load Balancer + nhiều Backend instance | Vấn đề rate-limit/cache in-memory chỉ đúng 1 instance đã nêu ở `03_BACKEND_REFACTOR_SMARTHOME.md`/`09_SECURITY_ARCHITECTURE.md` — bắt buộc giải quyết trước khi scale ngang |
 | Redis Cluster | Chuyển toàn bộ state in-memory (rate-limit, online-device cache, JWT blacklist) sang shared store |
 | MQTT Cluster (EMQX/VerneMQ) | Mosquitto đơn lẻ không có HA (High Availability) — 1 broker chết là toàn bộ Gateway mất kết nối Cloud; Cluster cho phép failover |
 | Read Replica | Tách truy vấn báo cáo/Dashboard (đọc nhiều) khỏi truy vấn ghi telemetry tần suất cao (viết nhiều) — tránh 1 loại truy vấn làm chậm loại kia |
@@ -285,7 +285,7 @@ flowchart TB
 
 **Khi nào thật sự cần Microservices:** khi các domain (Telemetry Ingest, Automation Engine, OTA Rollout, AI Training Pipeline) có **tốc độ thay đổi và tải khác biệt rất lớn** tới mức triển khai/scale chung 1 monolith gây lãng phí tài nguyên nghiêm trọng (VD Telemetry Ingest cần scale theo số thiết bị — hàng triệu request/phút — trong khi Automation Engine tải thấp hơn nhiều bậc) — tách ra để **scale độc lập từng phần**, không phải vì "microservices là xu hướng".
 
-**Khi nào thật sự cần Kafka:** khi Redis Pub/Sub (đủ dùng ở Commercial) không còn đáp ứng được yêu cầu **replay lịch sử event** (Kafka giữ log event có thể đọc lại từ đầu — quan trọng cho Training Dataset quy mô lớn ở `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12) hoặc yêu cầu **đồng bộ multi-region** (Redis Pub/Sub không thiết kế cho xuyên vùng địa lý).
+**Khi nào thật sự cần Kafka:** khi Redis Pub/Sub (đủ dùng ở Commercial) không còn đáp ứng được yêu cầu **replay lịch sử event** (Kafka giữ log event có thể đọc lại từ đầu — quan trọng cho Training Dataset quy mô lớn ở `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12) hoặc yêu cầu **đồng bộ multi-region** (Redis Pub/Sub không thiết kế cho xuyên vùng địa lý).
 
 ---
 
@@ -295,20 +295,20 @@ flowchart TB
 
 | # | Module | Vấn đề cốt lõi | Cần refactor trước phiên bản nào | Tài liệu chi tiết |
 |---|---|---|---|---|
-| 1 | `GET /api/device/sensors` | Rò rỉ secret_key toàn hệ thống | **V1 (khẩn cấp)** | `SECURITY_ARCHITECTURE.md` #1 |
-| 2 | Firmware config (`config_gw.h`/`config_1.h`) | WiFi/Secret hard-code compile vào binary, commit git | **V1 (khẩn cấp)** | `EMBEDDED_ARCHITECTURE_ESP_IDF.md`, `SECURITY_ARCHITECTURE.md` |
-| 3 | `devices` table (schema gốc) | Gộp Gateway+Sensor, không Customer/Home/Room | **V1→V2** | `DATABASE_REFACTOR_SMARTHOME.md` |
-| 4 | `middleware/rbac.ts` | Không giới hạn phạm vi Home cho Operator | **V2** | `SECURITY_ARCHITECTURE.md` #4 |
-| 5 | `validateDevice.ts` vs `mqttDataService.ts` | Logic xác thực trùng lặp 2 nơi | **V1→V2** | `BACKEND_REFACTOR_SMARTHOME.md` |
-| 6 | 3 project PlatformIO (`gateway-node`/`sensor-node`/`sensor-node-2`) | Copy-paste thay vì tham số hoá | **V1** | `EMBEDDED_ARCHITECTURE_ESP_IDF.md` |
-| 7 | `Sidebar.tsx`/`constants.ts` (Frontend) | Điều hướng theo thiết bị, 2 nguồn nav lệch nhau | **V2** | `FRONTEND_REFACTOR_SMARTHOME.md` |
-| 8 | `RegisterModal.tsx` | Hiển thị secret plaintext trên Dashboard | **V2** | `FRONTEND_REFACTOR_SMARTHOME.md`, `SECURITY_ARCHITECTURE.md` |
-| 9 | Mobile `MockAuthService` | Phụ thuộc cứng, không interface, chặn viết test | **V2** | `MOBILE_APP_ARCHITECTURE.md` |
-| 10 | `audit_log` (1 bảng gộp) | Gộp bảo mật + nghiệp vụ + dữ liệu tần suất cao | **V2** | `DATABASE_REFACTOR_SMARTHOME.md`, `BACKEND_REFACTOR_SMARTHOME.md` |
-| 11 | `sensor_data` giới hạn cứng 150 bản ghi | Phá huỷ dữ liệu lịch sử cần cho AI | **V2 (trước khi có AI thật ở V3)** | `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12 |
-| 12 | Rate-limit/cache in-memory (`app.ts`, `deviceStatus.ts`) | Không scale ngang nhiều instance | **Commercial** | `BACKEND_REFACTOR_SMARTHOME.md`, `SECURITY_ARCHITECTURE.md` |
-| 13 | Mosquitto đơn lẻ, không TLS, không ACL | Không HA, không bảo mật transport | **V2 (TLS) → Commercial (Cluster)** | `SECURITY_ARCHITECTURE.md` |
-| 14 | Không Soft Delete toàn hệ thống | Mất dữ liệu điều tra vĩnh viễn | **V2→V3** | `SECURITY_ARCHITECTURE.md`, `DATABASE_REFACTOR_SMARTHOME.md` |
+| 1 | `GET /api/device/sensors` | Rò rỉ secret_key toàn hệ thống | **V1 (khẩn cấp)** | `09_SECURITY_ARCHITECTURE.md` #1 |
+| 2 | Firmware config (`config_gw.h`/`config_1.h`) | WiFi/Secret hard-code compile vào binary (file đã `.gitignore`, không commit git) | **V1 (khẩn cấp)** | `08_EMBEDDED_ARCHITECTURE_ESP_IDF.md`, `09_SECURITY_ARCHITECTURE.md` |
+| 3 | `devices` table (schema gốc) | Gộp Gateway+Sensor, không Customer/Home/Room | **V1→V2** | `04_DATABASE_REFACTOR_SMARTHOME.md` |
+| 4 | `middleware/rbac.ts` | Không giới hạn phạm vi Home cho Operator | **V2** | `09_SECURITY_ARCHITECTURE.md` #4 |
+| 5 | `validateDevice.ts` vs `mqttDataService.ts` | Logic xác thực trùng lặp 2 nơi | **V1→V2** | `03_BACKEND_REFACTOR_SMARTHOME.md` |
+| 6 | 3 project PlatformIO (`gateway-node`/`sensor-node`/`sensor-node-2`) | Copy-paste thay vì tham số hoá | **V1** | `08_EMBEDDED_ARCHITECTURE_ESP_IDF.md` |
+| 7 | `Sidebar.tsx`/`constants.ts` (Frontend) | Điều hướng theo thiết bị, 2 nguồn nav lệch nhau | **V2** | `05_FRONTEND_REFACTOR_SMARTHOME.md` |
+| 8 | `RegisterModal.tsx` | Hiển thị secret plaintext trên Dashboard | **V2** | `05_FRONTEND_REFACTOR_SMARTHOME.md`, `09_SECURITY_ARCHITECTURE.md` |
+| 9 | Mobile `MockAuthService` | Phụ thuộc cứng, không interface, chặn viết test | **V2** | `07_MOBILE_APP_ARCHITECTURE.md` |
+| 10 | `audit_log` (1 bảng gộp) | Gộp bảo mật + nghiệp vụ + dữ liệu tần suất cao | **V2** | `04_DATABASE_REFACTOR_SMARTHOME.md`, `03_BACKEND_REFACTOR_SMARTHOME.md` |
+| 11 | `sensor_data` giới hạn cứng 150 bản ghi | Phá huỷ dữ liệu lịch sử cần cho AI | **V2 (trước khi có AI thật ở V3)** | `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12 |
+| 12 | Rate-limit/cache in-memory (`app.ts`, `deviceStatus.ts`) | Không scale ngang nhiều instance | **Commercial** | `03_BACKEND_REFACTOR_SMARTHOME.md`, `09_SECURITY_ARCHITECTURE.md` |
+| 13 | Mosquitto đơn lẻ, không TLS, không ACL | Không HA, không bảo mật transport | **V2 (TLS) → Commercial (Cluster)** | `09_SECURITY_ARCHITECTURE.md` |
+| 14 | Không Soft Delete toàn hệ thống | Mất dữ liệu điều tra vĩnh viễn | **V2→V3** | `09_SECURITY_ARCHITECTURE.md`, `04_DATABASE_REFACTOR_SMARTHOME.md` |
 | 15 | Không CI/CD, deploy thủ công | Rủi ro lỗi người khi release | **Commercial** | Phần 5.1 |
 
 ---
@@ -319,10 +319,10 @@ flowchart TB
 
 | Rủi ro | Xác suất | Tác động | Giảm thiểu |
 |---|---|---|---|
-| Firmware OTA lỗi biến thiết bị đã bán thành "gạch" | Trung bình (nếu bỏ qua App Rollback) | Nghiêm trọng — chi phí bảo hành/thu hồi vật lý | Bắt buộc 2 OTA partition + App Rollback tự động ngay từ V2 (`EMBEDDED_ARCHITECTURE_ESP_IDF.md` Phần 14-15) |
-| Rò rỉ dữ liệu khách hàng (secret, hành vi sinh hoạt qua Telemetry) | Cao nếu không vá trước V2 | Nghiêm trọng — mất niềm tin khách hàng, rủi ro pháp lý (bảo vệ dữ liệu cá nhân) | `SECURITY_ARCHITECTURE.md` Phase 0-3 |
-| ESP-NOW không đủ tầm phủ nhà nhiều tầng/nhà lớn | Trung bình | Trung bình — trải nghiệm khách hàng kém, tăng ticket hỗ trợ | Node lặp tín hiệu (repeater) — đã nêu ở `SMART_HOME_WIFI_PROVISIONING.md` mục 3.1 |
-| AI Recommendation sai/gây phiền (spam đề xuất) | Trung bình ở V3 | Trung bình — giảm trải nghiệm, khách hàng tắt tính năng | Ngưỡng confidence + giới hạn tần suất đề xuất (`BACKEND_REFACTOR_SMARTHOME.md` mục 18.6) |
+| Firmware OTA lỗi biến thiết bị đã bán thành "gạch" | Trung bình (nếu bỏ qua App Rollback) | Nghiêm trọng — chi phí bảo hành/thu hồi vật lý | Bắt buộc 2 OTA partition + App Rollback tự động ngay từ V2 (`08_EMBEDDED_ARCHITECTURE_ESP_IDF.md` Phần 14-15) |
+| Rò rỉ dữ liệu khách hàng (secret, hành vi sinh hoạt qua Telemetry) | Cao nếu không vá trước V2 | Nghiêm trọng — mất niềm tin khách hàng, rủi ro pháp lý (bảo vệ dữ liệu cá nhân) | `09_SECURITY_ARCHITECTURE.md` Phase 0-3 |
+| ESP-NOW không đủ tầm phủ nhà nhiều tầng/nhà lớn | Trung bình | Trung bình — trải nghiệm khách hàng kém, tăng ticket hỗ trợ | Node lặp tín hiệu (repeater) — đã nêu ở `02_SMART_HOME_WIFI_PROVISIONING.md` mục 3.1 |
+| AI Recommendation sai/gây phiền (spam đề xuất) | Trung bình ở V3 | Trung bình — giảm trải nghiệm, khách hàng tắt tính năng | Ngưỡng confidence + giới hạn tần suất đề xuất (`03_BACKEND_REFACTOR_SMARTHOME.md` mục 18.6) |
 | Scale ngang thất bại do state in-memory | Cao nếu bỏ qua trước Commercial | Cao — sự cố khi tải tăng đột biến | Redis hoá bắt buộc trước Commercial (Phần 5.1) |
 | Vendor lock-in Cloud Provider quá sớm | Thấp-Trung bình | Trung bình (chi phí chuyển đổi sau này) | Thiết kế Backend không phụ thuộc API độc quyền 1 Cloud cụ thể ở giai đoạn Commercial |
 
@@ -332,7 +332,7 @@ flowchart TB
 |---|---|
 | Cạnh tranh từ Tuya/Xiaomi/Aqara (đã có hệ sinh thái, chi phí sản xuất thấp hơn nhiều nhờ quy mô) | Sản phẩm tự phát triển firmware khó cạnh tranh giá — nên định vị vào phân khúc "tuỳ biến cao"/"bảo mật minh bạch"/"tích hợp AI học thói quen" thay vì cạnh tranh giá thuần |
 | Chi phí chứng nhận (FCC/CE, an toàn điện cho Relay điều khiển thiết bị điện) khi bán hàng thật | Cần tính vào kế hoạch tài chính trước khi bán ra thị trường — không phải rủi ro kỹ thuật nhưng chặn thương mại hoá nếu bỏ qua |
-| Chi phí hỗ trợ khách hàng tăng nhanh nếu Provisioning UX kém | Đây là lý do `SMART_HOME_WIFI_PROVISIONING.md` đầu tư kỹ vào UX "chỉ nhập WiFi 1 lần" — giảm trực tiếp chi phí vận hành dài hạn |
+| Chi phí hỗ trợ khách hàng tăng nhanh nếu Provisioning UX kém | Đây là lý do `02_SMART_HOME_WIFI_PROVISIONING.md` đầu tư kỹ vào UX "chỉ nhập WiFi 1 lần" — giảm trực tiếp chi phí vận hành dài hạn |
 | Phụ thuộc chuỗi cung ứng ESP32 (giá linh kiện biến động) | Rủi ro chung ngành phần cứng, cần đa dạng hoá nhà cung cấp linh kiện khi lên số lượng lớn |
 | Chuyển đổi Matter/Thread quá muộn so với thị trường | Theo dõi tốc độ chuẩn hoá ngành, không cần đi đầu nhưng không nên trễ quá 1-2 năm so với đối thủ lớn |
 
@@ -342,7 +342,7 @@ flowchart TB
 |---|---|
 | Phạm vi V2 quá lớn cho 1 người/1 nhóm nhỏ trong khung thời gian đồ án | Phần 10 — phân loại rõ Must-have/Should-have/Could-have cho buổi bảo vệ |
 | Phần cứng thật (Relay/Camera/Motion Sensor) chưa mua/lắp kịp | Có thể demo bằng **mô phỏng** (simulator gửi MQTT giả lập đúng payload) cho phần chưa có phần cứng, miễn kiến trúc Backend/DB đã đúng — hội đồng đánh giá thiết kế, không chỉ đánh giá phần cứng vật lý |
-| Hội đồng đặt câu hỏi về phần chưa triển khai (AI thật, Matter...) | Trả lời bằng **tài liệu kiến trúc đã có** (`BACKEND_REFACTOR_SMARTHOME.md` mục 18, `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12 v.v.) — chứng minh đã thiết kế đúng, chỉ là quyết định phạm vi hợp lý cho đồ án, không phải thiếu hiểu biết |
+| Hội đồng đặt câu hỏi về phần chưa triển khai (AI thật, Matter...) | Trả lời bằng **tài liệu kiến trúc đã có** (`03_BACKEND_REFACTOR_SMARTHOME.md` mục 18, `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12 v.v.) — chứng minh đã thiết kế đúng, chỉ là quyết định phạm vi hợp lý cho đồ án, không phải thiếu hiểu biết |
 
 ---
 
@@ -362,9 +362,9 @@ flowchart TB
 
 ### 8.2. Nguyên tắc trả nợ
 
-1. **Nợ Security luôn trả trước tiên** — không thương lượng, không hoãn vì lý do tốc độ ra tính năng (đã nhấn mạnh xuyên suốt `SECURITY_ARCHITECTURE.md` Phase 0).
+1. **Nợ Security luôn trả trước tiên** — không thương lượng, không hoãn vì lý do tốc độ ra tính năng (đã nhấn mạnh xuyên suốt `09_SECURITY_ARCHITECTURE.md` Phase 0).
 2. **Nợ Database/Firmware trả sớm hơn nợ Frontend/Mobile** — vì chi phí migrate dữ liệu/thiết bị đã triển khai tăng theo thời gian nhanh hơn nhiều so với chi phí viết lại UI.
-3. **Không vay thêm nợ mới cùng loại khi đang trả nợ cũ** — VD không nên thêm loại thiết bị mới (nợ Firmware kiểu copy-paste) trước khi Phase 0-2 của `EMBEDDED_ARCHITECTURE_ESP_IDF.md` hoàn tất.
+3. **Không vay thêm nợ mới cùng loại khi đang trả nợ cũ** — VD không nên thêm loại thiết bị mới (nợ Firmware kiểu copy-paste) trước khi Phase 0-2 của `08_EMBEDDED_ARCHITECTURE_ESP_IDF.md` hoàn tất.
 4. **Chấp nhận có chủ đích 1 số nợ ở V2** (VD chưa cần Test Coverage đầy đủ, chưa cần CI/CD) — đây là "nợ tốt" trong giai đoạn đồ án, miễn được ghi nhận rõ ràng và có kế hoạch trả ở Commercial (không phải "quên luôn").
 
 ---
@@ -412,7 +412,7 @@ quadrantChart
 | 6 | WiFi Provisioning + ESP-NOW Pairing | Effort cao nhất trong V2 — cần bắt đầu sớm, chạy song song các bước trên |
 | 7 | OTA + Partition 2-slot | Có thể chạy song song bước 6 (khác team/khác thời gian nếu có nhân lực) |
 | 8 | Rule Engine MVP + Notification + Camera | Sau khi nền tảng Home/Room/Device ổn định — các tính năng "trải nghiệm" xây trên nền đã vững |
-| 9 | AI-Ready Event Store/Behavior Log | Có thể làm sớm hơn thứ tự này nếu nhân lực cho phép — **càng sớm càng tốt** vì dữ liệu lịch sử không "hồi tố" được (đã nhấn mạnh ở `BACKEND_REFACTOR_SMARTHOME.md` mục 18.9) |
+| 9 | AI-Ready Event Store/Behavior Log | Có thể làm sớm hơn thứ tự này nếu nhân lực cho phép — **càng sớm càng tốt** vì dữ liệu lịch sử không "hồi tố" được (đã nhấn mạnh ở `03_BACKEND_REFACTOR_SMARTHOME.md` mục 18.9) |
 | 10 | Logging/Monitoring đầy đủ | Có thể làm cuối cùng trong V2 — không chặn tính năng khác, nhưng bắt buộc phải xong trước khi bảo vệ để chứng minh khả năng vận hành |
 
 ---
@@ -450,7 +450,7 @@ quadrantChart
 | Hạng mục | Cách trình bày trong buổi bảo vệ |
 |---|---|
 | Camera Live View | Trình bày kiến trúc Local-AP Bridge + wireframe, có thể demo bằng ảnh snapshot tĩnh thay vì live stream thật nếu thiếu thời gian |
-| AI-Ready Database/Backend đầy đủ (Event Store, Feature Store, Recommendation Engine) | Trình bày bằng tài liệu `BACKEND_REFACTOR_SMARTHOME.md` mục 18 + `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12 + demo 1 bảng `events`/`user_behavior_logs` có dữ liệu mẫu, **không cần** model AI chạy thật |
+| AI-Ready Database/Backend đầy đủ (Event Store, Feature Store, Recommendation Engine) | Trình bày bằng tài liệu `03_BACKEND_REFACTOR_SMARTHOME.md` mục 18 + `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12 + demo 1 bảng `events`/`user_behavior_logs` có dữ liệu mẫu, **không cần** model AI chạy thật |
 | Logging 10 loại tách bảng | Có thể chỉ triển khai 2-3 loại quan trọng nhất thật (Security Log, Provision Log), còn lại trình bày thiết kế |
 | Monitoring realtime (WebSocket) | Có thể tạm dùng polling REST như hiện tại, trình bày thiết kế WebSocket Gateway là hướng nâng cấp tiếp theo |
 | Secure Boot / Flash Encryption | Chỉ cần trình bày trong tài liệu là "Reserved cho giai đoạn Production" — hội đồng hiểu đây là quyết định đúng đắn (không phải thiếu sót) khi biết phân biệt "cần cho demo" và "cần cho production" |

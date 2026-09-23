@@ -1,12 +1,12 @@
 
-# EMBEDDED_ARCHITECTURE_ESP_IDF.md
+# 08_EMBEDDED_ARCHITECTURE_ESP_IDF.md
 
 > Thiết kế lại Firmware — từ **PlatformIO + Arduino Framework (prototype)** sang **ESP-IDF + CMake + FreeRTOS (Commercial Smart Home Firmware)**.
 > Vai trò biên soạn: Principal Embedded Architect / IoT Firmware Architect / ESP-IDF Expert / RTOS Expert / Solution Architect.
 > Tài liệu **chỉ thiết kế kiến trúc — không viết code, không migrate code**. Ràng buộc chặt với các tài liệu đã có, không lặp lại logic nghiệp vụ đã thiết kế mà **hiện thực hoá ở tầng firmware**:
-> - [`SMART_HOME_WIFI_PROVISIONING.md`](SMART_HOME_WIFI_PROVISIONING.md) — Network Topology (Gateway↔Node qua ESP-NOW, Gateway↔Camera qua Local-AP), Key Hierarchy, Provisioning/Pairing flow.
-> - [`BACKEND_REFACTOR_SMARTHOME.md`](BACKEND_REFACTOR_SMARTHOME.md) — MQTT Topic Design (Phần 10), OTA Design (Phần 11).
-> - [`BACKEND_REFACTOR_SMARTHOME.md`](BACKEND_REFACTOR_SMARTHOME.md) mục 18 — Event Catalog cần firmware phát sinh (`BrightnessChangedEvent`, `MotionDetectedEvent`...).
+> - [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — Network Topology (Gateway↔Node qua ESP-NOW, Gateway↔Camera qua Local-AP), Key Hierarchy, Provisioning/Pairing flow.
+> - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) — MQTT Topic Design (Phần 10), OTA Design (Phần 11).
+> - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) mục 18 — Event Catalog cần firmware phát sinh (`BrightnessChangedEvent`, `MotionDetectedEvent`...).
 >
 > Toàn bộ source code firmware thực tế đã được đọc: `firmware/gateway-node/{platformio.ini, include/config_gw.h, src/main.cpp, lib/{wifi_manager,mqtt_client,forwarder,hmac_util,ntp_sync,sensor_registry}}`, `firmware/sensor-node/{platformio.ini, include/config_1.h, src/main.cpp, lib/{wifi_manager,mqtt_sender,sensor_reader,hmac_util,ntp_sync}}`, và đối chiếu `firmware/sensor-node-2` (xác nhận bằng `diff` là bản sao gần như y hệt `sensor-node`, chỉ khác `device_id`/`secret_key`/IP broker). Thư mục `firmware/ESP32-S3-Touch-LCD-7B/` là SDK/ví dụ tham khảo của nhà cung cấp board (font, LCD driver, ví dụ I2C/CAN...) — **không phải firmware sản phẩm**, không thuộc phạm vi review.
 
@@ -74,15 +74,15 @@ Chỉ có 2 driver đơn giản: DHT22 (qua thư viện Adafruit, `sensor_reader
 
 | Kênh | Hiện trạng |
 |---|---|
-| WiFi | `WiFi.begin(WIFI_SSID, WIFI_PASS)` — **SSID/Password hard-code trực tiếp trong `config_1.h`/`config_gw.h`, compile vào firmware, commit vào source control** (`WIFI_SSID "Tang 4"`, `WIFI_PASS "19581958"` — đã xác nhận đọc trực tiếp trong file). Đây là lỗ hổng nghiêm trọng cho sản phẩm thương mại: mọi thiết bị build từ cùng firmware sẽ mang **cùng 1 WiFi credential** của mạng dev nội bộ — hoàn toàn không dùng được cho khách hàng thật (đúng vấn đề mà `SMART_HOME_WIFI_PROVISIONING.md` đã giải quyết ở tầng thiết kế, nhưng **firmware thực tế hiện tại không hề triển khai** cơ chế Provisioning nào — không có SoftAP, không có BLE, không có NVS lưu WiFi runtime). |
+| WiFi | `WiFi.begin(WIFI_SSID, WIFI_PASS)` — **SSID/Password hard-code trực tiếp trong `config_1.h`/`config_gw.h`, compile vào firmware** (`WIFI_SSID`, `WIFI_PASS` chứa giá trị thật — đã xác nhận đọc trực tiếp trong file; các file này đã được `.gitignore` loại khỏi git nhưng vẫn nằm plaintext trong source tree và trong binary). Đây là lỗ hổng nghiêm trọng cho sản phẩm thương mại: mọi thiết bị build từ cùng firmware sẽ mang **cùng 1 WiFi credential** của mạng dev nội bộ — hoàn toàn không dùng được cho khách hàng thật (đúng vấn đề mà `02_SMART_HOME_WIFI_PROVISIONING.md` đã giải quyết ở tầng thiết kế, nhưng **firmware thực tế hiện tại không hề triển khai** cơ chế Provisioning nào — không có SoftAP, không có BLE, không có NVS lưu WiFi runtime). |
 | MQTT | `PubSubClient` (thư viện Arduino phổ biến nhưng **không hỗ trợ TLS có kiểm chứng chứng chỉ đầy đủ** dễ dàng như `esp-mqtt` của ESP-IDF) — kết nối không TLS (`WiFiClient` thuần, không `WiFiClientSecure`), khớp với cấu hình Mosquitto `allow_anonymous true` không TLS đã nêu ở các tài liệu trước. |
-| ESP-NOW | **Không tồn tại trong code hiện tại** — dù đã được `SMART_HOME_WIFI_PROVISIONING.md` chọn làm giao thức chính Gateway↔Node (Phần 3.1), firmware thực tế chưa triển khai; mọi Sensor Node hiện tại kết nối **thẳng vào WiFi thật** (`WiFi.begin` trong `sensor-node`), vi phạm trực tiếp nguyên tắc "chỉ Gateway giữ WiFi thật" đã chốt ở tài liệu đó — **đây là khoảng cách lớn nhất giữa thiết kế đã có và code hiện tại**, không phải lỗi thiết kế mà là phần **chưa triển khai**. |
+| ESP-NOW | **Không tồn tại trong code hiện tại** — dù đã được `02_SMART_HOME_WIFI_PROVISIONING.md` chọn làm giao thức chính Gateway↔Node (Phần 3.1), firmware thực tế chưa triển khai; mọi Sensor Node hiện tại kết nối **thẳng vào WiFi thật** (`WiFi.begin` trong `sensor-node`), vi phạm trực tiếp nguyên tắc "chỉ Gateway giữ WiFi thật" đã chốt ở tài liệu đó — **đây là khoảng cách lớn nhất giữa thiết kế đã có và code hiện tại**, không phải lỗi thiết kế mà là phần **chưa triển khai**. |
 | BLE | Không tồn tại (`about_page.dart` phía Mobile có nhắc "Kết nối Bluetooth" nhưng đó chỉ là placeholder UI, chưa có gì tương ứng ở firmware). |
 | HTTP | Dùng cho `fetchSensorList()` (`sensor_registry.cpp`) — gọi `BACKEND_SENSORS_URL` không TLS (`http://`), đúng với lỗ hổng "rò rỉ secret_key toàn hệ thống" đã nêu ở `sensors.routes.ts` (backend trả plaintext secret cho endpoint này). |
 
 ### 1.6. MQTT chi tiết
 
-Gateway giữ **2 kết nối `PubSubClient` song song** (`mqttSubClient` cho Broker 1, `mqttPubClient` cho Broker 2 — `mqtt_client.cpp:9-14`) trong cùng 1 task, tự quản lý reconnect bằng `millis()` polling riêng cho từng broker (`mqtt_client.cpp:97-116`). Không có QoS > 1 (PubSubClient chỉ hỗ trợ QoS 0/1), không có Last Will and Testament (LWT) được cấu hình — nghĩa là khi Gateway mất kết nối đột ngột (rút điện, crash), **Backend không có cách nào biết ngay lập tức** ngoài chờ hết hạn `last_seen` (đã nêu ở `BACKEND_REFACTOR_SMARTHOME.md` — thiếu Heartbeat/LWT).
+Gateway giữ **2 kết nối `PubSubClient` song song** (`mqttSubClient` cho Broker 1, `mqttPubClient` cho Broker 2 — `mqtt_client.cpp:9-14`) trong cùng 1 task, tự quản lý reconnect bằng `millis()` polling riêng cho từng broker (`mqtt_client.cpp:97-116`). Không có QoS > 1 (PubSubClient chỉ hỗ trợ QoS 0/1), không có Last Will and Testament (LWT) được cấu hình — nghĩa là khi Gateway mất kết nối đột ngột (rút điện, crash), **Backend không có cách nào biết ngay lập tức** ngoài chờ hết hạn `last_seen` (đã nêu ở `03_BACKEND_REFACTOR_SMARTHOME.md` — thiếu Heartbeat/LWT).
 
 ### 1.7. Memory
 
@@ -98,7 +98,7 @@ Gateway giữ **2 kết nối `PubSubClient` song song** (`mqttSubClient` cho Br
 
 | Điểm tốt (đáng giữ lại) | Điểm cần cải thiện |
 |---|---|
-| Comment tiếng Việt rõ ràng, giải thích đúng lý do kỹ thuật (VD lý do dùng `StaticJsonDocument`, lý do offset NTP) | Cấu hình nhạy cảm (WiFi, Secret Key) nằm trong file `.h` **compile vào binary và commit vào git** — không tách biệt build-time config khỏi provisioning-time credential |
+| Comment tiếng Việt rõ ràng, giải thích đúng lý do kỹ thuật (VD lý do dùng `StaticJsonDocument`, lý do offset NTP) | Cấu hình nhạy cảm (WiFi, Secret Key) nằm trong file `.h` **compile vào binary** (file đã được `.gitignore` loại khỏi git, nhưng giá trị vẫn nằm plaintext trong source tree và binary) — không tách biệt build-time config khỏi provisioning-time credential |
 | `safeEq64()` trong `forwarder.cpp:13-17` — so sánh hằng thời gian (constant-time) tự viết tay đúng nguyên tắc chống timing attack, nhất quán với triết lý bảo mật ở Backend (`hmacService.ts` dùng `timingSafeEqual`) | 2 bản `hmac_util` khác API cho cùng 1 thuật toán (mục 1.2) |
 | `registryFindSecret()` có fallback 2 tầng (danh sách động từ backend → danh sách cứng `KNOWN_SENSORS`) — thiết kế resilient hợp lý cho giai đoạn demo | `KNOWN_SENSORS[]` hard-code secret key plaintext ngay trong file cấu hình (`config_gw.h:74-79`) — trùng lặp đúng vấn đề "rò rỉ secret" đã nêu ở Backend, giờ xác nhận **firmware cũng lưu bản sao plaintext ở phía thiết bị** |
 | Module hoá theo `lib/<name>` rõ ràng, mỗi module 1 trách nhiệm (WiFi/MQTT/HMAC/NTP/Registry/Forwarder) — **đúng tinh thần Component-based** dù chưa dùng ESP-IDF component thật | Không có test nào (`test/` không tồn tại trong cả 2 project) — không thể unit test do phụ thuộc cứng vào `Arduino.h`/`WiFi.h` toàn cục, không có interface trừu tượng cho driver |
@@ -107,7 +107,7 @@ Gateway giữ **2 kết nối `PubSubClient` song song** (`mqttSubClient` cho Br
 
 | # | Vấn đề | Mức độ |
 |---|---|---|
-| 1 | WiFi SSID/Password hard-code, compile vào binary, commit vào git | Nghiêm trọng |
+| 1 | WiFi SSID/Password hard-code, compile vào binary (file config đã `.gitignore`, không commit — nhưng vẫn plaintext trong binary) | Nghiêm trọng |
 | 2 | Gateway/Device Secret lưu plaintext trong file cấu hình, không mã hoá | Nghiêm trọng |
 | 3 | Không có Provisioning nào (SoftAP/BLE) — mỗi thiết bị phải flash riêng WiFi | Nghiêm trọng — chặn bán hàng loạt |
 | 4 | Không có ESP-NOW — Sensor Node vẫn nối thẳng WiFi thật, trái thiết kế đã chốt | Nghiêm trọng |
@@ -317,7 +317,7 @@ flowchart LR
 | `ota_task` | 3 | 4096B (cần buffer tải firmware) | Core 1 (tách khỏi mạng để không chặn heartbeat khi ghi flash) | Tải firmware, verify checksum, ghi OTA partition, relay OTA xuống Node qua ESP-NOW |
 | `telemetry_forward_task` | 4 | 3072B | Core 1 | Nhận dữ liệu từ `espnow_task` qua Queue, verify HMAC 2 lớp, publish MQTT (thay thế logic `forwardSensorData()` hiện tại — vẫn tuần tự trong 1 hàm nhưng nay chạy trong task riêng, không chặn `wifi_task`/`mqtt_task`) |
 | `heartbeat_task` | 3 | 2048B | Core 1 | Định kỳ publish MQTT `heartbeat` topic (RSSI, uptime, node_count) — tính năng **hoàn toàn chưa có** ở firmware hiện tại |
-| `automation_task` (reserved) | 3 | 4096B | Core 1 | Đánh giá rule cục bộ khi mất kết nối Cloud tạm thời (roadmap dài hạn, `BACKEND_REFACTOR_SMARTHOME.md` Phần 12.2) |
+| `automation_task` (reserved) | 3 | 4096B | Core 1 | Đánh giá rule cục bộ khi mất kết nối Cloud tạm thời (roadmap dài hạn, `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 12.2) |
 | `logger_task` | 2 (thấp) | 3072B | Core 1 | Ghi log ra Serial/flash log partition theo hàng đợi, không chặn task khác đang cần in log gấp |
 | `diagnostics_task` | 1 (thấp nhất) | 2048B | Core 1 | Định kỳ đo heap/stack watermark, đẩy vào `heartbeat_task` để báo cáo |
 | `watchdog_task` (hoặc dùng Task Watchdog Timer tích hợp IDF) | 2 | 1536B | — | Subscribe (feed) từ mọi task quan trọng; nếu 1 task không feed đúng hạn → reset có kiểm soát |
@@ -356,7 +356,7 @@ flowchart LR
     MQTT_LOST["MQTT_DISCONNECTED"] -.-> RETRY["Reconnect Backoff"]
 ```
 
-### 9.2. Danh mục Event nội bộ firmware (không nhầm với Event Catalog Backend ở `BACKEND_REFACTOR_SMARTHOME.md` mục 18.2 — đây là event **nội bộ giữa các component firmware**, một phần trong số đó sẽ **kích hoạt** việc gửi Event lên Backend)
+### 9.2. Danh mục Event nội bộ firmware (không nhầm với Event Catalog Backend ở `03_BACKEND_REFACTOR_SMARTHOME.md` mục 18.2 — đây là event **nội bộ giữa các component firmware**, một phần trong số đó sẽ **kích hoạt** việc gửi Event lên Backend)
 
 | Event (esp_event) | Publisher | Subscriber |
 |---|---|---|
@@ -382,7 +382,7 @@ flowchart LR
 | **Provision Manager** | Điều phối BLE/SoftAP Provisioning (Phần 12) | Hoàn toàn mới — hiện tại không có |
 | **Pairing Manager** | Điều phối ghép nối Node mới, whitelist theo `home_id` (Phần 13) | Hoàn toàn mới |
 | **WiFi Manager** | Kết nối WiFi Station bằng credential từ NVS (không hard-code) | Nâng cấp từ `wifi_manager.cpp` hiện tại — giữ nguyên tư duy retry/backoff, đổi nguồn credential |
-| **MQTT Manager** | Kết nối TLS Broker 2, publish/subscribe theo Topic Design mới (`BACKEND_REFACTOR_SMARTHOME.md` Phần 10) | Nâng cấp từ `mqtt_client.cpp` — thêm TLS, LWT, đổi topic có `home_id` |
+| **MQTT Manager** | Kết nối TLS Broker 2, publish/subscribe theo Topic Design mới (`03_BACKEND_REFACTOR_SMARTHOME.md` Phần 10) | Nâng cấp từ `mqtt_client.cpp` — thêm TLS, LWT, đổi topic có `home_id` |
 | **Device Manager** | Quản lý danh sách Node đã pair: UUID, Type, Room, Status, Firmware version, RSSI, Battery (nếu có), Last Seen (Phần 10.1 chi tiết bên dưới) | Nâng cấp từ `sensor_registry.cpp` — mở rộng từ "chỉ lưu secret" thành đầy đủ metadata |
 | **Room Manager** | Cache cấu trúc Room/Device đồng bộ từ Cloud (để Gateway biết Node nào thuộc phòng nào mà không cần hỏi Cloud mỗi lần) | Hoàn toàn mới |
 | **Heartbeat Manager** | Định kỳ publish RSSI/uptime/node_count | Hoàn toàn mới — hiện tại suy luận online qua `last_seen` gián tiếp, không có heartbeat riêng |
@@ -405,7 +405,7 @@ flowchart LR
 | `firmware_version` | Version hiện tại của Node (để quyết định có cần OTA hay không) |
 | `rssi` | Cường độ tín hiệu ESP-NOW từ Node này |
 | `battery` | % pin (nếu Node chạy pin — Garden/Balcony) |
-| `last_seen` | Thời điểm nhận tín hiệu gần nhất (dùng để tự động đưa Node "mất kết nối" — khớp cơ chế 24h ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 9.2) |
+| `last_seen` | Thời điểm nhận tín hiệu gần nhất (dùng để tự động đưa Node "mất kết nối" — khớp cơ chế 24h ở `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 9.2) |
 
 ---
 
@@ -418,7 +418,7 @@ Mỗi Node (Sensor/Relay/Camera) theo đúng 6 lớp yêu cầu:
 | **Application Layer** | `node_app` — state machine: `UNPAIRED → PAIRING → PAIRED_IDLE → ACTIVE ↔ OTA` |
 | **Device Layer** | Logic nghiệp vụ loại thiết bị cụ thể (VD: Relay Node biết "kênh 1 = đèn, kênh 2 = quạt", Camera Node biết "chụp khi nhận lệnh hoặc khi Motion Driver trigger") |
 | **Driver Layer** | `driver_relay`/`driver_dht22`/`driver_motion`/`driver_camera` — chỉ biết GPIO/I2C/SPI, không biết ESP-NOW/MQTT |
-| **Communication Layer** | `espnow_manager` (giao tiếp với Gateway) — Node **không** có `wifi_manager`/`mqtt_manager` riêng (đúng nguyên tắc Phương án C đã chọn ở `SMART_HOME_WIFI_PROVISIONING.md`, ngoại trừ Camera Node dùng WiFi Station trỏ vào Local-AP của Gateway) |
+| **Communication Layer** | `espnow_manager` (giao tiếp với Gateway) — Node **không** có `wifi_manager`/`mqtt_manager` riêng (đúng nguyên tắc Phương án C đã chọn ở `02_SMART_HOME_WIFI_PROVISIONING.md`, ngoại trừ Camera Node dùng WiFi Station trỏ vào Local-AP của Gateway) |
 | **Storage Layer** | `nvs_manager` — lưu `device_secret`, `paired_gateway_mac`, `session_key_version` |
 | **OTA Layer** | `ota_manager` (client — nhận firmware relay từ Gateway) |
 | **Logger** | Tối giản, ghi log cục bộ ít hơn Gateway (tiết kiệm tài nguyên) |
@@ -428,7 +428,7 @@ Mỗi Node (Sensor/Relay/Camera) theo đúng 6 lớp yêu cầu:
 
 ## 12. PROVISION FLOW
 
-> Chi tiết đầy đủ (BLE/SoftAP, ECDH handshake) đã có ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 8. Phần dưới là **ánh xạ sang component/task ESP-IDF cụ thể**.
+> Chi tiết đầy đủ (BLE/SoftAP, ECDH handshake) đã có ở `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 8. Phần dưới là **ánh xạ sang component/task ESP-IDF cụ thể**.
 
 ```mermaid
 sequenceDiagram
@@ -523,7 +523,7 @@ sequenceDiagram
     end
 ```
 
-**Điểm mấu chốt khác biệt so với thiết kế OTA ở tầng Backend (`BACKEND_REFACTOR_SMARTHOME.md` Phần 11):** tài liệu đó thiết kế luồng rollout từ góc nhìn Backend/DB; tài liệu này bổ sung **chi tiết cơ chế Rollback tự động ở tầng bootloader** — đây là tính năng **chỉ ESP-IDF cung cấp sẵn**, không cần Backend "ra lệnh rollback" trong trường hợp thiết bị tự phát hiện lỗi ngay sau khi flash (an toàn ngay cả khi thiết bị mất kết nối Internet ngay sau khi cập nhật).
+**Điểm mấu chốt khác biệt so với thiết kế OTA ở tầng Backend (`03_BACKEND_REFACTOR_SMARTHOME.md` Phần 11):** tài liệu đó thiết kế luồng rollout từ góc nhìn Backend/DB; tài liệu này bổ sung **chi tiết cơ chế Rollback tự động ở tầng bootloader** — đây là tính năng **chỉ ESP-IDF cung cấp sẵn**, không cần Backend "ra lệnh rollback" trong trường hợp thiết bị tự phát hiện lỗi ngay sau khi flash (an toàn ngay cả khi thiết bị mất kết nối Internet ngay sau khi cập nhật).
 
 ---
 
@@ -569,7 +569,7 @@ sequenceDiagram
 | `automation_cache` (reserved) | Rule cục bộ đồng bộ từ Cloud để đánh giá khi mất mạng tạm thời | Automation Engine (roadmap dài hạn) |
 | `diag` | `last_restart_reason`, `boot_count` | Diagnostics |
 
-**Nguyên tắc:** Namespace tách theo **domain sở hữu** (giống nguyên tắc tách bảng Database ở `DATABASE_REFACTOR_SMARTHOME.md`) — không gộp mọi key vào 1 namespace `"config"` chung chung; mọi giá trị nhạy cảm (`password`, `device_secret`, `session_key`) đọc/ghi qua `security_manager` (có bật NVS Encryption — Phần 19), không component nào khác được truy cập trực tiếp.
+**Nguyên tắc:** Namespace tách theo **domain sở hữu** (giống nguyên tắc tách bảng Database ở `04_DATABASE_REFACTOR_SMARTHOME.md`) — không gộp mọi key vào 1 namespace `"config"` chung chung; mọi giá trị nhạy cảm (`password`, `device_secret`, `session_key`) đọc/ghi qua `security_manager` (có bật NVS Encryption — Phần 19), không component nào khác được truy cập trực tiếp.
 
 ---
 
@@ -593,7 +593,7 @@ sequenceDiagram
 
 ## 18. AI READY DESIGN
 
-> Ánh xạ trực tiếp tới Event Catalog đã thiết kế ở `BACKEND_REFACTOR_SMARTHOME.md` mục 18.2 — firmware là **nơi phát sinh** các Event đó, không tự lưu trữ/xử lý AI (AI hoàn toàn ở phía Backend).
+> Ánh xạ trực tiếp tới Event Catalog đã thiết kế ở `03_BACKEND_REFACTOR_SMARTHOME.md` mục 18.2 — firmware là **nơi phát sinh** các Event đó, không tự lưu trữ/xử lý AI (AI hoàn toàn ở phía Backend).
 
 ### 18.1. Nguyên tắc
 
@@ -616,7 +616,7 @@ flowchart LR
     DEVMGR --> ESPNOW["espnow_manager (Node→Gateway)"]
     ESPNOW --> GWDEVMGR["device_manager (Gateway)"]
     GWDEVMGR --> MQTT["mqtt_manager"]
-    MQTT -->|"telemetry/status topic,\nkèm đủ ngữ cảnh Phần 18.1"| BACKEND["Backend Device Ingest Service\n(BACKEND_REFACTOR_SMARTHOME.md mục 18)"]
+    MQTT -->|"telemetry/status topic,\nkèm đủ ngữ cảnh Phần 18.1"| BACKEND["Backend Device Ingest Service\n(03_BACKEND_REFACTOR_SMARTHOME.md mục 18)"]
 ```
 
 **Không có bất kỳ xử lý AI/thống kê nào trên firmware** — đúng nguyên tắc "AI hoàn toàn ở Backend, firmware chỉ là nguồn dữ liệu trung thực nhất có thể" (giữ firmware đơn giản, dễ kiểm chứng, không tốn tài nguyên MCU hạn chế cho việc không phải sở trường của nó).
@@ -629,7 +629,7 @@ flowchart LR
 |---|---|---|
 | **TLS cho MQTT** | `esp-mqtt` (ESP-IDF) hỗ trợ TLS mutual/server-auth qua `esp_tls` — chứng chỉ CA nhúng vào firmware hoặc lưu NVS | Hiện tại `PubSubClient` không TLS (mục 1.5) |
 | **Device Secret / Gateway Secret** | Lưu trong NVS namespace `identity`, **mã hoá bằng NVS Encryption** (khoá lưu ở `nvs_keys` partition, bản thân partition đó được bảo vệ bởi Flash Encryption) | Hiện tại plaintext trong file `.h` compile vào binary (mục 1.10 #2) |
-| **Secure Provision** | ECDH handshake (đã thiết kế ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 6) — WiFi Password không bao giờ truyền dạng rõ qua BLE/SoftAP | Hiện tại không có Provisioning nào — WiFi hard-code |
+| **Secure Provision** | ECDH handshake (đã thiết kế ở `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 6) — WiFi Password không bao giờ truyền dạng rõ qua BLE/SoftAP | Hiện tại không có Provisioning nào — WiFi hard-code |
 | **NVS Encryption** | Bật qua `menuconfig` (`CONFIG_NVS_ENCRYPTION`), khoá sinh ngẫu nhiên lúc xuất xưởng, lưu tách biệt `nvs_keys` partition | Không tồn tại (Arduino không có tương đương dễ dùng) |
 | **Flash Encryption (Reserved)** | Bật ở bản Production (không bật ở bản Development để giữ khả năng debug/re-flash nhanh trong giai đoạn phát triển) — mã hoá toàn bộ nội dung flash bằng khoá AES gắn với chip (eFuse), chống dump firmware vật lý | Chưa có |
 | **Secure Boot V2 (Reserved)** | Ký firmware bằng khoá RSA/ECDSA quản lý qua quy trình xưởng (HSM hoặc ký ly khai offline) — bootloader từ chối chạy firmware không đúng chữ ký | Chưa có |
@@ -662,13 +662,13 @@ flowchart LR
 | **Phase 1 — NVS hoá cấu hình** | Chuyển toàn bộ WiFi/Secret từ hard-code sang NVS (Phần 16) — **chưa cần Provisioning UI**, tạm thời ghi NVS qua `idf.py` monitor console/1 tool nội bộ cho giai đoạn dev | Vá vấn đề bảo mật nghiêm trọng nhất (#1, #2) sớm nhất có thể, trước cả khi có Provisioning UI hoàn chỉnh |
 | **Phase 2 — Task hoá kiến trúc** | Tách `wifi`/`mqtt`/`telemetry_forward` thành FreeRTOS Task + Queue riêng (Phần 8), thay gọi hàm trực tiếp bằng `esp_event` (Phần 9) | Nền tảng bắt buộc trước khi thêm OTA/Provisioning/ESP-NOW — thêm task mới vào kiến trúc event-driven dễ hơn nhiều so với chèn vào super-loop |
 | **Phase 3 — OTA + Partition 2-slot** | Triển khai `ota_manager` + Partition Table (Phần 15) + App Rollback | Điều kiện tiên quyết để có thể sửa lỗi từ xa cho fleet đã bán ra — làm sớm giảm rủi ro kinh doanh |
-| **Phase 4 — Provisioning (BLE/SoftAP) + Pairing** | Triển khai đầy đủ theo `SMART_HOME_WIFI_PROVISIONING.md` Phần 7-9 | Điều kiện để bán hàng loạt (không phải flash tay từng thiết bị) |
+| **Phase 4 — Provisioning (BLE/SoftAP) + Pairing** | Triển khai đầy đủ theo `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 7-9 | Điều kiện để bán hàng loạt (không phải flash tay từng thiết bị) |
 | **Phase 5 — ESP-NOW Gateway↔Node** | Chuyển Sensor Node từ WiFi Station trực tiếp sang ESP-NOW qua Gateway (Phương án C đã chọn) | Đây là thay đổi kiến trúc mạng lớn nhất — cần test kỹ tầm phủ ESP-NOW thực tế trước khi rollout |
 | **Phase 6 — Security hardening** | Bật NVS Encryption, TLS MQTT, (Reserved) Flash Encryption + Secure Boot | Bắt buộc trước khi bán ra thị trường thật — không nên trì hoãn tới "sau khi có khách hàng" |
-| **Phase 7 — AI-Ready payload** | Bổ sung `previous_state`/`source`/ngữ cảnh môi trường vào mọi Event gửi lên (Phần 18) | Càng làm sớm càng tích luỹ được nhiều dữ liệu hành vi cho AI (đúng nguyên tắc đã nêu ở `BACKEND_REFACTOR_SMARTHOME.md` mục 18.9 — dữ liệu lịch sử không "ghi hồi tố" được) |
+| **Phase 7 — AI-Ready payload** | Bổ sung `previous_state`/`source`/ngữ cảnh môi trường vào mọi Event gửi lên (Phần 18) | Càng làm sớm càng tích luỹ được nhiều dữ liệu hành vi cho AI (đúng nguyên tắc đã nêu ở `03_BACKEND_REFACTOR_SMARTHOME.md` mục 18.9 — dữ liệu lịch sử không "ghi hồi tố" được) |
 | **Phase 8 — Diagnostics & Watchdog đầy đủ** | Heap/Task/RSSI/Restart Reason, Task Watchdog Timer | Hoàn thiện khả năng vận hành/điều tra sự cố ở quy mô fleet lớn |
 | **Phase 9 — Mở rộng loại thiết bị** | `driver_relay`, `driver_motion`, `driver_camera`, `driver_door_contact` | Phụ thuộc quyết định phần cứng cụ thể từng dòng sản phẩm — có thể chạy song song Phase 5-8 nếu đội ngũ đủ lớn |
-| **Phase 10 — Automation Engine cục bộ (dài hạn)** | Đánh giá rule đơn giản ngay trên Gateway khi mất kết nối Cloud tạm thời | Không MVP bắt buộc — chỉ làm sau khi Cloud Automation (`BACKEND_REFACTOR_SMARTHOME.md`) đã ổn định |
+| **Phase 10 — Automation Engine cục bộ (dài hạn)** | Đánh giá rule đơn giản ngay trên Gateway khi mất kết nối Cloud tạm thời | Không MVP bắt buộc — chỉ làm sau khi Cloud Automation (`03_BACKEND_REFACTOR_SMARTHOME.md`) đã ổn định |
 
 **Nguyên tắc xuyên suốt:** Phase 0-2 là nền tảng bắt buộc tuần tự (không thể làm OTA/Provisioning tốt trên kiến trúc super-loop); Phase 3 và Phase 4 có thể chạy song song bởi 2 nhóm khác nhau sau khi Phase 2 hoàn tất; Phase 6 (Security) tuyệt đối không lùi tới sau khi đã bán hàng — phải hoàn tất trước lô hàng thương mại đầu tiên.
 
@@ -684,5 +684,5 @@ flowchart LR
 6. **Mock Driver / Mock MQTT / Mock WiFi cho Unit Test:** thiết kế mọi Manager qua **interface hàm con trỏ hoặc `Kconfig`-switchable implementation** (tương tự cách ESP-IDF hỗ trợ build cho target `linux` để chạy Unit Test trên máy host không cần phần cứng thật) — Driver Layer định nghĩa interface trừu tượng (`typedef struct { ... } relay_driver_ops_t`), test dùng bản mock implement cùng interface đó.
 7. **Restart Reason phải được log ngay dòng đầu tiên sau boot** — đây là dữ liệu rẻ nhất nhưng giá trị điều tra sự cố cao nhất khi vận hành fleet hàng nghìn thiết bị.
 8. **Security Log và AI Behavior Log không bao giờ bị ghi đè** khi hàng đợi log cục bộ đầy — mọi loại log khác có thể hy sinh trước.
-9. **`source` (manual/automation) phải là trường bắt buộc trong mọi lệnh điều khiển gửi xuống Node** — thiếu trường này ở tầng firmware sẽ khiến toàn bộ nỗ lực AI-Ready ở tầng Backend/Database (`BACKEND_REFACTOR_SMARTHOME.md` mục 18, `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12) mất đi tín hiệu quan trọng nhất mà không cách nào bù đắp lại được sau này.
+9. **`source` (manual/automation) phải là trường bắt buộc trong mọi lệnh điều khiển gửi xuống Node** — thiếu trường này ở tầng firmware sẽ khiến toàn bộ nỗ lực AI-Ready ở tầng Backend/Database (`03_BACKEND_REFACTOR_SMARTHOME.md` mục 18, `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12) mất đi tín hiệu quan trọng nhất mà không cách nào bù đắp lại được sau này.
 10. **Không bật Flash Encryption/Secure Boot ở bản Development** — chỉ bật ở quy trình build Production chính thức, vì bật sớm sẽ làm chậm đáng kể vòng lặp debug/re-flash hàng ngày của đội ngũ phát triển.

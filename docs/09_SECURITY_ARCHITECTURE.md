@@ -1,11 +1,11 @@
 
-# SECURITY_ARCHITECTURE.md
+# 09_SECURITY_ARCHITECTURE.md
 
 > Kiến trúc bảo mật toàn diện cho **Commercial Smart Home Platform** — không chỉ đáp ứng yêu cầu đồ án, mà chịu được áp lực của sản phẩm thật bán ra thị trường với hàng nghìn khách hàng.
 > Vai trò biên soạn: Principal Security Architect / IoT Security Architect / Cyber Security Engineer / Embedded Security Engineer / Solution Architect.
 > Tài liệu **chỉ thiết kế kiến trúc — không viết code**. Đây là **lớp tổng hợp bảo mật xuyên suốt**, hợp nhất các phần bảo mật đã rải rác ở 6 tài liệu trước thành 1 mô hình duy nhất, nhất quán, đồng thời bổ sung Threat Model/Attack Scenarios/Layer Model chưa từng được trình bày tập trung:
-> - [`PROJECT_ANALYSIS_SMARTHOME.md`](PROJECT_ANALYSIS_SMARTHOME.md), [`SMART_HOME_PRODUCT_ARCHITECTURE.md`](SMART_HOME_PRODUCT_ARCHITECTURE.md), [`SMART_HOME_WIFI_PROVISIONING.md`](SMART_HOME_WIFI_PROVISIONING.md) — HMAC 2 lớp, Key Hierarchy, Claim/Activation Token.
-> - [`BACKEND_REFACTOR_SMARTHOME.md`](BACKEND_REFACTOR_SMARTHOME.md) Phần 7-8-17, [`DATABASE_REFACTOR_SMARTHOME.md`](DATABASE_REFACTOR_SMARTHOME.md) Phần 12, [`MOBILE_APP_ARCHITECTURE.md`](MOBILE_APP_ARCHITECTURE.md) Phần 17, [`EMBEDDED_ARCHITECTURE_ESP_IDF.md`](EMBEDDED_ARCHITECTURE_ESP_IDF.md) Phần 19 — thiết kế bảo mật riêng từng tầng.
+> - [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md), [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md), [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — HMAC 2 lớp, Key Hierarchy, Claim/Activation Token.
+> - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) Phần 7-8-17, [`04_DATABASE_REFACTOR_SMARTHOME.md`](04_DATABASE_REFACTOR_SMARTHOME.md) Phần 12, [`07_MOBILE_APP_ARCHITECTURE.md`](07_MOBILE_APP_ARCHITECTURE.md) Phần 17, [`08_EMBEDDED_ARCHITECTURE_ESP_IDF.md`](08_EMBEDDED_ARCHITECTURE_ESP_IDF.md) Phần 19 — thiết kế bảo mật riêng từng tầng.
 >
 > Toàn bộ source code hệ thống (Backend 22 file, Database schema gốc, Frontend ~60 file, Mobile 16 file, Firmware gateway-node/sensor-node) đã được đọc đầy đủ trong quá trình biên soạn các tài liệu trên — phần Review dưới đây tổng hợp lại đúng các bằng chứng cụ thể (file:line) đã phát hiện, nhìn dưới góc độ bảo mật xuyên suốt toàn hệ thống thay vì theo từng thành phần riêng lẻ.
 
@@ -42,7 +42,7 @@ Hệ thống hiện tại đã có **3 nền tảng bảo mật đúng hướng*
 Tuy nhiên, khi nhìn xuyên suốt toàn hệ thống (không chỉ 1 thành phần), lộ ra **4 lỗ hổng cấu trúc nghiêm trọng nhất**, đủ để loại bỏ khả năng thương mại hoá nếu không vá trước khi có khách hàng thứ hai:
 
 1. **Rò rỉ secret toàn hệ thống**: `GET /api/device/sensors` trả `secret_key` **plaintext của mọi sensor `active` trong toàn bộ hệ thống** cho bất kỳ gateway nào xác thực HMAC hợp lệ — không phân biệt khách hàng nào sở hữu gateway nào (`sensors.routes.ts:24-26`).
-2. **Secret lưu plaintext ở cả 3 tầng**: Database (`devices.secret_key VARCHAR(64)` không mã hoá), Firmware (`config_gw.h`/`config_1.h` hard-code compile vào binary, commit vào git), và UI (`RegisterModal.tsx` hiển thị secret dạng chữ để copy trên Dashboard).
+2. **Secret lưu plaintext ở cả 3 tầng**: Database (`devices.secret_key VARCHAR(64)` không mã hoá), Firmware (`config_gw.h`/`config_1.h` hard-code compile vào binary — file đã `.gitignore` nên không commit, nhưng secret vẫn plaintext trong binary), và UI (`RegisterModal.tsx` hiển thị secret dạng chữ để copy trên Dashboard).
 3. **Không có TLS ở bất kỳ đâu trong toàn bộ luồng thiết bị**: MQTT không TLS (`allow_anonymous true`), HTTP không TLS (`http://` cho `BACKEND_SENSORS_URL`), Backend↔Frontend chưa xác nhận bắt buộc HTTPS ở tầng ứng dụng.
 4. **RBAC không có khái niệm phạm vi tài nguyên**: Operator có quyền ngang Admin trên **mọi thiết bị của mọi khách hàng** — không có ràng buộc theo `home_id`, vi phạm nguyên tắc least-privilege bắt buộc cho SOC2/ISO 27001 nếu sản phẩm mở rộng sang thị trường yêu cầu tuân thủ.
 
@@ -89,11 +89,11 @@ Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transpo
 
 ### 1.5. Gateway / Device (Firmware)
 
-Đã đánh giá chi tiết ở `EMBEDDED_ARCHITECTURE_ESP_IDF.md` Phần 1 — tổng hợp lại các điểm bảo mật cốt lõi:
+Đã đánh giá chi tiết ở `08_EMBEDDED_ARCHITECTURE_ESP_IDF.md` Phần 1 — tổng hợp lại các điểm bảo mật cốt lõi:
 
 | Vấn đề | Mức độ |
 |---|---|
-| WiFi SSID/Password hard-code, compile vào binary, commit git (`config_gw.h`, `config_1.h`) | Nghiêm trọng |
+| WiFi SSID/Password hard-code, compile vào binary (`config_gw.h`, `config_1.h`) — file đã `.gitignore`, không commit git | Nghiêm trọng |
 | Gateway/Sensor Secret lưu plaintext trong file cấu hình (`GW_SECRET_KEY`, `KNOWN_SENSORS[]`) | Nghiêm trọng |
 | Không NVS — không thể xoay vòng bí mật mà không re-flash | Nghiêm trọng |
 | Không Provisioning (SoftAP/BLE) — mỗi thiết bị phải flash tay | Cao (chặn bán hàng loạt, gián tiếp là vấn đề bảo mật vì không kiểm soát được vòng đời credential) |
@@ -106,11 +106,11 @@ Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transpo
 
 ### 1.7. Mobile
 
-Đã đánh giá đầy đủ ở `MOBILE_APP_ARCHITECTURE.md` — hiện tại **hoàn toàn là mockup**, `MockAuthService` hard-code, không Secure Storage, không Biometric, không TLS Pinning — vì chưa có kết nối mạng thật nên chưa phát sinh rủi ro thật, nhưng đây chính là **cơ hội thiết kế đúng từ đầu** (Phần 7.4) thay vì vá sau.
+Đã đánh giá đầy đủ ở `07_MOBILE_APP_ARCHITECTURE.md` — hiện tại **hoàn toàn là mockup**, `MockAuthService` hard-code, không Secure Storage, không Biometric, không TLS Pinning — vì chưa có kết nối mạng thật nên chưa phát sinh rủi ro thật, nhưng đây chính là **cơ hội thiết kế đúng từ đầu** (Phần 7.4) thay vì vá sau.
 
 ### 1.8. Frontend (Dashboard)
 
-`RegisterModal.tsx` hiển thị `secret_key` dạng plaintext trên UI để Admin/Operator copy (`AddDeviceModal.tsx:62`, `RegisterModal.tsx:70-72`) — đúng với thiết kế backend hiện tại nhưng là **hành vi UI cần loại bỏ hoàn toàn** khi chuyển sang mô hình Provisioning mới (secret không bao giờ nên xuất hiện trên bất kỳ màn hình Dashboard nào — đã nêu ở `FRONTEND_REFACTOR_SMARTHOME.md` mục 1.5).
+`RegisterModal.tsx` hiển thị `secret_key` dạng plaintext trên UI để Admin/Operator copy (`AddDeviceModal.tsx:62`, `RegisterModal.tsx:70-72`) — đúng với thiết kế backend hiện tại nhưng là **hành vi UI cần loại bỏ hoàn toàn** khi chuyển sang mô hình Provisioning mới (secret không bao giờ nên xuất hiện trên bất kỳ màn hình Dashboard nào — đã nêu ở `05_FRONTEND_REFACTOR_SMARTHOME.md` mục 1.5).
 
 ### 1.9. Logging / Secret Management / Key Management
 
@@ -118,7 +118,7 @@ Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transpo
 |---|---|
 | Logging | 1 bảng `audit_log` duy nhất gộp mọi loại sự kiện — không tách Security Log/Authentication Log/Attack Log riêng biệt (`001_schema.sql:79-90`) |
 | Secret Management | Không có khái niệm quản lý vòng đời secret — secret sinh ra 1 lần lúc đăng ký (`crypto.randomBytes(32).toString("hex")` — `devices.ts:40`), không bao giờ xoay vòng, không có KMS/Vault |
-| Key Management | Không có phân biệt Factory Key/Provision Key/Session Key/Device Secret như đã thiết kế ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 6 — thực tế hiện tại chỉ có **1 loại secret duy nhất** dùng suốt vòng đời thiết bị, không phân lớp |
+| Key Management | Không có phân biệt Factory Key/Provision Key/Session Key/Device Secret như đã thiết kế ở `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 6 — thực tế hiện tại chỉ có **1 loại secret duy nhất** dùng suốt vòng đời thiết bị, không phân lớp |
 
 ---
 
@@ -180,9 +180,9 @@ flowchart TB
 
 | Broker | Kênh | TLS | Xác thực Client | Ghi chú |
 |---|---|---|---|---|
-| Broker 1 (nội bộ Gateway↔Node) | ESP-NOW (không phải MQTT/IP theo thiết kế đã chốt ở `SMART_HOME_WIFI_PROVISIONING.md`) | N/A (không phải TCP/IP) | Challenge-Response + Session Key (ECDH) ở tầng ESP-NOW | Không áp dụng TLS vì không phải giao thức IP |
+| Broker 1 (nội bộ Gateway↔Node) | ESP-NOW (không phải MQTT/IP theo thiết kế đã chốt ở `02_SMART_HOME_WIFI_PROVISIONING.md`) | N/A (không phải TCP/IP) | Challenge-Response + Session Key (ECDH) ở tầng ESP-NOW | Không áp dụng TLS vì không phải giao thức IP |
 | Broker 2 (Gateway↔Backend) | MQTT over TLS 1.2+ | **Bắt buộc** | **mTLS** — mỗi Gateway có client certificate riêng ký bởi Internal CA, cấp lúc Provisioning | Đây là kết nối quan trọng nhất cần bảo vệ — Gateway là điểm biên duy nhất giữa nhà khách hàng và Cloud |
-| Backend↔Broker (nội bộ Cloud) | MQTT over TLS (hoặc trust theo VPC riêng nếu cùng private network) | Khuyến nghị bật | Username/password nội bộ hoặc mTLS service-to-service | Backend là client MQTT duy nhất (đã chốt ở `MOBILE_APP_ARCHITECTURE.md` Phần 11 — Mobile không bao giờ kết nối MQTT trực tiếp) |
+| Backend↔Broker (nội bộ Cloud) | MQTT over TLS (hoặc trust theo VPC riêng nếu cùng private network) | Khuyến nghị bật | Username/password nội bộ hoặc mTLS service-to-service | Backend là client MQTT duy nhất (đã chốt ở `07_MOBILE_APP_ARCHITECTURE.md` Phần 11 — Mobile không bao giờ kết nối MQTT trực tiếp) |
 
 ### 4.2. Vì sao chọn mTLS cho Gateway↔Broker (không chỉ username/password)
 
@@ -192,7 +192,7 @@ flowchart TB
 
 ### 4.3. Topic Authorization (ACL)
 
-Kế thừa Topic Design đã chốt ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 10 (`home/{home_id}/gateway/{gw}/...`). ACL thực thi theo nguyên tắc: **mỗi Gateway chỉ được publish/subscribe đúng namespace `home_id` của chính nó** — cấu hình qua:
+Kế thừa Topic Design đã chốt ở `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 10 (`home/{home_id}/gateway/{gw}/...`). ACL thực thi theo nguyên tắc: **mỗi Gateway chỉ được publish/subscribe đúng namespace `home_id` của chính nó** — cấu hình qua:
 
 - **MVP:** Mosquitto Dynamic Security Plugin (built-in từ Mosquitto 2.x) — quản lý user/role/ACL qua API, không cần restart broker khi thêm Gateway mới.
 - **Khi scale lớn:** cân nhắc chuyển sang **EMQX**/**VerneMQ** — hỗ trợ multi-tenant ACL native, HTTP Auth/ACL hook (broker gọi ngược Backend để xác thực mỗi lần connect/subscribe/publish, cho phép Backend là nguồn sự thật duy nhất về quyền hạn thay vì đồng bộ 2 nơi).
@@ -225,7 +225,7 @@ flowchart LR
 | Authentication | HMAC-SHA256(Device Secret, `device_id:timestamp`), cửa sổ ±300s, `timingSafeEqual` | Giả mạo Device (không biết secret), Replay Attack (timestamp cũ) |
 | Online | Backend kiểm tra `device_type` đúng vai trò (sensor không được tự xưng gateway), `status='active'` | Privilege Escalation qua giả mạo loại thiết bị |
 
-**Nguyên tắc:** mỗi bước sinh ra 1 loại khoá/token khác nhau với vòng đời khác nhau (Factory Key vĩnh viễn, Session Key theo phiên Provisioning ~10 phút, Device Secret theo vòng đời thiết bị, HMAC theo từng request) — không dùng 1 khoá duy nhất cho mọi mục đích (đúng Key Hierarchy đã thiết kế ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 6, nay chính thức hoá thành 1 flow xuyên suốt).
+**Nguyên tắc:** mỗi bước sinh ra 1 loại khoá/token khác nhau với vòng đời khác nhau (Factory Key vĩnh viễn, Session Key theo phiên Provisioning ~10 phút, Device Secret theo vòng đời thiết bị, HMAC theo từng request) — không dùng 1 khoá duy nhất cho mọi mục đích (đúng Key Hierarchy đã thiết kế ở `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 6, nay chính thức hoá thành 1 flow xuyên suốt).
 
 ---
 
@@ -321,7 +321,7 @@ sequenceDiagram
 
 ### 7.4. Biometric (Reserved — thiết kế nguyên tắc, chưa triển khai)
 
-FaceID/Fingerprint (`local_auth` trên Mobile) **không thay thế bước đăng nhập bằng mật khẩu đầu tiên** — chỉ dùng để mở khoá lại phiên đã đăng nhập (unlock Refresh Token đã lưu) sau khi app bị khoá — đã chốt nguyên tắc này ở `MOBILE_APP_ARCHITECTURE.md` Phần 17.
+FaceID/Fingerprint (`local_auth` trên Mobile) **không thay thế bước đăng nhập bằng mật khẩu đầu tiên** — chỉ dùng để mở khoá lại phiên đã đăng nhập (unlock Refresh Token đã lưu) sau khi app bị khoá — đã chốt nguyên tắc này ở `07_MOBILE_APP_ARCHITECTURE.md` Phần 17.
 
 ---
 
@@ -372,7 +372,7 @@ flowchart TD
 | Hạng mục | Thiết kế |
 |---|---|
 | **HTTPS** | Bắt buộc TLS 1.2+ ở tầng Nginx/Load Balancer cho toàn bộ `/api/**`, không có endpoint ngoại lệ chạy HTTP thuần (kể cả `/api/device/**` — hiện tại `BACKEND_SENSORS_URL` dùng `http://` cần chuyển hẳn sang HTTPS) |
-| **JWT** | 2 secret riêng biệt Dashboard/Mobile (đã chốt ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 7.3) — 1 secret bị lộ không ảnh hưởng kênh còn lại |
+| **JWT** | 2 secret riêng biệt Dashboard/Mobile (đã chốt ở `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 7.3) — 1 secret bị lộ không ảnh hưởng kênh còn lại |
 | **Rate Limit** | Chuyển từ `express-rate-limit` in-memory sang **Redis-backed** (`rate-limit-redis`) — đúng khi scale nhiều instance; giữ nguyên chiến lược phân tầng đã có (login: 10/15 phút/IP, device data: 60/phút/IP, API chung: 100/15 phút/IP) |
 | **Input Validation** | Schema validation tập trung (zod/joi) ở tầng Controller cho mọi endpoint mới — thay thế `sanitize()` tự viết rải rác |
 | **CORS** | Whitelist rõ ràng theo môi trường (dev/staging/production), không dùng wildcard `*`; `credentials: true` chỉ áp dụng cho origin đã whitelist |
@@ -388,7 +388,7 @@ flowchart TD
 | Loại Secret | Sinh ra khi nào | Lưu ở đâu | Ai được đọc |
 |---|---|---|---|
 | **Factory Key** | Lúc flash tại xưởng | NVS (Flash Encryption bảo vệ — reserved), không đồng bộ Cloud dạng có thể đọc lại | Không ai — chỉ dùng ký nội bộ, không cần trích xuất |
-| **Gateway Secret / Device Secret** | Lúc Operator provision hoặc factory | NVS (mã hoá) ở thiết bị; **mã hoá tại rest bằng KMS/Vault** ở Cloud (bảng `gateway_secret`/`device_secret` tách riêng — `DATABASE_REFACTOR_SMARTHOME.md` Phần 7.4-7.5) | Chỉ service nội bộ xử lý HMAC (DB user riêng, least-privilege) |
+| **Gateway Secret / Device Secret** | Lúc Operator provision hoặc factory | NVS (mã hoá) ở thiết bị; **mã hoá tại rest bằng KMS/Vault** ở Cloud (bảng `gateway_secret`/`device_secret` tách riêng — `04_DATABASE_REFACTOR_SMARTHOME.md` Phần 7.4-7.5) | Chỉ service nội bộ xử lý HMAC (DB user riêng, least-privilege) |
 | **JWT Secret (Dashboard/Mobile)** | Cấu hình lúc triển khai hệ thống | Biến môi trường / Secret Manager (không commit vào git — đã đúng ở `env.ts` validate `JWT_SECRET` tồn tại, nhưng cần đảm bảo giá trị thật nằm ngoài git) | Chỉ Backend process |
 | **MQTT Credential (mTLS cert/key)** | Lúc Provisioning Gateway | NVS (thiết bị), Certificate Store nội bộ (Cloud CA) | Broker (verify), Backend (issue/revoke) |
 | **Activation Token** | Lúc Operator tạo Smart Home | Chỉ lưu **hash SHA-256** (`code_hash`), không lưu plaintext bất kỳ đâu | Không ai đọc lại được bản gốc — chỉ so khớp hash |
@@ -416,11 +416,11 @@ flowchart TD
 
 | Hạng mục | Thiết kế |
 |---|---|
-| **Encryption At Rest** | Secret (Gateway/Device) mã hoá AES-256 qua KMS/Vault (đã thiết kế ở `DATABASE_REFACTOR_SMARTHOME.md` Phần 12); cân nhắc bật Transparent Data Encryption (TDE) cấp độ MySQL instance cho toàn bộ dữ liệu nếu yêu cầu tuân thủ cao hơn (PCI-DSS-like) |
+| **Encryption At Rest** | Secret (Gateway/Device) mã hoá AES-256 qua KMS/Vault (đã thiết kế ở `04_DATABASE_REFACTOR_SMARTHOME.md` Phần 12); cân nhắc bật Transparent Data Encryption (TDE) cấp độ MySQL instance cho toàn bộ dữ liệu nếu yêu cầu tuân thủ cao hơn (PCI-DSS-like) |
 | **Password Hash** | bcrypt cost 12 — giữ nguyên, đã đúng chuẩn |
-| **Audit Log** | Tách bảng `audit_logs` append-only, DB user ứng dụng chỉ có quyền `INSERT`, không `UPDATE`/`DELETE` (đã thiết kế ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 14) |
+| **Audit Log** | Tách bảng `audit_logs` append-only, DB user ứng dụng chỉ có quyền `INSERT`, không `UPDATE`/`DELETE` (đã thiết kế ở `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 14) |
 | **Soft Delete** | Thay `DELETE FROM devices`/`DELETE FROM users` cứng bằng cột `deleted_at DATETIME NULL` — mọi query mặc định lọc `WHERE deleted_at IS NULL`, dữ liệu vật lý chỉ xoá hẳn qua job dọn dẹp định kỳ có kiểm soát (sau khi đã archive) — vá vấn đề #9 ở Phần 2 |
-| **Sensitive Data Protection** | Trường nhạy cảm (secret, refresh token hash) tách bảng riêng, hạn chế DB user có quyền SELECT (least-privilege theo domain — đã nêu ở `DATABASE_REFACTOR_SMARTHOME.md` Phần 12) |
+| **Sensitive Data Protection** | Trường nhạy cảm (secret, refresh token hash) tách bảng riêng, hạn chế DB user có quyền SELECT (least-privilege theo domain — đã nêu ở `04_DATABASE_REFACTOR_SMARTHOME.md` Phần 12) |
 | **Connection Security** | Kết nối Backend↔MySQL qua TLS nội bộ nếu không cùng private network được cô lập vật lý/VPC |
 
 ---
@@ -430,16 +430,16 @@ flowchart TD
 | Hạng mục | Thiết kế | So với hiện tại |
 |---|---|---|
 | **Firmware Signature** | Ký firmware bằng khoá RSA/ECDSA quản lý qua quy trình xưởng (HSM hoặc ký ly khai offline) — verify chữ ký trước khi chấp nhận OTA | Chưa có — hiện tại không có OTA nào |
-| **Checksum** | SHA-256 verify trước khi flash (đã thiết kế ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 11, `EMBEDDED_ARCHITECTURE_ESP_IDF.md` Phần 14) | Chưa có |
+| **Checksum** | SHA-256 verify trước khi flash (đã thiết kế ở `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 11, `08_EMBEDDED_ARCHITECTURE_ESP_IDF.md` Phần 14) | Chưa có |
 | **OTA Verification** | Checksum sai → không flash; App Rollback tự động (ESP-IDF built-in) nếu self-test sau flash thất bại | Chưa có |
-| **Secure Boot (Reserved)** | Bootloader từ chối chạy firmware không đúng chữ ký — bật ở bản Production, khoá quản lý tách biệt khỏi môi trường build hàng ngày | Reserved — chưa triển khai, có lộ trình rõ (`EMBEDDED_ARCHITECTURE_ESP_IDF.md` Phần 19) |
+| **Secure Boot (Reserved)** | Bootloader từ chối chạy firmware không đúng chữ ký — bật ở bản Production, khoá quản lý tách biệt khỏi môi trường build hàng ngày | Reserved — chưa triển khai, có lộ trình rõ (`08_EMBEDDED_ARCHITECTURE_ESP_IDF.md` Phần 19) |
 | **Flash Encryption (Reserved)** | Mã hoá toàn bộ flash bằng khoá gắn eFuse chip — chống dump firmware vật lý (quan trọng nhất cho Camera Node, dễ bị tháo trộm nhất vì lắp ở cửa) | Reserved |
 
 ---
 
 ## 14. LOGGING & SECURITY MONITORING
 
-### 14.1. Tách loại log theo mục đích bảo mật (kế thừa & mở rộng từ `BACKEND_REFACTOR_SMARTHOME.md` Phần 14)
+### 14.1. Tách loại log theo mục đích bảo mật (kế thừa & mở rộng từ `03_BACKEND_REFACTOR_SMARTHOME.md` Phần 14)
 
 | Loại Log | Nội dung | Retention | Bất biến (append-only)? |
 |---|---|---|---|
@@ -456,7 +456,7 @@ flowchart TD
 |---|---|
 | ≥5 lần auth fail liên tiếp (Gateway/Device) trong 5 phút | Auto-block thiết bị (đã có — giữ nguyên `BLOCK_THRESHOLD=5`), ghi Attack Log |
 | ≥10 lần login fail/IP trong 15 phút (đã có rate-limit chặn, bổ sung ghi nhận) | Ghi Security Log mức Warning, cảnh báo Admin nếu lặp lại nhiều IP khác nhau cùng pattern (dấu hiệu botnet) |
-| ≥5 lần thử Activation Code sai/mã/giờ (đã thiết kế ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.2) | Khoá tạm 15 phút + ghi Attack Log |
+| ≥5 lần thử Activation Code sai/mã/giờ (đã thiết kế ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.2) | Khoá tạm 15 phút + ghi Attack Log |
 | Refresh Token reuse phát hiện | Thu hồi toàn bộ session user, cảnh báo **Critical** tới Admin ngay lập tức (không chờ batch report) |
 
 ---
@@ -488,8 +488,8 @@ flowchart TD
 ### 16.2. Giả mạo Device/Node (Device Spoofing)
 
 **Kịch bản:** 1 Node giả mạo cố gắng Pair với Gateway của khách hàng để chèn dữ liệu cảm biến giả hoặc nhận lệnh điều khiển.
-**Mức độ khả thi hiện tại:** Thấp trong Pairing thật (whitelist theo `home_id` + Challenge-Response Node Secret đã thiết kế ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 9) — nhưng **firmware thực tế hiện tại chưa triển khai Pairing này** (Sensor Node nối thẳng WiFi, không qua ESP-NOW Pairing) nên thực tế hiện tại rủi ro cao hơn lý thuyết.
-**Giảm thiểu:** Triển khai đúng Pairing Flow (Phần 13 `EMBEDDED_ARCHITECTURE_ESP_IDF.md`) trước khi bán hàng loạt.
+**Mức độ khả thi hiện tại:** Thấp trong Pairing thật (whitelist theo `home_id` + Challenge-Response Node Secret đã thiết kế ở `02_SMART_HOME_WIFI_PROVISIONING.md` Phần 9) — nhưng **firmware thực tế hiện tại chưa triển khai Pairing này** (Sensor Node nối thẳng WiFi, không qua ESP-NOW Pairing) nên thực tế hiện tại rủi ro cao hơn lý thuyết.
+**Giảm thiểu:** Triển khai đúng Pairing Flow (Phần 13 `08_EMBEDDED_ARCHITECTURE_ESP_IDF.md`) trước khi bán hàng loạt.
 
 ### 16.3. Replay Attack
 
@@ -507,19 +507,19 @@ flowchart TD
 
 **Kịch bản:** Kẻ tấn công trong cùng mạng nghe lén toàn bộ payload MQTT (dù không sửa được vì có HMAC, vẫn đọc được nội dung nhiệt độ/độ ẩm/trạng thái nhà — rò rỉ thông tin riêng tư về thói quen sinh hoạt).
 **Mức độ khả thi hiện tại:** Cao — không TLS.
-**Giảm thiểu:** TLS bắt buộc (không chỉ chống sửa đổi mà còn chống đọc trộm nội dung riêng tư — quan trọng hơn cả chống giả mạo trong bối cảnh Smart Home vì dữ liệu hành vi rất nhạy cảm, liên quan trực tiếp tới `BACKEND_REFACTOR_SMARTHOME.md` mục 18 và `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12).
+**Giảm thiểu:** TLS bắt buộc (không chỉ chống sửa đổi mà còn chống đọc trộm nội dung riêng tư — quan trọng hơn cả chống giả mạo trong bối cảnh Smart Home vì dữ liệu hành vi rất nhạy cảm, liên quan trực tiếp tới `03_BACKEND_REFACTOR_SMARTHOME.md` mục 18 và `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.12).
 
 ### 16.6. Credential Leak (Rò rỉ Secret)
 
 **Kịch bản:** Secret Key bị lộ qua (a) endpoint API thiết kế sai (`/api/device/sensors`), (b) firmware bị dump/đọc ngược, (c) commit nhầm vào git, (d) hiển thị plaintext trên Dashboard UI.
 **Mức độ khả thi hiện tại:** **Rất cao — đã xảy ra ở cả 4 điểm** (mục 1.1-1.2 của Phần 2, đã xác nhận bằng bằng chứng code cụ thể).
-**Giảm thiểu:** Vá endpoint (whitelist theo `home_id` — Phần 5), mã hoá tại rest (Phần 10), Flash Encryption (Phần 13), loại bỏ hiển thị secret trên UI (đã chốt ở `FRONTEND_REFACTOR_SMARTHOME.md`).
+**Giảm thiểu:** Vá endpoint (whitelist theo `home_id` — Phần 5), mã hoá tại rest (Phần 10), Flash Encryption (Phần 13), loại bỏ hiển thị secret trên UI (đã chốt ở `05_FRONTEND_REFACTOR_SMARTHOME.md`).
 
 ### 16.7. API Abuse
 
 **Kịch bản:** Gọi API liên tục để dò thông tin (brute-force Activation Code, quét `device_id` tồn tại) hoặc gây quá tải.
 **Mức độ khả thi hiện tại:** Trung bình — đã có rate-limit theo IP nhưng in-memory (mục 1.4), chưa có rate-limit theo tài khoản/theo mã cụ thể cho Activation Code.
-**Giảm thiểu:** Redis-backed rate-limit (Phần 9), rate-limit riêng cho Activation theo cả IP và theo mã (đã thiết kế ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.2: 5 lần/mã/giờ, 20 lần/tài khoản/ngày).
+**Giảm thiểu:** Redis-backed rate-limit (Phần 9), rate-limit riêng cho Activation theo cả IP và theo mã (đã thiết kế ở `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.2: 5 lần/mã/giờ, 20 lần/tài khoản/ngày).
 
 ### 16.8. Privilege Escalation
 
@@ -570,7 +570,7 @@ sequenceDiagram
     BE->>BE: Verify Gateway HMAC → Verify Node HMAC (2 lớp độc lập)
     BE->>BE: Verify device_type đúng vai trò, status=active
     alt Toàn bộ hợp lệ
-        BE->>BE: Lưu Telemetry, publish Event (BACKEND_REFACTOR_SMARTHOME.md mục 18)
+        BE->>BE: Lưu Telemetry, publish Event (03_BACKEND_REFACTOR_SMARTHOME.md mục 18)
     else Bất kỳ bước nào thất bại
         BE->>BE: Ghi Security Log, tăng fail_count, auto-block nếu vượt ngưỡng
     end
@@ -605,7 +605,7 @@ sequenceDiagram
 | **Phase 1 — TLS toàn diện** | HTTPS bắt buộc mọi API, MQTT TLS cho Broker 2, mTLS Gateway | Nền tảng cho mọi lớp bảo mật khác — không có TLS thì HMAC chỉ chống giả mạo, không chống nghe lén |
 | **Phase 2 — RBAC theo phạm vi (`operator_home_access`)** | Middleware kiểm tra phạm vi Home cho mọi hành động Operator | Vá Privilege Escalation nghiêm trọng nhất |
 | **Phase 3 — Secret Management tập trung** | Mã hoá tại rest (KMS/Vault), tách bảng secret, least-privilege DB user | Điều kiện để Phase 0 không tái diễn dưới hình thức khác |
-| **Phase 4 — Mobile Auth + Refresh Token** | JWT Bearer + Refresh Token rotation, Secure Storage, Biometric unlock | Điều kiện để Mobile App thật kết nối an toàn (`MOBILE_APP_ARCHITECTURE.md` V1) |
+| **Phase 4 — Mobile Auth + Refresh Token** | JWT Bearer + Refresh Token rotation, Secure Storage, Biometric unlock | Điều kiện để Mobile App thật kết nối an toàn (`07_MOBILE_APP_ARCHITECTURE.md` V1) |
 | **Phase 5 — Rate Limit & Cache Redis-backed** | Chuyển toàn bộ in-memory sang Redis | Điều kiện bắt buộc trước khi scale ngang nhiều instance |
 | **Phase 6 — Logging & Monitoring đầy đủ** | Tách Security/Authentication/Attack Log, Alerting theo ngưỡng | Khả năng phát hiện & điều tra sự cố ở quy mô fleet lớn |
 | **Phase 7 — Firmware Security nâng cao** | Firmware Signature, OTA Verification + Rollback | Điều kiện để sửa lỗi bảo mật từ xa an toàn cho thiết bị đã bán |
