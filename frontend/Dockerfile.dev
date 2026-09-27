@@ -1,6 +1,15 @@
+# Image dev dùng chung cho 3 app — chọn app bằng build arg APP (admin|operator|user).
+# Source được bind-mount vào /app, node_modules nằm trong anonymous volume.
 FROM node:20-alpine
 WORKDIR /app
-COPY package*.json ./
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/console/package.json packages/console/
+COPY admin/package.json admin/
+COPY operator/package.json operator/
+COPY user/package.json user/
 RUN npm install
+ARG APP=admin
+ENV APP=${APP}
 EXPOSE 3000
-CMD ["npm", "run", "dev"]
+CMD ["sh", "-c", "npx next dev \"$APP\" -H 0.0.0.0 -p 3000"]

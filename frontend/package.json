@@ -1,22 +1,22 @@
 {
-  "name": "frontend",
+  "name": "smarthome-frontend",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "packages/shared",
+    "packages/console",
+    "admin",
+    "operator",
+    "user"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "lucide-react": "^1.16.0",
-    "next": "16.2.5",
-    "next-themes": "^0.4.6",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "recharts": "^3.8.1",
-    "socket.io-client": "^4.8.3",
-    "swr": "^2.4.1"
+    "dev": "node scripts/dev-all.mjs",
+    "dev:admin": "npm run dev -w @smarthome/admin",
+    "dev:operator": "npm run dev -w @smarthome/operator",
+    "dev:user": "npm run dev -w @smarthome/user",
+    "build": "npm run build -w @smarthome/admin -w @smarthome/operator -w @smarthome/user",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint ."
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

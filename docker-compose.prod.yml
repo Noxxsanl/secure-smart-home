@@ -69,11 +69,44 @@ services:
       - iot-network
     restart: always
 
-  frontend:
+  # Frontend: 3 app Next.js trong frontend/ (npm workspaces), mỗi role một image.
+  frontend-admin:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: iot-frontend
+      args:
+        APP: admin
+    container_name: iot-frontend-admin
+    environment:
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - iot-network
+    restart: always
+
+  frontend-operator:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        APP: operator
+    container_name: iot-frontend-operator
+    environment:
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - iot-network
+    restart: always
+
+  frontend-user:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        APP: user
+    container_name: iot-frontend-user
     environment:
       - BACKEND_URL=http://backend:5000
     depends_on:
@@ -91,7 +124,9 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend
-      - frontend
+      - frontend-admin
+      - frontend-operator
+      - frontend-user
     networks:
       - iot-network
     restart: always

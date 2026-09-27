@@ -58,7 +58,9 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - backend
-      - frontend
+      - frontend-admin
+      - frontend-operator
+      - frontend-user
     networks:
       - iot-network
     restart: unless-stopped
@@ -92,17 +94,66 @@ services:
       - iot-network
     restart: unless-stopped
 
-  frontend:
+  # Frontend: 3 app Next.js trong frontend/ (npm workspaces), mỗi role một app.
+  frontend-admin:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    container_name: iot-frontend
+      args:
+        APP: admin
+    container_name: iot-frontend-admin
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/.next
+      - /app/admin/.next
+    environment:
+      - BACKEND_URL=http://backend:5000
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend
+    networks:
+      - iot-network
+    restart: unless-stopped
+
+  frontend-operator:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+      args:
+        APP: operator
+    container_name: iot-frontend-operator
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/operator/.next
+    environment:
+      - BACKEND_URL=http://backend:5000
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend
+    networks:
+      - iot-network
+    restart: unless-stopped
+
+  frontend-user:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+      args:
+        APP: user
+    container_name: iot-frontend-user
+    ports:
+      - "3003:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/user/.next
     environment:
       - BACKEND_URL=http://backend:5000
       - WATCHPACK_POLLING=true

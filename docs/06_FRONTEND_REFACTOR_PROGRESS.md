@@ -116,3 +116,31 @@
 4. ~~Xác thực với tài khoản Operator thật~~ — **đã giải quyết**: login nay hoàn toàn mock, đăng nhập `operator01`/`operator123` để xem đúng `OperatorDashboardPage`/Sidebar biến thể Operator mà không cần backend.
 5. **Room/Device management form trong Smart Home Detail:** tab Rooms hiện cho xem thiết bị theo phòng nhưng chưa có nút "Thêm thiết bị vào phòng này" (gán lại `room_id` cho thiết bị đã tồn tại) như §9.5 mô tả — hiện chỉ tạo được thiết bị mới qua Provisioning Wizard.
 6. **`sensor_type` động hoàn toàn:** `SensorChart`/`DeviceDetailPage` vẫn giả định 2 field cố định `temperature`/`humidity` thay vì đọc động theo danh mục `sensor_type` như §9.6 mô tả đầy đủ — đã tổng quát hoá một phần (category-driven hiển thị chart) nhưng chưa tới mức hoàn toàn danh mục hoá.
+
+---
+
+## 12. Tách thành 3 app theo role (2026-09-26)
+
+`frontend/` chuyển sang **npm workspaces**: mỗi role hệ thống một app Next.js, code dùng chung nằm trong 2 gói. Chi tiết cấu trúc và lệnh: [`frontend/README.md`](../frontend/README.md).
+
+| App / gói | Cổng dev | Nội dung |
+|---|---|---|
+| `admin/` | 3001 | Toàn bộ console cũ + Team & Roles, Operator Access, Settings, 10 loại log |
+| `operator/` | 3002 | Console không có nhóm "Quản trị hệ thống", 5 loại log vận hành (§5.3) |
+| `user/` | 3003 | **Mới** — cổng web khách hàng: Tổng quan, Phòng, Thiết bị (bật/tắt optimistic + hoàn tác), Tự động hoá + gợi ý thói quen, Thông báo, Thành viên, Thêm Smart Home (Activation Code), Hồ sơ |
+| `packages/shared` | — | `ui/`, `app-shell/` (ShellFrame/Sidebar/Header nhận menu qua props), `auth/` (PortalConfig, AuthGuard/GuestGuard), `mock/`, `styles/theme.css` |
+| `packages/console` | — | Tính năng dùng chung Admin + Operator (smart-homes, customers, gateways, devices, ota, automation, logs, notifications, ai) |
+
+**Đối chiếu đường dẫn cho các mục 0–11 ở trên:** `src/shared/*` → `packages/shared/*`; `src/features/auth` → `packages/shared/auth`; `src/widgets/app-shell/*` → `packages/shared/app-shell/*` (nav-config tách thành `src/config/nav.ts` của từng app + `packages/console/logs/config.ts`); `src/features/{ai,automation,customers,devices,gateways,logs,notifications,ota,smart-homes}` → `packages/console/*`; `usePermissions` → `packages/console/auth/`; dashboard Admin/Operator, `team`, `settings` → `src/features` của app tương ứng; `StatsCard`, `SensorChart` → `packages/shared/ui`.
+
+**Thay đổi hành vi đáng chú ý:**
+- Mỗi app chỉ nhận phiên đúng role (`mock_auth_session:<role>`); đăng nhập nhầm cổng → thông báo hướng dẫn sang đúng cổng. Tài khoản demo mới: `user01 / user123` (khách hàng #1, chủ Nhà #1).
+- Private route có `AuthGuard` (chưa đăng nhập → `/login`); trước đây `middleware.ts`/`proxy.ts` nằm ngoài `src/` nên Next không nạp, trang private mở được khi chưa đăng nhập. Hai file này đã bỏ.
+- `/logs/[category]` kiểm tra loại log theo role ở server — Operator mở `/logs/security` nhận trang 404 (trước đây xem được qua URL).
+- Sidebar chỉ tô sáng mục khớp dài nhất (hết cảnh "Smart Homes" và "Provisioning" cùng sáng).
+- Việt hoá trang Quên mật khẩu, nút Đăng nhập, trang lỗi; `lang="vi"`. Sửa lỗi lint cũ ở `ThemeToggle`.
+- Cổng user gọi `packages/shared/mock/portal.ts` — mock của `/api/mobile/**`, tự kiểm 404 (không thuộc nhà) / 403 (role trong nhà không đủ) theo FR-6.1.
+
+**Lệch tài liệu cần quyết định:** PRD 13 §2.2 và FR-1.4 ghi *không* có Web cho khách hàng (USER chỉ dùng Mobile). App `user/` được làm theo yêu cầu trực tiếp — cần cập nhật PRD/docs 01, 05 nếu giữ hướng này.
+
+**Kiểm tra đã chạy:** `npm run typecheck` (5 workspace) pass; `npm run lint` 0 lỗi (3 warning cũ ở `packages/shared/ui/Select.tsx`); `npm run build` cả 3 app pass; smoke test trình duyệt headless (Edge qua CDP) trên bản production — 62/62 luồng pass, không có exception runtime. Chưa kiểm được build Docker và `nginx -t` (Docker daemon không chạy lúc kiểm tra).

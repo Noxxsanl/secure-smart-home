@@ -1,0 +1,22 @@
+{
+  "name": "@smarthome/admin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web Console cho ADMIN — toàn quyền vận hành nền tảng.",
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@smarthome/console": "*",
+    "@smarthome/shared": "*",
+    "lucide-react": "^1.16.0",
+    "next": "16.2.5",
+    "next-themes": "^0.4.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "swr": "^2.4.1"
+  }
+}
