@@ -3,15 +3,29 @@
 #include "wifi_manager.h"
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+
+// CA của Broker 2 — sinh bằng scripts/gen_mqtt_certs.sh (gitignored, giống config_gw.h)
+#if __has_include("mqtt_ca_cert.h")
+#include "mqtt_ca_cert.h"
+#else
+#error "Thieu include/mqtt_ca_cert.h - chay: bash scripts/gen_mqtt_certs.sh <IP may chay broker>"
+#endif
+
+// TLS handshake RSA-2048 trên ESP32 mất ~1-3s; quá thời gian này coi như broker không phản hồi
+#ifndef MQTT_TLS_HANDSHAKE_TIMEOUT_S
+#define MQTT_TLS_HANDSHAKE_TIMEOUT_S 10
+#endif
 
 // Broker 1: Gateway subscribes sensor data (local/sensors/+/data)
 static WiFiClient   espSubClient;
 static PubSubClient mqttSubClient(espSubClient);
 
 // Broker 2: Gateway publishes forwarded data to backend (gateway/<id>/data)
-static WiFiClient   espPubClient;
-static PubSubClient mqttPubClient(espPubClient);
+// MQTT over TLS (FR-12.3): kiểm chứng cert broker bằng CA nội bộ — không bao giờ setInsecure().
+static WiFiClientSecure espPubClient;
+static PubSubClient     mqttPubClient(espPubClient);
 
 static MessageCallback _userCallback = nullptr;
 
@@ -64,11 +78,17 @@ static bool mqttSubConnect() {
 static bool mqttPubConnect() {
     char clientId[48];
     snprintf(clientId, sizeof(clientId), "gw-%s", GW_DEVICE_ID);
-    Serial.printf("[MQTT-PUB] Connecting to Broker2 %s:%d as '%s'...",
+    Serial.printf("[MQTT-PUB] Connecting to Broker2 %s:%d (TLS) as '%s'...",
                   MQTT_BROKER2_HOST, MQTT_BROKER2_PORT, clientId);
 
     if (!mqttPubClient.connect(clientId)) {
-        Serial.printf(" FAILED (rc=%d)\n", mqttPubClient.state());
+        // Lỗi TLS (sai CA, cert không chứa host/IP này...) nằm ở lastError, không ở rc
+        char tlsErr[96] = "";
+        if (espPubClient.lastError(tlsErr, sizeof(tlsErr)) != 0) {
+            Serial.printf(" FAILED (rc=%d, TLS: %s)\n", mqttPubClient.state(), tlsErr);
+        } else {
+            Serial.printf(" FAILED (rc=%d)\n", mqttPubClient.state());
+        }
         return false;
     }
     Serial.println(" OK");
@@ -84,10 +104,12 @@ void mqttClientSetup(MessageCallback cb) {
     mqttSubClient.setCallback(onMqttMessage);
     Serial.printf("[MQTT-SUB] Broker1: %s:%d\n", MQTT_BROKER1_HOST, MQTT_BROKER1_PORT);
 
-    // Broker 2 – publish side (no callback needed)
+    // Broker 2 – publish side over TLS (no callback needed)
+    espPubClient.setCACert(MQTT_BROKER2_CA_CERT);
+    espPubClient.setHandshakeTimeout(MQTT_TLS_HANDSHAKE_TIMEOUT_S);
     mqttPubClient.setServer(MQTT_BROKER2_HOST, MQTT_BROKER2_PORT);
     mqttPubClient.setBufferSize(MQTT_BUFFER_SIZE);
-    Serial.printf("[MQTT-PUB] Broker2: %s:%d\n", MQTT_BROKER2_HOST, MQTT_BROKER2_PORT);
+    Serial.printf("[MQTT-PUB] Broker2: %s:%d (TLS)\n", MQTT_BROKER2_HOST, MQTT_BROKER2_PORT);
 }
 
 void mqttClientMaintain() {

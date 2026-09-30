@@ -19,6 +19,11 @@ firmware/**/config_1.h
 firmware/**/config_2.h
 firmware/**/config_gw.h
 
+# MQTT TLS — sinh bởi scripts/gen_mqtt_certs.sh (có khoá riêng CA/server)
+mosquitto/certs/*
+!mosquitto/certs/README.md
+firmware/gateway-node/include/mqtt_ca_cert.h
+
 # OS
 .DS_Store
 Thumbs.db

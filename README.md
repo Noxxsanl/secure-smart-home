@@ -59,7 +59,7 @@ Codebase hiện tại đã có phần nền tảng (Gateway, Server, Dashboard, 
 | Phân quyền người dùng (RBAC: admin/operator) | ✅ Đã có |
 | Nút cảm biến IoT (DHT22 — nhiệt độ, độ ẩm) | ✅ Đã có |
 | Nút điều khiển thiết bị (đèn, quạt) | 🔜 Chưa làm |
-| Mã hóa MQTT bằng TLS | 🔜 Chưa làm |
+| Mã hóa MQTT bằng TLS | 🟡 Gateway ↔ Backend (TLS xác thực server) — mTLS, ACL theo gateway chưa làm |
 | Module AI học thói quen / dự đoán hành vi | 🔜 Chưa làm |
 
 ---
@@ -96,16 +96,16 @@ Codebase hiện tại đã có phần nền tảng (Gateway, Server, Dashboard, 
 │  │ Compute         │──MQTT 1883──▶│ Verify Sensor HMAC       │        │
 │  │ HMAC-SHA256     │              │ (offline, constant-time) │        │
 │  │ Publish payload │              │ Sign Gateway HMAC        │        │
-│  └─────────────────┘              │ Publish → Broker 2 :1884 │        │
+│  └─────────────────┘              │ Publish → Broker 2 :8883 │        │
 │                                   └──────────────────────────┘        │
 └──────────────────────────────────────────┬────────────────────────────┘
-                                           │ MQTT gateway/{id}/data
+                                           │ MQTT over TLS gateway/{id}/data
                                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  INFRASTRUCTURE LAYER (Docker Compose — 6 services)                  │
 │                                                                       │
 │  [Mosquitto Broker 1 :1883]  ─────── Sensor ↔ Gateway only          │
-│  [Mosquitto Broker 2 :1884]  ─────── Gateway → Backend only         │
+│  [Mosquitto Broker 2 :8883]  ─────── Gateway → Backend, TLS only    │
 │                                           │                           │
 │  [Nginx :80] ──/api/*──▶ [Backend Express :5000] ──▶ [MySQL :3306]  │
 │              ──/*──────▶ [Next.js Frontend :3000]                    │
@@ -114,7 +114,7 @@ Codebase hiện tại đã có phần nền tảng (Gateway, Server, Dashboard, 
 
 **Why two separate MQTT brokers?**
 - **Broker 1 (`:1883`)** — LAN-local. Sensors and Gateway share this network. If Broker 1 is compromised, forged data still cannot reach the backend because the Gateway validates HMAC before forwarding.
-- **Broker 2 (`:1884`)** — Only Gateway-authenticated traffic arrives here. Backend trusts nothing on Broker 2 either — it re-validates both signatures independently.
+- **Broker 2 (`:8883`, TLS only)** — Only Gateway-authenticated traffic arrives here, encrypted with TLS ≥ 1.2; Gateway and Backend both verify the broker certificate against the local CA. Backend trusts nothing on Broker 2 either — it re-validates both signatures independently.
 
 ### Authentication Chain
 
@@ -147,7 +147,8 @@ HMAC#1 (sensor)      + forwards enc. payload       HMAC#2 (gw)       HMAC#2 + HM
 ### Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop) ≥ 24.x (running)
-- Free ports: `80`, `3000`, `5000`, `1883`, `1884`, `3308`
+- Free ports: `80`, `3000`, `5000`, `1883`, `8883`, `3308`
+- `openssl` (bundled with Git Bash on Windows) to generate the MQTT TLS certificates
 
 ### Step 1 — Environment file
 
@@ -170,13 +171,23 @@ DB_PASS=iot_managerIoTpassword
 DB_NAME=iot_managerDeviceIoT
 JWT_SECRET=dev_secret_please_change_in_production_min32chars
 MQTT_HOST=mqtt-broker-2
-MQTT_PORT=1883
+MQTT_PORT=8883
 FRONTEND_URL=http://localhost
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 ```
 
 > **Note:** `DB_HOST=mysql` and `MQTT_HOST=mqtt-broker-2` are Docker-internal service names.
+
+### Step 1b — MQTT TLS certificates
+
+Broker 2 only accepts MQTT over TLS. Generate a local CA and the broker certificate once, passing the LAN IP the Gateway will use (`MQTT_BROKER2_HOST`):
+
+```bash
+bash scripts/gen_mqtt_certs.sh 192.168.1.100
+```
+
+This writes `mosquitto/certs/` (gitignored) and `firmware/gateway-node/include/mqtt_ca_cert.h`. If the LAN IP changes, run it again — the CA is reused, so the Gateway does not need reflashing. Verify with `bash scripts/check_mqtt_tls.sh`.
 
 ### Step 2 — Start the stack
 
@@ -214,7 +225,7 @@ iot-nginx            running                 0.0.0.0:80->80/tcp
 iot-frontend         running                 0.0.0.0:3000->3000/tcp
 iot-backend          running (healthy)       0.0.0.0:5000->5000/tcp
 iot-mqtt-broker-1    running                 0.0.0.0:1883->1883/tcp
-iot-mqtt-broker-2    running                 0.0.0.0:1884->1883/tcp
+iot-mqtt-broker-2    running                 0.0.0.0:8883->8883/tcp
 iot-mysql            running (healthy)       0.0.0.0:3308->3306/tcp
 ```
 
@@ -227,7 +238,7 @@ iot-mysql            running (healthy)       0.0.0.0:3308->3306/tcp
 | **Backend API** | http://localhost:5000 |
 | **Health check** | http://localhost:5000/api/health |
 | **MQTT Broker 1** | `mqtt://localhost:1883` |
-| **MQTT Broker 2** | `mqtt://localhost:1884` |
+| **MQTT Broker 2** | `mqtts://localhost:8883` (CA: `mosquitto/certs/ca.crt`) |
 
 **Default credentials:**
 
@@ -263,7 +274,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 - Node.js ≥ 20, npm ≥ 10
 - MySQL 8.0
-- Mosquitto MQTT Broker (2 instances on ports 1883 and 1884)
+- Mosquitto MQTT Broker (2 instances: 1883 plaintext, 8883 TLS — certificates from `scripts/gen_mqtt_certs.sh`)
 
 **Tip:** Run only the infrastructure in Docker, backends locally:
 
@@ -276,7 +287,8 @@ docker compose up -d mysql mqtt-broker-1 mqtt-broker-2
 ```bash
 cd backend
 cp .env.example .env
-# Edit .env: DB_HOST=localhost, MQTT_HOST=localhost, MQTT_PORT=1884
+# Edit .env: DB_HOST=localhost, MQTT_HOST=localhost, MQTT_PORT=8883
+# (MQTT_CA_FILE defaults to ../mosquitto/certs/ca.crt)
 npm install
 npm run dev
 # API at http://localhost:5000
@@ -415,9 +427,9 @@ Edit `firmware/gateway-node/include/config_gw.h`:
 #define MQTT_BROKER1_HOST  "192.168.1.100"
 #define MQTT_BROKER1_PORT  1883
 
-// MQTT Broker 2 — publish to backend
+// MQTT Broker 2 — publish to backend over TLS (host must be in the broker cert SAN)
 #define MQTT_BROKER2_HOST  "192.168.1.100"
-#define MQTT_BROKER2_PORT  1884
+#define MQTT_BROKER2_PORT  8883
 
 // Backend URL to fetch sensor list every 5 min
 #define BACKEND_SENSORS_URL  "http://192.168.1.100/api/device/sensors"
@@ -440,7 +452,7 @@ pio run --target upload
 [NTP]      Sync OK
 [MQTT-SUB] Broker 1: 192.168.1.100:1883 → OK
 [MQTT-SUB] Subscribed: local/sensors/+/data
-[MQTT-PUB] Broker 2: 192.168.1.100:1884 → OK
+[MQTT-PUB] Broker 2: 192.168.1.100:8883 (TLS) → OK
 [Registry] Sensor list fetched from backend
 [MAIN]     Ready — listening for sensor data...
 ```
@@ -590,7 +602,8 @@ All endpoints except `/api/health` and `/api/auth/login` require a valid JWT in 
 | `DB_NAME` | `iot_managerDeviceIoT` | Database name |
 | `JWT_SECRET` | — | JWT signing key **(required, min 32 chars)** |
 | `MQTT_HOST` | `localhost` | Broker 2 host (`mqtt-broker-2` in Docker) |
-| `MQTT_PORT` | `1884` | Broker 2 port (Docker internal: `1883`) |
+| `MQTT_PORT` | `8883` | Broker 2 TLS port |
+| `MQTT_CA_FILE` | `../mosquitto/certs/ca.crt` | CA used to verify Broker 2 (`/certs/mqtt-ca.crt` in Docker) |
 | `FRONTEND_URL` | `http://localhost` | Frontend origin for CORS |
 | `ADMIN_USERNAME` | `admin` | Seeded admin username |
 | `ADMIN_PASSWORD` | `admin123` | Seeded admin password |
@@ -699,11 +712,14 @@ secure-smart-home-iot/
 │   └── migrations/            001_schema.sql — MySQL 8.0
 ├── mosquitto/
 │   ├── broker1/               MQTT Broker 1 (Sensor ↔ Gateway)          → :1883
-│   └── broker2/               MQTT Broker 2 (Gateway → Backend)         → :1884
+│   ├── broker2/               MQTT Broker 2 (Gateway → Backend, TLS)    → :8883
+│   └── certs/                 TLS certificates (gitignored, gen_mqtt_certs.sh)
 ├── nginx/                     Reverse proxy config                       → :80
 ├── scripts/
 │   ├── setup.bat              Windows automated setup
-│   └── setup.sh               Linux / macOS / WSL automated setup
+│   ├── setup.sh               Linux / macOS / WSL automated setup
+│   ├── gen_mqtt_certs.sh      Local CA + Broker 2 TLS certificate
+│   └── check_mqtt_tls.sh      MQTT TLS acceptance check (FR-12.3)
 ├── docs/                      14 technical documentation files
 ├── docker-compose.yml         Development stack (6 services)
 └── docker-compose.prod.yml    Production stack

@@ -51,6 +51,14 @@ else
     ok "backend/.env đã tồn tại."
 fi
 
+# Chứng chỉ TLS cho MQTT Broker 2 — tham số của setup.sh (IP LAN) được chuyển tiếp
+if [ ! -f "mosquitto/certs/server.crt" ]; then
+    info "Chưa có chứng chỉ MQTT TLS — đang sinh..."
+    bash scripts/gen_mqtt_certs.sh "$@"
+else
+    ok "Chứng chỉ MQTT TLS đã có (sinh lại: bash scripts/gen_mqtt_certs.sh <IP LAN>)."
+fi
+
 # Build and start
 echo ""
 info "Đang build và khởi động services..."

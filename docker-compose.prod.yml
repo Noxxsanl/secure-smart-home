@@ -33,15 +33,20 @@ services:
     networks:
       - iot-network
 
-  # Broker 2: Gateway Node → Backend (port 1884)
+  # Broker 2: Gateway Node → Backend — chỉ MQTT over TLS (port 8883)
+  # Chạy scripts/gen_mqtt_certs.sh <IP/hostname broker> trước lần up đầu tiên.
   mqtt-broker-2:
     image: eclipse-mosquitto:2
     container_name: iot-mosquitto-2
     restart: always
     ports:
-      - "1884:1883"
+      - "8883:8883"
     volumes:
       - ./mosquitto/broker2/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      # ca.key không mount vào container nào
+      - ./mosquitto/certs/ca.crt:/mosquitto/certs/ca.crt:ro
+      - ./mosquitto/certs/server.crt:/mosquitto/certs/server.crt:ro
+      - ./mosquitto/certs/server.key:/mosquitto/certs/server.key:ro
       - mosquitto2_data:/mosquitto/data
       - mosquitto2_logs:/mosquitto/log
     networks:
@@ -52,13 +57,16 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: iot-backend
+    volumes:
+      - ./mosquitto/certs/ca.crt:/certs/mqtt-ca.crt:ro
     env_file:
       - ./backend/.env
     environment:
       - DB_HOST=mysql
-      # Backend chỉ kết nối Broker 2 (gateway → backend layer)
+      # Backend chỉ kết nối Broker 2 (gateway → backend layer) qua TLS
       - MQTT_HOST=mqtt-broker-2
-      - MQTT_PORT=1883
+      - MQTT_PORT=8883
+      - MQTT_CA_FILE=/certs/mqtt-ca.crt
       - FRONTEND_URL=http://localhost
     depends_on:
       mysql:

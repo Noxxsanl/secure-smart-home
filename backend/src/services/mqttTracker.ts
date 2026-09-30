@@ -1,5 +1,5 @@
-import mqtt from "mqtt";
 import pool from "../config/db";
+import { connectBroker } from "../config/mqtt";
 
 // Mosquitto Notice log: "New client connected from 192.168.100.54:40434 as gw-ESP32-GW-xxx (...)"
 // Capture IP and optional :port separately so port can be stripped.
@@ -17,16 +17,8 @@ async function updateDeviceIp(clientId: string, ip: string): Promise<void> {
 }
 
 export function startMqttTracker(): void {
-  const host = process.env.MQTT_HOST || "localhost";
-  // Default port 1884: Broker 2 (gateway → backend layer; $SYS logs contain gateway IPs)
-  const port = Number(process.env.MQTT_PORT) || 1884;
-  const url = `mqtt://${host}:${port}`;
-
-  const client = mqtt.connect(url, {
-    clientId: "iot-backend-tracker",
-    clean: true,
-    reconnectPeriod: 5000,
-  });
+  // Broker 2 (gateway → backend layer; $SYS logs contain gateway IPs), MQTT over TLS
+  const client = connectBroker("iot-backend-tracker");
 
   client.on("connect", () => {
     console.log("[mqttTracker] connected, subscribing to $SYS logs");

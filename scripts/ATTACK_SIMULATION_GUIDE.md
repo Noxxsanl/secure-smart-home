@@ -71,7 +71,7 @@ Toi thieu:
 | Backend health | `http://localhost:5000/api/health` |
 | MySQL tren host | `localhost:3308` |
 | MQTT Broker 1 (Sensor↔GW) | `localhost:1883` |
-| MQTT Broker 2 (GW→Backend) | `localhost:1884` |
+| MQTT Broker 2 (GW→Backend) | `localhost:8883` (TLS) |
 
 ---
 
@@ -197,7 +197,7 @@ Voi cach nay, tren host:
 
 - MySQL la `localhost:3308`
 - MQTT Broker 1 (Sensor↔Gateway) la `localhost:1883`
-- MQTT Broker 2 (Gateway→Backend) la `localhost:1884`
+- MQTT Broker 2 (Gateway→Backend) la `localhost:8883` (chi MQTT over TLS, CA: `mosquitto/certs/ca.crt`)
 
 ### 5.2 Cau hinh Backend local
 
@@ -215,7 +215,7 @@ DB_NAME=iot_managerDeviceIoT
 JWT_SECRET=local_dev_secret_key_change_in_production_32chars
 
 MQTT_HOST=localhost
-MQTT_PORT=1884
+MQTT_PORT=8883
 
 FRONTEND_URL=http://localhost:3000
 
@@ -356,7 +356,7 @@ Sua cac gia tri:
 
 // Broker 2 - Publish du lieu len Backend
 #define MQTT_BROKER2_HOST  "192.168.1.100"
-#define MQTT_BROKER2_PORT  1884
+#define MQTT_BROKER2_PORT  8883
 
 #define BACKEND_URL    "http://192.168.1.100:3000/api/device/data"
 ```
@@ -392,7 +392,7 @@ IoT Gateway Node - Starting
 Gateway ID : ESP32-GW-...
 Backend URL: http://192.168.1.100:3000/api/device/data
 [MQTT-SUB] Broker 1: 192.168.1.100:1883
-[MQTT-PUB] Broker 2: 192.168.1.100:1884
+[MQTT-PUB] Broker 2: 192.168.1.100:8883 (TLS)
 [MAIN] Ready - listening for sensor data...
 ```
 
@@ -875,7 +875,7 @@ Kiem tra:
 
 - ESP32 va may Docker cung mang WiFi.
 - `MQTT_BROKER1_HOST` / `MQTT_BROKER2_HOST` la IP LAN cua may, khong phai `localhost`.
-- Cong `1883` (Broker 1) va `1884` (Broker 2) khong bi firewall chan.
+- Cong `1883` (Broker 1) va `8883` (Broker 2, TLS) khong bi firewall chan.
 - Ca hai container `iot-mqtt-broker-1` va `iot-mqtt-broker-2` dang chay.
 
 ### Gateway forward fail

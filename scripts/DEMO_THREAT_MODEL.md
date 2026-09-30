@@ -127,7 +127,7 @@ Kết quả mong đợi — tất cả status `running` hoặc `healthy`:
 NAME                  STATUS              PORTS
 iot-mysql             running (healthy)   0.0.0.0:3308->3306/tcp
 iot-mqtt-broker-1     running             0.0.0.0:1883->1883/tcp
-iot-mqtt-broker-2     running             0.0.0.0:1884->1884/tcp
+iot-mqtt-broker-2     running             0.0.0.0:8883->8883/tcp
 iot-backend           running (healthy)   0.0.0.0:5000->5000/tcp
 iot-frontend          running             0.0.0.0:3000->3000/tcp
 iot-nginx             running             0.0.0.0:80->80/tcp
@@ -1824,7 +1824,7 @@ Phần này dùng cho báo cáo — phân tích các rủi ro mà hệ thống *
 | **Commit lên GitHub public** | `config.h` chứa key bị index công khai vĩnh viễn | Thêm `config.h` vào `.gitignore`, dùng OTA cấp key |
 | **Log server in ra key** | Key xuất hiện trong log file, ai có quyền đọc log là có key | Code review, không log credentials, kiểm tra với `grep -r "secret_key"` trong log |
 | **Database bị breach** | Secret key lưu plain text → toàn bộ key bị lộ | Mã hóa AES-256-GCM trước khi lưu, master key trong env var |
-| **Traffic MQTT không mã hóa** | Sniff payload trên mạng LAN (dù HMAC vẫn an toàn) | Bật TLS trên Mosquitto, cổng 8883 thay vì 1883 |
+| **Traffic MQTT không mã hóa** | Sniff payload trên mạng LAN (dù HMAC vẫn an toàn) | Đã xử lý cho Gateway↔Backend: Broker 2 chỉ nhận TLS cổng 8883 (`scripts/gen_mqtt_certs.sh`, kiểm bằng `scripts/check_mqtt_tls.sh`). Broker 1 (Sensor↔Gateway, LAN nội bộ) vẫn plaintext |
 
 ### 13.2 — Kịch bản tấn công vật lý (Out of scope nhưng nên đề cập)
 

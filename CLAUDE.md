@@ -11,14 +11,14 @@
 | Web (3 app) | `frontend/{admin,operator,user}/`, dùng chung `frontend/packages/{shared,console}` | Next.js **16.2.5**, React 19, Tailwind v4, SWR, npm workspaces | **100% mock** (`packages/shared/mock/`). Mỗi role hệ thống một app (:3001/:3002/:3003). App `user` là cổng web khách hàng — ngoài phạm vi PRD V2 (§2.2, FR-1.4), xem `frontend/README.md` |
 | Mobile | `mobile/lib/` | Flutter, chưa có package nào ngoài SDK | **100% UI mockup**, cho khách hàng (USER) |
 | Firmware | `firmware/{gateway-node,sensor-node,sensor-node-2}` | PlatformIO + Arduino, `esp32doit-devkit-v1` | Chạy thật. `firmware/ESP32-S3-Touch-LCD-7B` là vendor — không sửa |
-| Hạ tầng | `docker-compose.yml`, `mosquitto/`, `nginx/` | 2 broker Mosquitto (1883, 1884), MySQL host 3308 | Không TLS, `allow_anonymous true` |
+| Hạ tầng | `docker-compose.yml`, `mosquitto/`, `nginx/` | 2 broker Mosquitto (1883 plaintext, 8883 TLS), MySQL host 3308 | Broker 2 chỉ TLS (cert: `scripts/gen_mqtt_certs.sh`, gitignored `mosquitto/certs/`); cả hai vẫn `allow_anonymous true`, chưa ACL |
 | Demo tấn công | `scripts/attack_demo*.sh` | bash + curl + openssl | Dùng khi bảo vệ |
 
-Luồng dữ liệu: Sensor —`local/sensors/+/data` (Broker 1)→ Gateway verify HMAC sensor, ký HMAC gateway —`gateway/<GW_ID>/data` (Broker 2)→ `backend/src/services/mqttDataService.ts` verify 2 lớp → `sensor_data`. Fallback HTTP `POST /api/device/data`.
+Luồng dữ liệu: Sensor —`local/sensors/+/data` (Broker 1)→ Gateway verify HMAC sensor, ký HMAC gateway —`gateway/<GW_ID>/data` (Broker 2, TLS)→ `backend/src/services/mqttDataService.ts` verify 2 lớp → `sensor_data`. Fallback HTTP `POST /api/device/data`.
 
 ## Tài liệu (`docs/`)
 
-`00` phân tích · `01` product architecture, RBAC, claim · `02` WiFi provisioning · `03` backend (§9 API, §10 MQTT, §18 AI) · `04` database (§6 naming, §7 bảng) · `05` frontend design · `06` tiến độ frontend · `07` mobile · `08` firmware ESP-IDF · `09` security · `10` roadmap · `11` chạy local · `12` brief · `13` **PRD** (FR-x.y, NFR-*, tiêu chí nghiệm thu, §14 truy vết). PRD 13 thắng roadmap 10 khi mâu thuẫn.
+`00` phân tích · `01` product architecture, RBAC, claim · `02` WiFi provisioning · `03` backend (§9 API, §10 MQTT, §18 AI) · `04` database (§6 naming, §7 bảng) · `05` frontend design · `06` tiến độ frontend · `07` mobile · `08` firmware ESP-IDF · `09` security · `10` roadmap · `11` chạy local · `12` brief · `13` **PRD** (FR-x.y, NFR-*, tiêu chí nghiệm thu, §14 truy vết) · `14` MQTT TLS (hiện trạng FR-12.3, cách chạy, việc còn thiếu). PRD 13 thắng roadmap 10 khi mâu thuẫn.
 
 Domain đích: `Customer → SmartHome → Room → Device(Gateway|Node) → Sensor → Telemetry`. API tách theo kênh: `/api/dashboard/**` (cookie, ADMIN/OPERATOR), `/api/mobile/**` (JWT Bearer, USER), `/api/device/**` (HMAC). RBAC 2 tầng: role hệ thống quyết định kênh, role trong nhà (OWNER/CONTROLLER/VIEWER/GUEST) quyết định hành động.
 
@@ -26,7 +26,7 @@ Domain đích: `Customer → SmartHome → Room → Device(Gateway|Node) → Sen
 
 1. Secret thiết bị/gateway chỉ trả **1 lần** khi tạo; không hiển thị trên Dashboard.
 2. Không log password, token, secret, WiFi password ở bất kỳ tầng nào.
-3. Không đọc/in/commit `firmware/**/config_1.h|config_2.h|config_gw.h`, `backend/.env`, `frontend/.env.local`.
+3. Không đọc/in/commit `firmware/**/config_1.h|config_2.h|config_gw.h`, `backend/.env`, `frontend/.env.local`, `mosquitto/certs/*.key`. Không tắt kiểm chứng TLS (`rejectUnauthorized: false`, `setInsecure()`).
 4. `middleware/validateDevice.ts` (HTTP) và `services/mqttDataService.ts` (MQTT) phải giữ cùng logic xác thực.
 5. HMAC `HMAC-SHA256(secret, "<device_id>:<unix_ts>")` hex thường phải khớp backend ↔ gateway ↔ sensor.
 6. Dữ liệu theo nhà: nhà không thuộc quyền → **404**, sai role trong nhà → **403**.

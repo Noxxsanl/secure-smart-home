@@ -1,8 +1,8 @@
 // Đường nhận dữ liệu chính: subscribe Broker 2 (gateway → backend) và
 // thực hiện xác thực HMAC 2 lớp giống hệt đường fallback HTTP (data.routes.ts).
 // Hai đường phải luôn đồng bộ logic xác thực khi có thay đổi.
-import mqtt from "mqtt";
 import pool from "../config/db";
+import { connectBroker } from "../config/mqtt";
 import { verifyGatewayHMAC, verifyDeviceHMAC } from "./hmacService";
 import { log, logDataRecvWithPrune } from "./auditLogger";
 
@@ -158,16 +158,8 @@ async function handleGatewayData(raw: string): Promise<void> {
 }
 
 export function startMqttDataService(): void {
-  const host = process.env.MQTT_HOST || "localhost";
-  // Default port 1884: Broker 2 (gateway → backend layer)
-  const port = Number(process.env.MQTT_PORT) || 1884;
-  const url  = `mqtt://${host}:${port}`;
-
-  const client = mqtt.connect(url, {
-    clientId:        "iot-backend-data",
-    clean:           true,
-    reconnectPeriod: 5000,
-  });
+  // Broker 2 (gateway → backend layer), MQTT over TLS
+  const client = connectBroker("iot-backend-data");
 
   client.on("connect", () => {
     console.log("[mqttData] connected, subscribing to gateway/+/data");

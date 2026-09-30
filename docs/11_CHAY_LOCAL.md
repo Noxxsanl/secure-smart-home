@@ -10,7 +10,7 @@
 ```
 Terminal 1: MySQL 8.0             (database, port 3306)
 Terminal 2: Mosquitto Broker 1    (Sensor ↔ Gateway, port 1883)
-Terminal 3: Mosquitto Broker 2    (Gateway → Backend, port 1884)
+Terminal 3: Mosquitto Broker 2    (Gateway → Backend, TLS port 8883)
 Terminal 4: Backend Express       (API,      port 5000)
 Terminal 5: Frontend Next.js      (UI,       port 3000)
 ```
@@ -152,14 +152,28 @@ persistence_location e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\data\broker1\
 '@ | Out-File -Encoding utf8 "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker1_local.conf"
 ```
 
-### Tạo file config cho Broker 2 (Gateway → Backend, port 1884)
+### Sinh chứng chỉ TLS cho Broker 2
+
+Broker 2 chỉ nhận MQTT over TLS (FR-12.3). Mở **Git Bash** ở thư mục gốc repo, truyền IP LAN của máy này (IP mà gateway dùng làm `MQTT_BROKER2_HOST`):
+
+```bash
+bash scripts/gen_mqtt_certs.sh 192.168.1.100
+```
+
+Script tạo `mosquitto\certs\` (CA + cert broker) và `firmware\gateway-node\include\mqtt_ca_cert.h`. Chỉ cần chạy lại khi đổi IP LAN — CA giữ nguyên nên không phải nạp lại firmware. Chi tiết: [`14_MQTT_TLS.md`](14_MQTT_TLS.md).
+
+### Tạo file config cho Broker 2 (Gateway → Backend, TLS port 8883)
 
 Tạo file `mosquitto\broker2_local.conf`:
 
 ```powershell
-# Tạo file config Broker 2
+# Tạo file config Broker 2 — chỉ listener TLS, không còn cổng plaintext
 @'
-listener 1884
+listener 8883
+cafile   e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\certs\ca.crt
+certfile e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\certs\server.crt
+keyfile  e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\certs\server.key
+tls_version tlsv1.2
 allow_anonymous true
 log_type all
 log_dest stdout
@@ -183,7 +197,7 @@ Output mong đợi:
 1749383000: mosquitto version 2.x.x running
 ```
 
-### Mở Terminal 3 — chạy Broker 2 (port 1884)
+### Mở Terminal 3 — chạy Broker 2 (TLS port 8883)
 
 ```powershell
 & "C:\Program Files\mosquitto\mosquitto.exe" `
@@ -194,7 +208,7 @@ Output mong đợi:
 Output mong đợi:
 ```
 1749383000: mosquitto version 2.x.x starting
-1749383000: Opening ipv4 listen socket on port 1884.
+1749383000: Opening ipv4 listen socket on port 8883.
 1749383000: mosquitto version 2.x.x running
 ```
 
@@ -232,9 +246,10 @@ DB_NAME=iot_managerDeviceIoT
 # JWT (phải >= 32 ký tự)
 JWT_SECRET=local_dev_secret_key_change_in_production_32chars
 
-# MQTT Broker 2 (Gateway → Backend layer)
+# MQTT Broker 2 (Gateway → Backend layer) — MQTT over TLS
 MQTT_HOST=localhost
-MQTT_PORT=1884
+MQTT_PORT=8883
+MQTT_CA_FILE=../mosquitto/certs/ca.crt
 
 # CORS
 FRONTEND_URL=http://localhost:3000
@@ -245,8 +260,9 @@ ADMIN_PASSWORD=admin123
 '@ | Out-File -Encoding utf8 .env
 ```
 
-> **Quan trọng:** Khi chạy local, `DB_HOST=localhost` và `MQTT_HOST=localhost` với `MQTT_PORT=1884` (kết nối Broker 2).
-> Khác với Docker: `MQTT_HOST=mqtt-broker-2` và `MQTT_PORT=1883` (cổng nội bộ Docker network).
+> **Quan trọng:** Khi chạy local, `DB_HOST=localhost` và `MQTT_HOST=localhost` với `MQTT_PORT=8883` (Broker 2, TLS). `MQTT_HOST` phải nằm trong SAN của cert broker (`localhost` luôn có sẵn).
+> Khác với Docker: `MQTT_HOST=mqtt-broker-2`, `MQTT_PORT=8883`, `MQTT_CA_FILE=/certs/mqtt-ca.crt` (compose tự đặt).
+> Thiếu file CA thì backend dừng ngay khi khởi động với lỗi `[startup] Cannot read MQTT CA certificate ...`.
 
 ### Cài dependencies
 
@@ -274,7 +290,8 @@ Output mong đợi:
 ```
 [ts-node-dev] Starting...
 [DB] Connected to MySQL at localhost:3306
-[MQTT] Connected to broker at localhost:1884
+[mqttTracker] connected, subscribing to $SYS logs
+[mqttData] connected, subscribing to gateway/+/data
 [Server] Listening on port 5000
 ```
 
@@ -384,11 +401,11 @@ if ($mqtt1) {
 }
 
 # Mosquitto Broker 2 (Gateway → Backend)
-$mqtt2 = Get-NetTCPConnection -LocalPort 1884 -ErrorAction SilentlyContinue
+$mqtt2 = Get-NetTCPConnection -LocalPort 8883 -ErrorAction SilentlyContinue
 if ($mqtt2) {
-    Write-Host "[Broker 2]  OK — port 1884 đang mở" -ForegroundColor Green
+    Write-Host "[Broker 2]  OK — port 8883 (TLS) đang mở" -ForegroundColor Green
 } else {
-    Write-Host "[Broker 2]  FAIL — port 1884 chưa mở" -ForegroundColor Red
+    Write-Host "[Broker 2]  FAIL — port 8883 (TLS) chưa mở" -ForegroundColor Red
 }
 ```
 
@@ -416,7 +433,7 @@ Mỗi lần mở máy muốn chạy hệ thống, làm theo thứ tự này:
 [Terminal 2] Mosquitto Broker 1 (Sensor ↔ Gateway, port 1883)
   & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker1_local.conf" -v
 
-[Terminal 3] Mosquitto Broker 2 (Gateway → Backend, port 1884)
+[Terminal 3] Mosquitto Broker 2 (Gateway → Backend, TLS port 8883)
   & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker2_local.conf" -v
 
 [Terminal 4] Backend
@@ -483,11 +500,19 @@ Phải đủ **32 ký tự trở lên**.
 Mosquitto chưa chạy hoặc sai port.
 
 ```powershell
-# Kiểm tra port 1883 (Broker 1) và 1884 (Broker 2) có mở không
+# Kiểm tra port 1883 (Broker 1) và 8883 (Broker 2, TLS) có mở không
 Get-NetTCPConnection -LocalPort 1883 -ErrorAction SilentlyContinue
-Get-NetTCPConnection -LocalPort 1884 -ErrorAction SilentlyContinue
+Get-NetTCPConnection -LocalPort 8883 -ErrorAction SilentlyContinue
 # Nếu không thấy gì → Mosquitto chưa chạy → chạy lại Terminal 2 và/hoặc Terminal 3
 ```
+
+Port mở nhưng backend log `[mqttData] error: ...` → lỗi TLS. Kiểm tra bằng Git Bash: `bash scripts/check_mqtt_tls.sh localhost 8883`
+
+| Lỗi backend | Nguyên nhân | Cách sửa |
+|---|---|---|
+| `self-signed certificate in certificate chain` | `MQTT_CA_FILE` trỏ tới CA khác CA đã ký cert broker | Trỏ về `mosquitto/certs/ca.crt` hiện tại; khởi động lại broker sau khi sinh cert |
+| `Hostname/IP does not match certificate's altnames` | `MQTT_HOST` không có trong SAN của cert | Chạy lại `gen_mqtt_certs.sh` kèm host đó, hoặc dùng `localhost` |
+| `connect ECONNREFUSED ...:1884` | `.env` cũ còn `MQTT_PORT=1884` (cổng plaintext đã bỏ) | `MQTT_PORT=8883` |
 
 ### Lỗi Frontend: `Failed to fetch` / API trả về 500
 

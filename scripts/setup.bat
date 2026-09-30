@@ -50,6 +50,19 @@ if not exist "backend\.env" (
     echo [OK] backend\.env da ton tai.
 )
 
+:: Chung chi TLS cho MQTT Broker 2 (can Git Bash + openssl). Tham so cua setup.bat (IP LAN) duoc chuyen tiep.
+if not exist "mosquitto\certs\server.crt" (
+    if not exist "%ProgramFiles%\Git\bin\bash.exe" (
+        echo [ERROR] Chua co chung chi MQTT TLS. Mo Git Bash va chay: bash scripts/gen_mqtt_certs.sh ^<IP LAN^>
+        exit /b 1
+    )
+    echo [INFO] Chua co chung chi MQTT TLS - dang sinh...
+    "%ProgramFiles%\Git\bin\bash.exe" scripts/gen_mqtt_certs.sh %*
+    if errorlevel 1 exit /b 1
+) else (
+    echo [OK] Chung chi MQTT TLS da co.
+)
+
 :: Build and start
 echo.
 echo [INFO] Dang build va khoi dong services...

@@ -1,6 +1,6 @@
 # Gateway Node Firmware
 
-Firmware cho **ESP32 DOIT DevKit V1** hoạt động như một IoT Gateway: nhận dữ liệu từ các Sensor Node qua MQTT nội bộ, xác thực HMAC, rồi publish lên Backend qua MQTT.
+Firmware cho **ESP32 DOIT DevKit V1** hoạt động như một IoT Gateway: nhận dữ liệu từ các Sensor Node qua MQTT nội bộ, xác thực HMAC, rồi publish lên Backend qua **MQTT over TLS**.
 
 ---
 
@@ -17,11 +17,11 @@ Sensor Node (ESP32 DOIT V1)
  Gateway Node (ESP32 DOIT V1)           ← firmware này
       │  1. Validate: whitelist + timestamp ±300s + HMAC
       │  2. Re-sign: Gateway HMAC
-      │  MQTT Publish
+      │  MQTT Publish qua TLS (verify cert broker bằng CA nội bộ)
       │  topic: gateway/{gateway_id}/data
       ▼
- MQTT Broker
-      │  Backend Subscribe: gateway/+/data
+ MQTT Broker 2 (Mosquitto – TLS :8883)
+      │  Backend Subscribe (TLS): gateway/+/data
       ▼
  Backend API (Express.js :5000)
 ```
@@ -50,12 +50,13 @@ Sensor Node (ESP32 DOIT V1)
 ```
 gateway-node/
 ├── include/
-│   └── config_gw.h          # Cấu hình tập trung (WiFi, MQTT, secrets, sensor whitelist)
+│   ├── config_gw.h          # Cấu hình tập trung (WiFi, MQTT, secrets, sensor whitelist) — gitignored
+│   └── mqtt_ca_cert.h       # CA của Broker 2, sinh bằng scripts/gen_mqtt_certs.sh — gitignored
 ├── lib/
 │   ├── hmac_util/            # HMAC-SHA256 dùng mbedTLS tích hợp của ESP-IDF
 │   ├── wifi_manager/         # Kết nối và auto-reconnect WiFi
 │   ├── ntp_sync/             # Đồng bộ thời gian NTP (UTC+7)
-│   ├── mqtt_client/          # MQTT subscriber + auto-reconnect
+│   ├── mqtt_client/          # MQTT: Broker 1 (subscribe) + Broker 2 (publish qua TLS), auto-reconnect
 │   ├── forwarder/            # Validate payload, ký Gateway HMAC, MQTT Publish
 │   └── sensor_registry/      # Quản lý danh sách sensor (static + dynamic fetch)
 ├── src/
@@ -79,8 +80,10 @@ Mở [`include/config_gw.h`](include/config_gw.h) và điền đầy đủ các 
 #define WIFI_PASS "your-password"
 
 // 3. MQTT Broker (IP máy chạy Mosquitto)
-#define MQTT_HOST "192.168.1.100"
-#define MQTT_PORT 1883
+#define MQTT_BROKER1_HOST "192.168.1.100"   // Sensor → Gateway, plaintext
+#define MQTT_BROKER1_PORT 1883
+#define MQTT_BROKER2_HOST "192.168.1.100"   // Gateway → Backend, TLS — phải nằm trong SAN của cert
+#define MQTT_BROKER2_PORT 8883
 
 // 4. URL lấy danh sách sensor từ Backend (qua Nginx cổng 80)
 #define BACKEND_SENSORS_URL "http://192.168.1.100/api/device/sensors"
@@ -90,6 +93,16 @@ static const SensorCredential KNOWN_SENSORS[] = {
     { "ESP32-SN-XXXXXXXX", "sensor-64-char-hex-secret" },
 };
 ```
+
+### Chứng chỉ TLS cho Broker 2
+
+Gateway chỉ kết nối Broker 2 qua TLS và kiểm chứng chứng chỉ broker bằng CA nội bộ (không có chế độ bỏ qua kiểm tra). Từ thư mục gốc repo:
+
+```bash
+bash scripts/gen_mqtt_certs.sh 192.168.1.100   # đúng giá trị MQTT_BROKER2_HOST
+```
+
+Script sinh `include/mqtt_ca_cert.h`. Thiếu file này thì build báo lỗi. IP/hostname truyền vào phải trùng `MQTT_BROKER2_HOST`, nếu không gateway sẽ từ chối kết nối (`X509 - Certificate verification failed`). Đổi IP thì chạy lại script: CA giữ nguyên nên không phải nạp lại firmware.
 
 ---
 
@@ -181,9 +194,11 @@ pio device monitor --baud 115200
 [WiFi] OK – IP: 192.168.1.42
 [NTP] Syncing....
 [NTP] OK – 2024-06-01 08:00:00 (UTC+7)
-[MQTT] Broker: 192.168.1.100:1883
-[MQTT] Connecting... OK
-[MQTT] Subscribed to 'local/sensors/+/data'
+[MQTT-SUB] Broker1: 192.168.1.100:1883
+[MQTT-PUB] Broker2: 192.168.1.100:8883 (TLS)
+[MQTT-SUB] Connecting to Broker1 192.168.1.100:1883 as 'gw-sub-ESP32-GW-XXXXXXXX'... OK
+[MQTT-SUB] Subscribed to 'local/sensors/+/data'
+[MQTT-PUB] Connecting to Broker2 192.168.1.100:8883 (TLS) as 'gw-ESP32-GW-XXXXXXXX'... OK
 [Registry] Fetching sensor list from backend...
 [Registry] Loaded 1 sensor(s)
 
@@ -202,4 +217,5 @@ pio device monitor --baud 115200
 |---|---|---|
 | [PubSubClient](https://github.com/knolleary/pubsubclient) | ^2.8 | MQTT client |
 | [ArduinoJson](https://arduinojson.org/) | ^6.21.5 | Parse/build JSON |
-| mbedTLS | tích hợp ESP-IDF | HMAC-SHA256 |
+| WiFiClientSecure | tích hợp Arduino core | TLS cho kết nối Broker 2 |
+| mbedTLS | tích hợp ESP-IDF | HMAC-SHA256, TLS 1.2 |
