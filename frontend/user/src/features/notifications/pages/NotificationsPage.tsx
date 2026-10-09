@@ -6,11 +6,14 @@ import SeverityBadge from "@smarthome/shared/ui/SeverityBadge";
 import EmptyState from "@smarthome/shared/ui/EmptyState";
 import Skeleton from "@smarthome/shared/ui/Skeleton";
 import { relativeTime } from "@smarthome/shared/lib/time";
-import type { NotificationSeverity } from "@smarthome/shared/mock/types";
+import type { Severity } from "@/lib/api/types";
+import ErrorPanel from "@/widgets/ErrorPanel";
 import HomeGate from "@/features/home/components/HomeGate";
 import { useHomeNotifications } from "@/features/notifications/hooks/useHomeNotifications";
 
-const FILTERS: { value: NotificationSeverity | "all" | "unread"; label: string }[] = [
+type Filter = Severity | "all" | "unread";
+
+const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "Tất cả" },
   { value: "unread", label: "Chưa đọc" },
   { value: "critical", label: "Critical" },
@@ -20,8 +23,8 @@ const FILTERS: { value: NotificationSeverity | "all" | "unread"; label: string }
 ];
 
 function Notifications() {
-  const { notifications, unreadCount, isLoading, markRead, markAllRead } = useHomeNotifications();
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]["value"]>("all");
+  const { notifications, unreadCount, isLoading, error, markRead, markAllRead, refresh } = useHomeNotifications();
+  const [filter, setFilter] = useState<Filter>("all");
 
   const filtered = notifications.filter((n) =>
     filter === "all" ? true : filter === "unread" ? !n.is_read : n.severity === filter
@@ -49,7 +52,7 @@ function Notifications() {
       <div className="flex flex-wrap items-center gap-1.5">
         {FILTERS.map(({ value, label }) => (
           <button
-            key={value} type="button" onClick={() => setFilter(value)}
+            key={value} type="button" onClick={() => setFilter(value)} aria-pressed={filter === value}
             className={`rounded px-3 py-1.5 text-xs font-semibold transition
               ${filter === value ? "bg-brand text-white" : "bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-600"}`}
           >
@@ -58,41 +61,49 @@ function Notifications() {
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-md border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800">
-        {isLoading ? (
-          <div className="space-y-2 p-4"><Skeleton className="h-12" /><Skeleton className="h-12" /></div>
-        ) : filtered.length === 0 ? (
-          <EmptyState icon={Bell} title="Không có thông báo nào" description="Thử đổi bộ lọc." />
-        ) : (
-          <ul className="divide-y divide-gray-100 dark:divide-slate-700">
-            {filtered.map((n) => (
-              <li key={n.id}>
-                <button
-                  type="button"
-                  onClick={() => !n.is_read && markRead(n.id)}
-                  className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors
-                    ${n.is_read ? "bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700/50" : "bg-brand-soft/40 hover:bg-brand-soft/70"}`}
-                >
-                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-slate-700">
-                    <Bell size={14} className="text-gray-500 dark:text-slate-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className={`text-sm ${n.is_read ? "font-medium text-gray-700 dark:text-slate-300" : "font-semibold text-gray-900 dark:text-slate-100"}`}>
-                        {n.title}
-                      </p>
-                      <SeverityBadge severity={n.severity} />
-                      {!n.is_read && <span className="h-2 w-2 shrink-0 rounded-full bg-brand" />}
+      {error ? (
+        <ErrorPanel error={error} onRetry={() => refresh()} />
+      ) : (
+        <div className="overflow-hidden rounded-md border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800">
+          {isLoading ? (
+            <div className="space-y-2 p-4"><Skeleton className="h-12" /><Skeleton className="h-12" /></div>
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={Bell}
+              title="Không có thông báo nào"
+              description={notifications.length === 0 ? "Cảnh báo thiết bị, lời mời và gợi ý tự động hoá sẽ hiện ở đây." : "Thử đổi bộ lọc."}
+            />
+          ) : (
+            <ul className="divide-y divide-gray-100 dark:divide-slate-700">
+              {filtered.map((n) => (
+                <li key={n.id}>
+                  <button
+                    type="button"
+                    onClick={() => !n.is_read && markRead(n.id)}
+                    className={`flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors
+                      ${n.is_read ? "bg-white dark:bg-slate-800 hover:bg-gray-50 dark:hover:bg-slate-700/50" : "bg-brand-soft/40 hover:bg-brand-soft/70"}`}
+                  >
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded bg-gray-100 dark:bg-slate-700">
+                      <Bell size={14} className="text-gray-500 dark:text-slate-400" />
                     </div>
-                    <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">{n.message}</p>
-                    <p className="mt-1 text-[11px] text-gray-400 dark:text-slate-500">{relativeTime(n.created_at)}</p>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className={`text-sm ${n.is_read ? "font-medium text-gray-700 dark:text-slate-300" : "font-semibold text-gray-900 dark:text-slate-100"}`}>
+                          {n.title}
+                        </p>
+                        <SeverityBadge severity={n.severity} />
+                        {!n.is_read && <span className="h-2 w-2 shrink-0 rounded-full bg-brand" />}
+                      </div>
+                      <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">{n.message}</p>
+                      <p className="mt-1 text-[11px] text-gray-400 dark:text-slate-500">{relativeTime(n.created_at)}</p>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

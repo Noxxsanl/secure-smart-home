@@ -1,72 +1,76 @@
-import { FetchError } from "@smarthome/shared/api/errors";
-import { mockDelay } from "@smarthome/shared/mock/store";
-import type { User, UserRole } from "@smarthome/shared/auth/types";
+import { api } from "@smarthome/shared/api/http";
+import type { RegisterInput, User, UserRole } from "@smarthome/shared/auth/types";
 
-// Demo accounts — no backend required. Each portal only accepts its own role,
-// mirroring FR-1.4 (sai kênh → 403) so a staff session can never be reused on
-// the customer portal and vice versa.
-const MOCK_ACCOUNTS: { username: string; password: string; user: User }[] = [
-  {
-    username: "admin", password: "admin123",
-    user: { id: 1, username: "admin", role: "admin", display_name: "admin", customer_id: null },
-  },
-  {
-    username: "operator01", password: "operator123",
-    user: { id: 2, username: "operator01", role: "operator", display_name: "operator01", customer_id: null },
-  },
-  {
-    username: "user01", password: "user123",
-    user: { id: 101, username: "user01", role: "user", display_name: "Nguyễn Hoàng Đạt", customer_id: 1 },
-  },
-];
+// ---------------------------------------------------------------------------
+// Auth thật theo kênh (CONTRACT §2):
+//   admin / operator → /api/dashboard/auth/*  body { username, password, portal }
+//   user (khách)     → /api/portal/auth/*     body { email, password }
+// Backend set cookie HttpOnly `sh_<role>`; JS không bao giờ thấy token.
+// Mọi lời gọi ở đây dùng `skipAuthRedirect`: 401 của login/me là kết quả bình
+// thường, không phải "phiên hết hạn giữa chừng".
+// ---------------------------------------------------------------------------
 
-export const DEMO_ACCOUNT_HINTS: Record<UserRole, string> = Object.fromEntries(
-  MOCK_ACCOUNTS.map((a) => [a.user.role, `${a.username} / ${a.password}`])
-) as Record<UserRole, string>;
+type MeResponse = { user: RawUser };
 
-function storageKey(role: UserRole) {
-  return `mock_auth_session:${role}`;
+// Phòng khi backend bỏ trống vài trường tuỳ chọn — UI luôn nhận đủ kiểu User.
+type RawUser = Partial<User> & { id: number; role: UserRole };
+
+function authBase(role: UserRole): string {
+  return role === "user" ? "/api/portal/auth" : "/api/dashboard/auth";
 }
 
-function readSession(role: UserRole): User | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(storageKey(role));
-    if (!raw) return null;
-    const user = JSON.parse(raw) as User;
-    return user.role === role ? user : null;
-  } catch {
-    return null;
-  }
+export function normalizeUser(raw: RawUser): User {
+  const username = raw.username ?? raw.email ?? "";
+  return {
+    id: raw.id,
+    role: raw.role,
+    username,
+    email: raw.email ?? null,
+    display_name: raw.display_name || username,
+    customer_id: raw.customer_id ?? null,
+    user_tag: raw.user_tag ?? null,
+  };
 }
 
-export async function login(portalRole: UserRole, username: string, password: string): Promise<User> {
-  await mockDelay(undefined, 300);
-  const match = MOCK_ACCOUNTS.find((a) => a.username === username && a.password === password);
-  if (!match) {
-    throw new FetchError(401, { error: "INVALID_CREDENTIALS" });
-  }
-  if (match.user.role !== portalRole) {
-    throw new FetchError(403, { error: "WRONG_PORTAL", role: match.user.role });
-  }
-  try {
-    window.localStorage.setItem(storageKey(portalRole), JSON.stringify(match.user));
-  } catch {
-    // Storage bị chặn (private mode) — phiên chỉ sống trong bộ nhớ.
-  }
-  return match.user;
+/**
+ * Đăng nhập vào cổng `portalRole`. `identifier` là tên đăng nhập (staff) hoặc
+ * email / mã người dùng (khách hàng).
+ */
+export async function login(portalRole: UserRole, identifier: string, password: string): Promise<User> {
+  const body =
+    portalRole === "user"
+      ? { email: identifier, password }
+      : { username: identifier, password, portal: portalRole };
+  const res = await api<MeResponse>(`${authBase(portalRole)}/login`, {
+    method: "POST",
+    body,
+    skipAuthRedirect: true,
+  });
+  return normalizeUser(res.user);
 }
 
+/** Đăng ký tài khoản khách hàng — chỉ có trên cổng khách hàng. Thành công thì đã có phiên. */
+export async function register(input: RegisterInput): Promise<User> {
+  const res = await api<MeResponse>("/api/portal/auth/register", {
+    method: "POST",
+    body: {
+      full_name: input.full_name,
+      email: input.email,
+      password: input.password,
+      ...(input.phone ? { phone: input.phone } : {}),
+    },
+    skipAuthRedirect: true,
+  });
+  return normalizeUser(res.user);
+}
+
+/** Thu hồi phiên phía server (backend xoá cookie HttpOnly). */
 export async function logout(portalRole: UserRole): Promise<void> {
-  await mockDelay(undefined, 100);
-  try {
-    window.localStorage.removeItem(storageKey(portalRole));
-  } catch {
-    // ignore
-  }
+  await api<void>(`${authBase(portalRole)}/logout`, { method: "POST", skipAuthRedirect: true });
 }
 
-export async function getUser(portalRole: UserRole): Promise<User | null> {
-  await mockDelay(undefined, 150);
-  return readSession(portalRole);
+/** Phiên hiện tại của cổng. Ném FetchError (401 khi chưa đăng nhập / phiên vô hiệu). */
+export async function getUser(portalRole: UserRole): Promise<User> {
+  const res = await api<MeResponse>(`${authBase(portalRole)}/me`, { skipAuthRedirect: true });
+  return normalizeUser(res.user);
 }

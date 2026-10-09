@@ -1,22 +1,32 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { KeyRound, Smartphone } from "lucide-react";
+import { KeyRound, LifeBuoy, Smartphone } from "lucide-react";
 import { useToast } from "@smarthome/shared/ui/Toast";
-import { claimHome, normalizeActivationCode } from "@smarthome/shared/mock/portal";
+import { apiErrorCode } from "@smarthome/shared/api/http";
+import { FetchError } from "@smarthome/shared/api/errors";
+import { claimHome } from "@/lib/api/claim";
+import { isCompleteActivationCode, isValidActivationCode, normalizeActivationCode } from "@/lib/activation";
+import { claimErrorMessage, retryAfterSeconds } from "@/lib/errors";
 import { useCurrentHome } from "@/features/home/providers/CurrentHomeProvider";
-import { claimErrorMessage } from "@/lib/errors";
+
+// Mã chứa ký tự ngoài bảng Crockford (VD chữ U) chắc chắn không tồn tại — báo
+// luôn như "mã không đúng" mà không tốn một lượt thử (FR-3.6 đếm lần nhập sai).
+const INVALID_CODE_ERROR = new FetchError(404, { error: "NOT_FOUND" });
 
 export default function ClaimHomePage() {
   const router = useRouter();
-  const { customerId, refreshHomes, selectHome } = useCurrentHome();
+  const { refresh, selectHome } = useCurrentHome();
   const { showToast } = useToast();
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Sau 429 RATE_LIMITED khoá nút đến hết thời gian backend yêu cầu chờ.
+  const [locked, setLocked] = useState(false);
 
-  const complete = code.replace(/-/g, "").length === 12;
+  const complete = isCompleteActivationCode(code);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -25,15 +35,25 @@ export default function ClaimHomePage() {
       setError("Activation Code gồm 12 ký tự (dạng XXXX-XXXX-XXXX). Vui lòng nhập đủ.");
       return;
     }
+    if (!isValidActivationCode(code)) {
+      setError(claimErrorMessage(INVALID_CODE_ERROR));
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const home = await claimHome(customerId, code);
-      await refreshHomes();
+      const { home } = await claimHome(code);
+      // Lấy lại danh sách nhà trước rồi mới chọn nhà mới, để nhà đó chắc chắn có trong danh sách.
+      await refresh();
       selectHome(home.id);
       showToast(`Đã kích hoạt ${home.name}. Bạn là chủ nhà.`);
       router.push("/home");
     } catch (err) {
       setError(claimErrorMessage(err));
+      if (apiErrorCode(err) === "RATE_LIMITED") {
+        setLocked(true);
+        setTimeout(() => setLocked(false), (retryAfterSeconds(err) ?? 15 * 60) * 1000);
+      }
       setSubmitting(false);
     }
   }
@@ -54,10 +74,11 @@ export default function ClaimHomePage() {
         <input
           id="activation-code"
           value={code}
-          // FR-3.2: tự chèn gạch, không phân biệt hoa/thường.
+          // FR-3.2: tự chèn gạch, không phân biệt hoa/thường; O→0, I/L→1 như backend.
           onChange={(e) => setCode(normalizeActivationCode(e.target.value))}
           placeholder="XXXX-XXXX-XXXX"
           autoComplete="off"
+          autoCapitalize="characters"
           spellCheck={false}
           className="h-12 w-full rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-4 text-center font-mono text-lg tracking-[0.3em] text-gray-900 dark:text-slate-100 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
         />
@@ -67,10 +88,10 @@ export default function ClaimHomePage() {
         )}
 
         <button
-          type="submit" disabled={submitting || !complete}
+          type="submit" disabled={submitting || locked || !complete}
           className="mt-4 h-10 w-full rounded bg-brand text-sm font-semibold text-white transition hover:brightness-90 disabled:opacity-50"
         >
-          {submitting ? "Đang kích hoạt…" : "Kích hoạt"}
+          {submitting ? "Đang kích hoạt…" : locked ? "Tạm khoá — vui lòng đợi" : "Kích hoạt"}
         </button>
       </form>
 
@@ -82,10 +103,13 @@ export default function ClaimHomePage() {
         </p>
       </div>
 
-      <div className="rounded-md bg-gray-50 dark:bg-slate-800/60 px-4 py-3 text-xs text-gray-500 dark:text-slate-400">
-        <p className="font-semibold text-gray-600 dark:text-slate-300">Mã demo (dữ liệu mock)</p>
-        <p className="mt-1 font-mono">7K2M-9QXA-4TPB · H3VD-8NRW-2CYE — hợp lệ</p>
-        <p className="font-mono">Q4ZT-6MJK-1PSX — đã dùng · B9FE-3WRA-7GMK — hết hạn</p>
+      <div className="flex gap-3 rounded-md border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-sm text-gray-600 dark:text-slate-300">
+        <LifeBuoy className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+        <p>
+          Mất tem hoặc không kích hoạt được? Liên hệ bộ phận hỗ trợ kèm <strong>mã người dùng</strong> của bạn (xem ở trang{" "}
+          <Link href="/profile" className="font-semibold text-brand hover:brightness-90">Hồ sơ</Link>) để nhân viên gán nhà
+          trực tiếp cho tài khoản.
+        </p>
       </div>
     </div>
   );

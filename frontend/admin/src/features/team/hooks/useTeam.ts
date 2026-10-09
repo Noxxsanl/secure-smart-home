@@ -1,31 +1,54 @@
-import useSWR from "swr";
-import { mockDelay, staffStore } from "@smarthome/shared/mock/store";
-import type { StaffAccount } from "@smarthome/shared/mock/types";
+"use client";
 
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import {
+  createOperatorAccount, deleteStaffAccount, teamKey, updateStaffAccount,
+} from "@smarthome/console/api/team.api";
+import type { StaffAccount } from "@smarthome/console/api/types";
+
+/**
+ * GET /team (Admin) + các thao tác POST/PATCH/DELETE /team. Mọi thao tác ném FetchError
+ * khi backend từ chối — trang dịch ra tiếng Việt qua `errorMessage`. Poll 10 s.
+ * Mật khẩu chỉ đi qua tham số của hàm, không lưu vào state hay log.
+ */
 export function useTeam() {
-  const { data, error, isLoading, mutate } = useSWR<StaffAccount[]>(
-    "/mock/team",
-    () => mockDelay(staffStore.list())
-  );
+  const { data, error, isLoading, isValidating, mutate } = useDashboardSWR<StaffAccount[]>(teamKey(), {
+    refreshInterval: 10_000,
+    keepPreviousData: true,
+  });
 
-  // `password` is collected by the create-member form to match the real
-  // account-creation UX, but the mock store has no auth of its own to set it on.
-  const createMember = async (username: string, password: string, role: "admin" | "operator" = "operator") => {
-    void password;
-    staffStore.create(username, role);
+  const createOperator = async (input: { username: string; password: string }) => {
+    const created = await createOperatorAccount(input);
     await mutate();
+    return created;
   };
 
-  const deleteMember = async (id: number) => {
-    staffStore.delete(id);
+  const setStatus = async (account: StaffAccount, status: "active" | "locked") => {
+    const updated = await updateStaffAccount(account.id, { status });
+    await mutate();
+    return updated;
+  };
+
+  const resetPassword = async (account: StaffAccount, password: string) => {
+    const updated = await updateStaffAccount(account.id, { password });
+    await mutate();
+    return updated;
+  };
+
+  const remove = async (account: StaffAccount) => {
+    await deleteStaffAccount(account.id);
     await mutate();
   };
 
   return {
     members: data ?? [],
     isLoading,
-    isError: !!error,
-    createMember,
-    deleteMember,
+    isValidating,
+    error,
+    refresh: () => mutate(),
+    createOperator,
+    setStatus,
+    resetPassword,
+    remove,
   };
 }

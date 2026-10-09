@@ -2,9 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
-import { mockDelay } from "@smarthome/shared/mock/store";
 import { aiStore, generateRandomPredictions } from "@smarthome/shared/mock/ai";
 import type { AiDashboardSnapshot } from "@smarthome/shared/mock/ai";
+import { runHabitSuggestions } from "@smarthome/console/api/ai.api";
+import type { HabitJobResult } from "@smarthome/console/api/types";
+
+// Toàn bộ số liệu model/dự đoán/gợi ý của trang AI Dashboard vẫn là DỮ LIỆU MÔ PHỎNG
+// (aiStore) — backend chưa có pipeline AI thật. Duy nhất `analyzeHabits` gọi API thật:
+// POST /api/dashboard/ai/suggestions/run (Admin) chạy ngay job phân tích thói quen.
+function delay<T>(value: T, ms: number): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
 
 const TRAIN_TICK_MS = 220;
 const TRAIN_STEP = 7;
@@ -17,22 +25,27 @@ export type UseAiDashboard = {
   isTraining: boolean;
   isPredicting: boolean;
   isExporting: boolean;
+  /** Đang chờ backend chạy job phân tích thói quen (API thật). */
+  isAnalyzingHabits: boolean;
   trainModel: () => Promise<string>;
   runPrediction: () => Promise<number>;
   exportReport: () => Promise<string>;
+  /** POST /ai/suggestions/run — ném FetchError khi backend từ chối (trang dịch ra tiếng Việt). */
+  analyzeHabits: () => Promise<HabitJobResult>;
   resolveRecommendation: (id: number, accepted: boolean) => void;
 };
 
 export function useAiDashboard(): UseAiDashboard {
   const { data, isLoading, mutate } = useSWR(
     "/mock/ai/dashboard",
-    () => mockDelay(aiStore.snapshot(), 400)
+    () => delay(aiStore.snapshot(), 400)
   );
 
   const [trainingProgress, setTrainingProgress] = useState(0);
   const [isTraining, setIsTraining] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isAnalyzingHabits, setIsAnalyzingHabits] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // A training round is a ticking interval, not a request — clear it if the
@@ -66,7 +79,7 @@ export function useAiDashboard(): UseAiDashboard {
   const runPrediction = useCallback(async () => {
     setIsPredicting(true);
     const rows = generateRandomPredictions(5);
-    await mockDelay(null, 600);
+    await delay(null, 600);
     aiStore.addPredictions(rows);
     await mutate();
     setIsPredicting(false);
@@ -76,9 +89,18 @@ export function useAiDashboard(): UseAiDashboard {
   const exportReport = useCallback(async () => {
     setIsExporting(true);
     const fileName = `ai-report-${new Date().toISOString().slice(0, 10)}.csv`;
-    await mockDelay(null, 700);
+    await delay(null, 700);
     setIsExporting(false);
     return fileName;
+  }, []);
+
+  const analyzeHabits = useCallback(async () => {
+    setIsAnalyzingHabits(true);
+    try {
+      return await runHabitSuggestions();
+    } finally {
+      setIsAnalyzingHabits(false);
+    }
   }, []);
 
   const resolveRecommendation = useCallback((id: number, accepted: boolean) => {
@@ -93,9 +115,11 @@ export function useAiDashboard(): UseAiDashboard {
     isTraining,
     isPredicting,
     isExporting,
+    isAnalyzingHabits,
     trainModel,
     runPrediction,
     exportReport,
+    analyzeHabits,
     resolveRecommendation,
   };
 }

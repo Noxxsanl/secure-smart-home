@@ -18,4 +18,14 @@ const pool = mysql.createPool({
   timezone: "+00:00",
 });
 
+// Tuỳ chọn `timezone` ở trên chỉ ảnh hưởng cách mysql2 chuyển Date <-> chuỗi; còn NOW(),
+// CURRENT_TIMESTAMP, UNIX_TIMESTAMP() của MySQL dùng múi giờ của SESSION. Nếu server MySQL
+// không chạy UTC thì `expires_at > NOW()` (so Date ghi từ Node với NOW()) sẽ lệch nhiều giờ.
+// Ép mỗi connection mới về UTC để mọi so sánh thời gian trong SQL khớp với giá trị Date của Node.
+pool.pool.on("connection", (connection) => {
+  connection.query("SET time_zone = '+00:00'", (err) => {
+    if (err) console.error("[db] failed to set session time_zone to UTC:", err.message);
+  });
+});
+
 export default pool;

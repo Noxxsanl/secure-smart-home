@@ -50,6 +50,7 @@ Sensor Node (ESP32 DOIT V1)
 ```
 gateway-node/
 ├── include/
+│   ├── config_gw.example.h  # Mẫu cấu hình (commit được, CI build bằng file này)
 │   ├── config_gw.h          # Cấu hình tập trung (WiFi, MQTT, secrets, sensor whitelist) — gitignored
 │   └── mqtt_ca_cert.h       # CA của Broker 2, sinh bằng scripts/gen_mqtt_certs.sh — gitignored
 ├── lib/
@@ -68,7 +69,13 @@ gateway-node/
 
 ## Cấu hình trước khi nạp firmware
 
-Mở [`include/config_gw.h`](include/config_gw.h) và điền đầy đủ các giá trị:
+Sao chép file mẫu rồi điền đầy đủ các giá trị (file `config_gw.h` bị gitignore, không commit):
+
+```bash
+cp include/config_gw.example.h include/config_gw.h
+```
+
+Các giá trị chính:
 
 ```cpp
 // 1. Identity — lấy từ API đăng ký thiết bị (/api/devices/register)

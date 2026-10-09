@@ -21,7 +21,8 @@ DHT22 ──► ESP32 (Sensor Node)
 sensor-node/
 ├── platformio.ini          # Cấu hình build PlatformIO
 ├── include/
-│   └── config.h            # Cấu hình thiết bị (WiFi, MQTT, PIN...)
+│   ├── config_2.example.h # Mẫu cấu hình (commit được, CI build bằng file này)
+│   └── config_2.h         # Cấu hình thiết bị (WiFi, MQTT, PIN...) — gitignored
 ├── lib/
 │   ├── wifi_manager/       # Kết nối và tự reconnect WiFi
 │   ├── ntp_sync/           # Đồng bộ thời gian NTP (UTC+7)
@@ -85,7 +86,13 @@ Response (201):
 > `secret_key` chỉ trả về **một lần duy nhất**. Sao chép và lưu ngay.
 > Sau khi flash firmware, cần **kích hoạt** thiết bị (đổi status → `active`) trên Dashboard.
 
-### 3. Cấu hình `include/config.h`
+### 3. Cấu hình `include/config_2.h`
+
+Sao chép file mẫu rồi điền giá trị thật (file `config_2.h` bị gitignore, không commit):
+
+```bash
+cp include/config_2.example.h include/config_2.h
+```
 
 ```cpp
 #define DEVICE_ID   "ESP32-SN-ABCD1234"           // từ API đăng ký

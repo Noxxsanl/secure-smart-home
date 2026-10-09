@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Chỉ chạy job của tầng có file thay đổi. Chạy tay (workflow_dispatch) thì chạy hết.
+  changes:
+    name: Phát hiện thay đổi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.backend == 'true' }}
+      frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
+      mobile: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.mobile == 'true' }}
+      firmware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.firmware == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'database/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+            mobile:
+              - 'mobile/**'
+              - '.github/workflows/ci.yml'
+            firmware:
+              - 'firmware/gateway-node/**'
+              - 'firmware/sensor-node/**'
+              - 'firmware/sensor-node-2/**'
+              - 'scripts/gen_mqtt_certs.sh'
+              - '.github/workflows/ci.yml'
+
+  # Bất biến 3 (CLAUDE.md): không commit credential/khoá, không tắt kiểm chứng TLS.
+  guard:
+    name: Bảo mật repo
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Không có file bí mật trong git
+        run: |
+          bad=$(git ls-files | grep -E \
+            -e '(^|/)config_(1|2|gw)\.h$' \
+            -e '(^|/)mqtt_ca_cert\.h$' \
+            -e '(^|/)\.env$' \
+            -e '(^|/)\.env(\..+)?\.local$' \
+            -e '^mosquitto/certs/' \
+            -e '\.(key|pem|p12|pfx)$' \
+            | grep -v '^mosquitto/certs/README\.md$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::File bí mật bị commit — xoá khỏi git (git rm --cached) và đổi secret:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: Không tắt kiểm chứng TLS
+        run: |
+          hits=$(git grep -nE \
+            -e 'rejectUnauthorized[[:space:]]*:[[:space:]]*false' \
+            -e '\.setInsecure[[:space:]]*\(' \
+            -- ':!*.md' ':!firmware/ESP32-S3-Touch-LCD-7B' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Không được tắt kiểm chứng TLS (rejectUnauthorized: false / setInsecure()):"
+            echo "$hits"
+            exit 1
+          fi
+
+  backend:
+    name: Backend (tsc)
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  frontend:
+    name: Frontend (typecheck, lint, build)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/cache@v6
+        with:
+          path: frontend/*/.next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ github.sha }}
+          restore-keys: next-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+
+  mobile:
+    name: Mobile (analyze, test)
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.4
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  firmware:
+    name: Firmware (${{ matrix.node }})
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - node: gateway-node
+            config: config_gw
+          - node: sensor-node
+            config: config_1
+          - node: sensor-node-2
+            config: config_2
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.platformio/.cache
+            ~/.platformio/packages
+            ~/.platformio/platforms
+          key: pio-${{ runner.os }}-${{ hashFiles('firmware/*/platformio.ini') }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: pip install --upgrade platformio
+
+      # config_*.h thật bị gitignore (chứa WiFi/secret) — CI build bằng file mẫu.
+      - name: Dùng cấu hình mẫu
+        run: cp firmware/${{ matrix.node }}/include/${{ matrix.config }}.example.h firmware/${{ matrix.node }}/include/${{ matrix.config }}.h
+
+      # mqtt_ca_cert.h cũng bị gitignore — sinh CA dùng-một-lần trên runner (không upload đi đâu).
+      - name: Sinh CA tạm cho gateway
+        if: matrix.node == 'gateway-node'
+        run: bash scripts/gen_mqtt_certs.sh
+
+      - run: pio run -d firmware/${{ matrix.node }}

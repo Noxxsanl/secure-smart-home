@@ -19,7 +19,7 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
   }
 
   const [rows] = await pool.execute<any[]>(
-    "SELECT id, username, password_hash, role FROM users WHERE username = ?",
+    "SELECT id, username, password_hash, role, status FROM users WHERE username = ?",
     [username]
   );
   const user = rows[0];
@@ -32,6 +32,12 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
 
   if (!user || !valid) {
     res.status(401).json({ error: "INVALID_CREDENTIALS" });
+    return;
+  }
+
+  // V2: tài khoản bị khoá (users.status = 'locked') không được đăng nhập kể cả qua endpoint cũ này
+  if (user.status === "locked") {
+    res.status(403).json({ error: "ACCOUNT_LOCKED" });
     return;
   }
 

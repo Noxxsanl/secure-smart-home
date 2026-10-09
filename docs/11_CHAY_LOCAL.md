@@ -12,7 +12,8 @@ Terminal 1: MySQL 8.0             (database, port 3306)
 Terminal 2: Mosquitto Broker 1    (Sensor ↔ Gateway, port 1883)
 Terminal 3: Mosquitto Broker 2    (Gateway → Backend, TLS port 8883)
 Terminal 4: Backend Express       (API,      port 5000)
-Terminal 5: Frontend Next.js      (UI,       port 3000)
+Terminal 5: Frontend Next.js      (3 app web: Admin 3001, Operator 3002, Khách hàng 3003)
+(tuỳ chọn) Mobile Flutter         (app khách hàng, xem Bước 7)
 ```
 
 ---
@@ -114,20 +115,13 @@ mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
       -e "SHOW TABLES;"
 ```
 
-Kết quả mong đợi:
+Kết quả mong đợi (V2 có thêm nhiều bảng: `customers`, `smart_homes`, `rooms`, `smart_home_members`, `activation_tokens`, `refresh_tokens`, `device_commands`, `automation_rules`, `firmware`, `ota_jobs`, …):
 ```
-+-----------------------------+
-| Tables_in_iot_managerDevi.. |
-+-----------------------------+
-| audit_log                   |
-| device_tokens               |
-| devices                     |
-| sensor_data                 |
-| users                       |
-+-----------------------------+
+audit_log, device_tokens, devices, sensor_data, users, notifications, + các bảng V2
 ```
 
 > File SQL đã bao gồm sẵn lệnh tạo user `admin` với password `admin123`. Bước seed ở dưới chỉ cần chạy **nếu** bảng `users` trống.
+> Backend cũng tự áp migration (`backend/src/config/migrate.ts`) mỗi lần khởi động, nên DB cũ được nâng lên schema V2 mà không cần import lại.
 
 ---
 
@@ -251,14 +245,32 @@ MQTT_HOST=localhost
 MQTT_PORT=8883
 MQTT_CA_FILE=../mosquitto/certs/ca.crt
 
-# CORS
-FRONTEND_URL=http://localhost:3000
+# CORS (3 app web gọi cùng origin qua rewrites nên chủ yếu dùng khi gọi thẳng backend)
+FRONTEND_URL=http://localhost:3001
 
 # Admin default (dùng cho seed)
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 '@ | Out-File -Encoding utf8 .env
 ```
+
+### Biến môi trường V2 (tuỳ chọn)
+
+Tất cả có mặc định an toàn (mẫu đầy đủ: `backend/.env.example`). Chỉ thêm vào `.env` khi cần đổi:
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `MOBILE_JWT_SECRET` | dẫn xuất từ `JWT_SECRET` | Secret ký access token Mobile (≥ 32 ký tự) |
+| `ACTIVATION_QR_SECRET` | dẫn xuất từ `JWT_SECRET` | Secret ký payload QR kích hoạt (≥ 32 ký tự) |
+| `COOKIE_SECURE` | `true` khi `NODE_ENV=production` | Cờ `Secure` cho cookie phiên. Chạy HTTP local để trống/`false` |
+| `DEVICE_SIMULATOR` | `true` khi `NODE_ENV` khác `production` | Bật simulator thiết bị ảo (`is_simulated=1`) |
+| `SEED_DEMO_DATA` | `true` khi `NODE_ENV` khác `production` | Seed dữ liệu demo một lần sau migration |
+| `ACTIVATION_CODE_TTL_DAYS` | `180` | Hạn Activation Code (ngày) |
+| `FIRMWARE_STORAGE_DIR` | `storage/firmware` | Thư mục lưu file firmware upload |
+| `TELEMETRY_RETENTION_DAYS` | `8` | Số ngày giữ `sensor_data` (job dọn mỗi giờ) |
+| `TRUST_PROXY` | `false` | Số hop proxy tin cậy. Đặt `1` khi backend chạy sau nginx để lấy đúng IP client (rate-limit, audit) |
+
+> Không commit `.env`. Production: tắt `DEVICE_SIMULATOR` và `SEED_DEMO_DATA`.
 
 > **Quan trọng:** Khi chạy local, `DB_HOST=localhost` và `MQTT_HOST=localhost` với `MQTT_PORT=8883` (Broker 2, TLS). `MQTT_HOST` phải nằm trong SAN của cert broker (`localhost` luôn có sẵn).
 > Khác với Docker: `MQTT_HOST=mqtt-broker-2`, `MQTT_PORT=8883`, `MQTT_CA_FILE=/certs/mqtt-ca.crt` (compose tự đặt).
@@ -295,6 +307,8 @@ Output mong đợi:
 [Server] Listening on port 5000
 ```
 
+> **Lần chạy đầu — đọc log backend:** migration V2 và seed chạy ngay lúc khởi động. Tìm dòng `[migrate] FAILED <tên>: …` — nếu có, migration dừng, server vẫn chạy nhưng **seed bị bỏ qua** (sửa lỗi DB rồi khởi động lại). Seed thành công in các dòng `[seed] created …` (không in secret). Seed chạy một lần (đánh dấu `seed_demo_v2` trong `_migrations`) và idempotent.
+
 Kiểm tra nhanh backend đang chạy:
 ```powershell
 # Mở tab PowerShell khác
@@ -306,7 +320,7 @@ curl http://localhost:5000/api/health
 
 ---
 
-## Bước 5 — Cấu hình và chạy Frontend
+## Bước 5 — Cấu hình và chạy Frontend (3 app web)
 
 ### Mở Terminal 5 — dành riêng cho Frontend
 
@@ -325,11 +339,10 @@ Nếu chưa có, tạo mới:
 ```powershell
 @'
 BACKEND_URL=http://localhost:5000
-NEXT_PUBLIC_APP_NAME=IoT Device Manager
 '@ | Out-File -Encoding utf8 .env.local
 ```
 
-> `BACKEND_URL` là URL backend dùng phía server (Next.js proxy). Frontend trình duyệt gọi API qua route `/api/[...path]` → proxy tự forward sang `http://localhost:5000`.
+> `BACKEND_URL` (chỉ gốc URL, không kèm `/api`; mặc định `http://localhost:5000`) được `next.config.ts` của mỗi app dùng cho `rewrites` `/api/:path*` → `${BACKEND_URL}/api/:path*`. Trình duyệt chỉ gọi `/api/*` cùng origin nên cookie đi kèm tự động, không cần CORS. Không còn route `/api/[...path]`. Cũng có thể đặt trực tiếp: `$env:BACKEND_URL="http://192.168.1.10:5000"; npm run dev`. Chi tiết: [`frontend/README.md`](../frontend/README.md).
 
 ### Cài dependencies
 
@@ -337,7 +350,7 @@ NEXT_PUBLIC_APP_NAME=IoT Device Manager
 npm install
 ```
 
-Lần đầu khoảng 2–3 phút (Next.js nặng hơn backend).
+Lần đầu khoảng 2–3 phút (npm workspaces, cài chung cho cả 3 app).
 
 ### Chạy Frontend
 
@@ -345,13 +358,18 @@ Lần đầu khoảng 2–3 phút (Next.js nặng hơn backend).
 npm run dev
 ```
 
-Output mong đợi:
+Lệnh này khởi động cả 3 app cùng lúc (mỗi role một app, một cổng):
+
+| App | Cổng | Role |
+|---|---|---|
+| `admin` | 3001 | ADMIN |
+| `operator` | 3002 | OPERATOR |
+| `user` | 3003 | USER (cổng web khách hàng) |
+
+Output mong đợi (mỗi app một dòng tương tự):
 ```
   ▲ Next.js 16.2.5
-  - Local:        http://localhost:3000
-  - Network:      http://192.168.x.x:3000
-
- ✓ Starting...
+  - Local:        http://localhost:3001
  ✓ Ready in 2.1s
 ```
 
@@ -384,12 +402,14 @@ try {
     Write-Host "[Backend]   FAIL — chưa chạy hoặc lỗi kết nối DB/MQTT" -ForegroundColor Red
 }
 
-# Frontend
-try {
-    $r = Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing -TimeoutSec 5
-    Write-Host "[Frontend]  OK — HTTP $($r.StatusCode)" -ForegroundColor Green
-} catch {
-    Write-Host "[Frontend]  FAIL" -ForegroundColor Red
+# Frontend (3 app)
+foreach ($p in 3001,3002,3003) {
+    try {
+        $r = Invoke-WebRequest -Uri "http://localhost:$p" -UseBasicParsing -TimeoutSec 5
+        Write-Host "[Frontend :$p]  OK — HTTP $($r.StatusCode)" -ForegroundColor Green
+    } catch {
+        Write-Host "[Frontend :$p]  FAIL" -ForegroundColor Red
+    }
 }
 
 # Mosquitto Broker 1 (Sensor ↔ Gateway)
@@ -415,13 +435,34 @@ Mở trình duyệt:
 
 | Service | URL |
 |---|---|
-| **Frontend (Web App)** | http://localhost:3000 |
+| **Admin console** | http://localhost:3001 |
+| **Operator console** | http://localhost:3002 |
+| **Cổng khách hàng** | http://localhost:3003 |
 | **Backend Health** | http://localhost:5000/api/health |
-| **Login** | http://localhost:3000/account/login |
 
-**Đăng nhập:**
-- Username: `admin`
-- Password: `admin123`
+Mỗi app chỉ nhận đúng role của nó; đăng nhập nhầm cổng sẽ được hướng dẫn sang cổng đúng. Cookie phiên tách theo cổng (`sh_admin` / `sh_operator` / `sh_user`) nên đăng nhập 3 app cùng lúc không ghi đè nhau.
+
+### Dữ liệu demo (seed)
+
+Khi `SEED_DEMO_DATA` bật (mặc định ở môi trường không phải production), backend seed dữ liệu demo — mọi thiết bị trong nhà demo là thiết bị mô phỏng (`is_simulated=1`).
+
+| Vai trò | Đăng nhập | Mật khẩu | Cổng |
+|---|---|---|---|
+| Admin | `admin` | `admin123` | 3001 |
+| Operator | `operator01` (và `operator02`) | `operator123` | 3002 |
+| Khách hàng | `user01@smarthome.local` (chủ "Nhà của Đạt") | `user123` | 3003 / Mobile |
+| Khách hàng | `lan@…`, `hoa@…`, `hung@…`, `kimanh@…` (`@smarthome.local`; `kimanh` chưa có nhà) | `user123` | 3003 / Mobile |
+
+Activation Code để thử luồng claim (Thêm Smart Home / quét QR):
+
+| Code | Trạng thái |
+|---|---|
+| `7K2M-9QXA-4TPB` | Hợp lệ |
+| `H3VD-8NRW-2CYE` | Hợp lệ |
+| `Q4ZT-6MJK-1PSX` | Đã dùng |
+| `B9FE-3WRA-7GMK` | Hết hạn |
+
+> Mật khẩu/mã trên chỉ là dữ liệu demo local — không dùng ở production.
 
 ---
 
@@ -440,14 +481,46 @@ Mỗi lần mở máy muốn chạy hệ thống, làm theo thứ tự này:
   cd e:\WorkSpace\managerDeviceIoT-RBAC\backend
   npm run dev
 
-[Terminal 5] Frontend
+[Terminal 5] Frontend (3 app: 3001 / 3002 / 3003)
   cd e:\WorkSpace\managerDeviceIoT-RBAC\frontend
   npm run dev
 
-→ Mở http://localhost:3000
+→ Mở http://localhost:3001 (Admin), :3002 (Operator), :3003 (Khách hàng)
 ```
 
 > MySQL tự chạy như Windows Service khi khởi động máy — không cần mở thêm terminal.
+
+---
+
+## Bước 6b — Simulator thiết bị (không cần phần cứng)
+
+Với `DEVICE_SIMULATOR` bật, backend tự mô phỏng các thiết bị `is_simulated=1`: giữ `last_seen` mới (online trong cửa sổ 90 s), sinh số liệu nhiệt/ẩm mỗi 60 s, ack lệnh bật/tắt relay sau 300–900 ms. Nhà tạo mới qua Provisioning Wizard cũng toàn thiết bị mô phỏng. Thiết bị thật cũ trong DB không bị đụng tới (hiện "Chưa gán nhà").
+
+Giả lập sự cố từ console (đăng nhập Admin/Operator), trong chi tiết thiết bị mô phỏng:
+- **Mất điện:** tắt "nguồn" thiết bị (`POST /api/dashboard/simulator/devices/:id/power` `{ "online": false }`) — thiết bị chuyển offline sau khoảng 90 s, khách hàng nhận thông báo "offline". Bật lại để online.
+- **Mở cửa:** với cảm biến cửa mô phỏng, bật trạng thái mở (`POST …/simulator/devices/:id/door` `{ "open": true }`) — khách hàng nhận thông báo cửa mở.
+
+Chỉ áp dụng cho thiết bị mô phỏng (thiết bị thật → `409 NOT_SIMULATED`).
+
+---
+
+## Bước 7 — Chạy Mobile (Flutter, tuỳ chọn)
+
+```powershell
+cd e:\WorkSpace\managerDeviceIoT-RBAC\mobile
+flutter pub get
+
+# Gọi backend thật — thay <LAN-IP> bằng IP máy chạy backend
+flutter run --dart-define=API_BASE_URL=http://<LAN-IP>:5000
+
+# Hoặc chạy hoàn toàn bằng dữ liệu giả, không cần backend
+flutter run --dart-define=USE_MOCK=true
+```
+
+- Android emulator: mặc định `API_BASE_URL=http://10.0.2.2:5000` (alias tới localhost của máy host), không cần truyền.
+- Thiết bị thật: điện thoại và máy chạy backend cùng mạng LAN; dùng IP LAN của máy, không dùng `localhost`.
+- Đăng nhập bằng tài khoản khách hàng ở bảng seed (ví dụ `user01@smarthome.local` / `user123`). Realtime qua WebSocket `/api/mobile/ws`.
+- Kiểm tra: `flutter analyze && flutter test`.
 
 ---
 
@@ -524,11 +597,11 @@ BACKEND_URL=http://localhost:5000
 ```
 Sau khi sửa `.env.local`, cần **restart** `npm run dev` của frontend (Next.js không hot-reload env).
 
-### Lỗi: `Port 3000 already in use`
+### Lỗi: `Port 300x already in use` (3001/3002/3003)
 
 ```powershell
-# Tìm process đang dùng port 3000
-Get-NetTCPConnection -LocalPort 3000 | Select-Object OwningProcess
+# Tìm process đang dùng cổng (ví dụ 3001)
+Get-NetTCPConnection -LocalPort 3001 | Select-Object OwningProcess
 # Lấy PID rồi kill
 Stop-Process -Id <PID> -Force
 ```

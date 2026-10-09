@@ -1,301 +1,361 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, QrCode, CheckCircle2, KeyRound } from "lucide-react";
+import {
+  ArrowLeft, CheckCircle2, KeyRound, ShieldCheck, Copy, Check, AlertTriangle, RefreshCw, Server, Cpu,
+} from "lucide-react";
 import Stepper from "@smarthome/shared/ui/Stepper";
 import StatusBadge from "@smarthome/shared/ui/StatusBadge";
-import AssignOwnerModal from "@smarthome/console/smart-homes/components/AssignOwnerModal";
 import { useToast } from "@smarthome/shared/ui/Toast";
-import { smartHomeStore, roomStore, deviceStore, gatewayStore, customerStore } from "@smarthome/shared/mock/store";
-import type { PackageCode, Room, MockDevice, SmartHome, Gateway } from "@smarthome/shared/mock/types";
+import AssignOwnerModal from "@smarthome/console/smart-homes/components/AssignOwnerModal";
+import ActivationCodePanel from "@smarthome/console/smart-homes/components/ActivationCodePanel";
+import { InlineError } from "@smarthome/console/components/PageStates";
+import { createSmartHome } from "@smarthome/console/api/smartHomes.api";
+import { revalidateDashboard } from "@smarthome/console/api/client";
+import { PACKAGE_TEMPLATES, templateSummary } from "@smarthome/console/smart-homes/templates";
+import { errorMessage } from "@smarthome/console/lib/errors";
+import { useBeforeUnload } from "@smarthome/console/lib/hooks";
+import { CATEGORY_LABELS } from "@smarthome/console/lib/labels";
+import { BTN_BRAND_SOFT, BTN_PRIMARY, BTN_SECONDARY, CARD, INPUT, LABEL } from "@smarthome/console/lib/ui";
+import type { Customer, PackageCode, ProvisionResult } from "@smarthome/console/api/types";
 
-const STEPS = ["Create Home", "Room/Device Preview", "Gateway & Node UID", "Activation Code", "Ready to Sell"];
+const STEPS = ["Tạo Smart Home", "Phòng & thiết bị", "Gateway & Node UID", "Mã kích hoạt & QR", "Sẵn sàng bán"];
 
-type NodeGroup = {
-  uid: string;
-  label: string;
-  deviceNames: string[];
-};
+const LEAVE_WARNING = "Mã kích hoạt chỉ hiển thị một lần và chưa được in. Rời trang bây giờ sẽ phải tạo mã mới. Vẫn rời trang?";
 
-function randomNodeUid(): string {
-  return `ESP32-ND-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
+function CountCheck({ label, actual, expected }: { label: string; actual: number; expected: number }) {
+  const ok = actual === expected;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold ${ok ? "bg-success-soft text-success" : "bg-warning-soft text-warning"}`}>
+      {ok ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+      {actual} {label}{!ok && ` (template: ${expected})`}
+    </span>
+  );
 }
 
-// Node vật lý được gắn theo Phòng (1 board ESP32 xử lý mọi sensor/relay/camera
-// trong phòng đó) và theo Cửa (khoá cửa luôn là 1 board riêng, tách khỏi node
-// của phòng) — không phải mỗi thiết bị logic là 1 node phần cứng riêng.
-function buildNodeGroups(rooms: Room[], devices: MockDevice[]): NodeGroup[] {
-  const groups: NodeGroup[] = [];
-  rooms.forEach((room) => {
-    const roomDevices = devices.filter((d) => d.room_id === room.id);
-    const doorDevices = roomDevices.filter((d) => d.category === "door_contact");
-    const nonDoorDevices = roomDevices.filter((d) => d.category !== "door_contact");
-    if (nonDoorDevices.length > 0) {
-      groups.push({ uid: randomNodeUid(), label: room.name, deviceNames: nonDoorDevices.map((d) => d.device_name) });
-    }
-    doorDevices.forEach((d) => {
-      groups.push({ uid: randomNodeUid(), label: `Cửa - ${room.name}`, deviceNames: [d.device_name] });
-    });
-  });
-  return groups;
-}
-
-// Package → template used to auto-generate Rooms/Devices (Operator confirms,
-// doesn't hand-enter every device — per doc §9.8).
-const PACKAGE_TEMPLATES: Record<PackageCode, { room: Room["room_type"]; roomName: string; devices: { name: string; category: MockDevice["category"] }[] }[]> = {
-  KIT_A: [
-    { room: "living_room", roomName: "Living room", devices: [{ name: "Cảm biến nhiệt/ẩm", category: "sensor" }, { name: "Lightings", category: "relay" }] },
-    { room: "bedroom", roomName: "Bedroom", devices: [{ name: "Cảm biến nhiệt/ẩm", category: "sensor" }] },
-    { room: "kitchen", roomName: "Kitchen", devices: [{ name: "Cảm biến nhiệt/ẩm", category: "sensor" }] },
-    { room: "bathroom", roomName: "Bathroom", devices: [{ name: "Door locks", category: "door_contact" }] },
-  ],
-  KIT_B: [
-    { room: "living_room", roomName: "Living room", devices: [{ name: "Cảm biến nhiệt/ẩm", category: "sensor" }, { name: "Camera cửa chính", category: "camera" }] },
-    { room: "bedroom", roomName: "Bedroom", devices: [{ name: "Cảm biến nhiệt/ẩm", category: "sensor" }] },
-    { room: "office", roomName: "Office", devices: [{ name: "Lightings", category: "relay" }] },
-  ],
-};
-
+// FR-2.7 — 5 bước: Tạo nhà → Xem phòng/thiết bị → UID Gateway/Node → Mã kích hoạt/QR → Sẵn sàng bán.
+// Bước 1 gọi POST /smart-homes ĐÚNG MỘT LẦN (FR-2.2: backend tạo mọi thứ trong 1 transaction);
+// các bước sau chỉ hiển thị dữ liệu từ response — không có request tạo thêm nào.
 export default function ProvisioningWizardPage() {
-  const router = useRouter();
   const { showToast } = useToast();
   const [step, setStep] = useState(0);
-  const [homeName, setHomeName] = useState("");
+
+  const [name, setName] = useState("");
   const [packageCode, setPackageCode] = useState<PackageCode>("KIT_A");
+  const [address, setAddress] = useState("");
+  const [expectedOwner, setExpectedOwner] = useState("");
+  const [formError, setFormError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const submittedRef = useRef(false);
 
-  const [home, setHome] = useState<SmartHome | null>(null);
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [devices, setDevices] = useState<MockDevice[]>([]);
-  const [gateway, setGateway] = useState<Gateway | null>(null);
-  const [nodeGroups, setNodeGroups] = useState<NodeGroup[]>([]);
-  const [activationCode] = useState(() => Math.random().toString(36).slice(2, 10).toUpperCase());
+  const [result, setResult] = useState<ProvisionResult | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
-  const [assignedOwnerName, setAssignedOwnerName] = useState<string | null>(null);
+  const [owner, setOwner] = useState<Customer | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  function handleAssignOwner(customerId: number) {
-    if (!home) return;
-    smartHomeStore.assignOwner(home.id, customerId);
-    const customer = customerStore.get(customerId);
-    setAssignedOwnerName(customer?.name ?? null);
-    showToast(`Đã gán "${home.name}" cho ${customer?.name ?? "khách hàng"}.`);
-  }
+  // Bước 2–4 (sau khi tạo, trước khi xác nhận đã in tem): mã kích hoạt in-một-lần chưa được lưu lại ở đâu.
+  const codeAtRisk = result !== null && step < 4;
+  useBeforeUnload(codeAtRisk);
 
-  function handleCreateHome() {
-    if (!homeName.trim()) return;
-    const created = smartHomeStore.createUnclaimed({ name: homeName.trim(), package: packageCode });
-    const createdRooms: Room[] = [];
-    const createdDevices: MockDevice[] = [];
-    PACKAGE_TEMPLATES[packageCode].forEach((tpl) => {
-      const room = roomStore.createForHome(created.id, tpl.roomName, tpl.room);
-      createdRooms.push(room);
-      tpl.devices.forEach((d) => {
-        createdDevices.push(deviceStore.createInRoom({ device_name: d.name, category: d.category, room_id: room.id, home_id: created.id, location: tpl.roomName }));
+  async function handleCreate() {
+    if (submittedRef.current || result) return;
+    const trimmedName = name.trim();
+    if (trimmedName.length < 2) { setFormError("Nhập tên Smart Home (ít nhất 2 ký tự)."); return; }
+    if (trimmedName.length > 128) { setFormError("Tên Smart Home tối đa 128 ký tự."); return; }
+    if (address.trim().length > 255) { setFormError("Địa chỉ tối đa 255 ký tự."); return; }
+    if (expectedOwner.trim().length > 128) { setFormError("Tên chủ nhà dự kiến tối đa 128 ký tự."); return; }
+
+    submittedRef.current = true;
+    setSubmitting(true);
+    setFormError("");
+    try {
+      const created = await createSmartHome({
+        name: trimmedName,
+        package: packageCode,
+        address: address.trim() || undefined,
+        expected_owner_name: expectedOwner.trim() || undefined,
       });
-    });
-    setHome(created);
-    setRooms(createdRooms);
-    setDevices(createdDevices);
-    setStep(1);
+      setResult(created);
+      setStep(1);
+      void revalidateDashboard("/smart-homes", "/stats");
+    } catch (err) {
+      submittedRef.current = false;
+      setFormError(`${errorMessage(err)} Chưa có dữ liệu nào được tạo — sửa thông tin rồi bấm lại.`);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  // Sinh UID cho cả Gateway lẫn từng Node (thiết bị) trong nhà — đây là bước
-  // Operator cầm UID này đi flash WiFi + Secret Key vật lý tại kho, để khi
-  // hoạt động Gateway và từng Node xác thực lẫn nhau bằng UID + Secret đó.
-  function handleGenerateUids() {
-    if (!home) return;
-    const gw = gatewayStore.createForHome(home.id);
-    smartHomeStore.update(home.id, { gateway_id: gw.id });
-    setGateway(gw);
-    setNodeGroups(buildNodeGroups(rooms, devices));
-    setStep(2);
+  async function copyUids() {
+    if (!result) return;
+    const lines = [
+      `Gateway: ${result.gateway.uid}`,
+      ...result.nodes.map((n) => `${n.room_name}: ${n.node_uid} (${n.device_names.join(", ")})`),
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showToast("Trình duyệt không cho phép sao chép. Hãy chọn và sao chép thủ công.", false);
+    }
   }
+
+  function resetWizard() {
+    submittedRef.current = false;
+    setResult(null); setOwner(null); setStep(0);
+    setName(""); setAddress(""); setExpectedOwner(""); setPackageCode("KIT_A"); setFormError("");
+  }
+
+  function guardLeave(e: React.MouseEvent) {
+    if (codeAtRisk && !window.confirm(LEAVE_WARNING)) e.preventDefault();
+  }
+
+  const template = PACKAGE_TEMPLATES[packageCode];
+  const expected = templateSummary(result?.home.package ?? packageCode);
+  const resultDevices = result?.devices.filter((d) => d.category !== "gateway") ?? [];
 
   return (
-    <div className="w-full max-w-3xl space-y-4">
-      <Link href="/smart-homes" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200">
+    <div className="w-full max-w-4xl space-y-4">
+      <Link href="/smart-homes" onClick={guardLeave} className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200">
         <ArrowLeft className="h-3.5 w-3.5" /> Smart Homes
       </Link>
 
       <div>
         <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Provisioning Wizard</h1>
-        <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">Tạo Smart Home mới cho đơn hàng — từ tạo nhà đến sẵn sàng bán.</p>
+        <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">Chuẩn bị kit Smart Home cho đơn hàng — từ tạo nhà đến in tem, sẵn sàng bán.</p>
       </div>
 
-      <div className="rounded-md border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800 p-5">
+      <div className={`${CARD} p-5`}>
         <Stepper steps={STEPS} currentStep={step} />
 
         <div className="mt-6">
+          {/* Bước 1 — thông tin nhà + gói */}
           {step === 0 && (
-            <div className="space-y-4">
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-slate-300">Tên Smart Home</label>
-                <input
-                  type="text" value={homeName} onChange={(e) => setHomeName(e.target.value)}
-                  placeholder="VD: Nhà Quận 2"
-                  className="h-10 w-full rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-3 text-sm text-gray-900 dark:text-slate-100 outline-none focus:border-brand focus:ring-2 focus:ring-brand/15"
-                />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-slate-300">Package</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {(["KIT_A", "KIT_B"] as PackageCode[]).map((p) => (
-                    <button
-                      key={p} type="button" onClick={() => setPackageCode(p)}
-                      className={`rounded-md border-2 px-4 py-3 text-left transition
-                        ${packageCode === p ? "border-brand bg-brand-soft/40" : "border-gray-200 dark:border-slate-600 hover:border-gray-300 dark:hover:border-slate-500"}`}
-                    >
-                      <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">{p}</p>
-                      <p className="text-xs text-gray-400 dark:text-slate-500">{PACKAGE_TEMPLATES[p].length} phòng mẫu</p>
-                    </button>
-                  ))}
+            <form noValidate onSubmit={(e) => { e.preventDefault(); void handleCreate(); }} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label htmlFor="wiz-name" className={LABEL}>Tên Smart Home <span className="text-critical">*</span></label>
+                  <input id="wiz-name" type="text" value={name} maxLength={128} onChange={(e) => setName(e.target.value)}
+                    placeholder="VD: Kit KIT_A — Đơn #1042" className={INPUT} disabled={submitting} />
+                  <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">Tên tạm cho kho; khách hàng có thể đổi tên sau khi kích hoạt.</p>
+                </div>
+                <div>
+                  <label htmlFor="wiz-address" className={LABEL}>Địa chỉ / vị trí kho (tuỳ chọn)</label>
+                  <input id="wiz-address" type="text" value={address} maxLength={255} onChange={(e) => setAddress(e.target.value)}
+                    placeholder="VD: Kho Quận 7 — kệ B2" className={INPUT} disabled={submitting} />
+                </div>
+                <div>
+                  <label htmlFor="wiz-owner" className={LABEL}>Tên chủ nhà dự kiến (tuỳ chọn)</label>
+                  <input id="wiz-owner" type="text" value={expectedOwner} maxLength={128} onChange={(e) => setExpectedOwner(e.target.value)}
+                    placeholder="Chỉ là ghi chú, không cấp quyền" className={INPUT} disabled={submitting} />
                 </div>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" disabled={!homeName.trim()} onClick={handleCreateHome}
-                  className="rounded bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:brightness-90 disabled:cursor-not-allowed disabled:opacity-50">
-                  Tiếp tục →
+
+              <div>
+                <p className={LABEL}>Gói thiết bị</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {(["KIT_A", "KIT_B"] as PackageCode[]).map((p) => {
+                    const summary = templateSummary(p);
+                    return (
+                      <button
+                        key={p} type="button" onClick={() => setPackageCode(p)} disabled={submitting}
+                        className={`rounded-md border-2 px-4 py-3 text-left transition
+                          ${packageCode === p ? "border-brand bg-brand-soft/40" : "border-gray-200 dark:border-slate-600 hover:border-gray-300 dark:hover:border-slate-500"}`}
+                      >
+                        <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">{PACKAGE_TEMPLATES[p].title}</p>
+                        <p className="text-xs text-gray-500 dark:text-slate-400">{PACKAGE_TEMPLATES[p].description}</p>
+                        <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+                          {summary.rooms} phòng · 1 Gateway · {summary.nodes} Node · {summary.devices} thiết bị
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded border border-gray-100 dark:border-slate-700">
+                <p className="border-b border-gray-100 dark:border-slate-700 bg-[#F4F5F7] dark:bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">
+                  Xem trước template {packageCode}
+                </p>
+                <ul className="grid gap-px bg-gray-100 dark:bg-slate-700 sm:grid-cols-2">
+                  {template.rooms.map((room) => (
+                    <li key={room.node} className="bg-white dark:bg-slate-800 px-4 py-2.5">
+                      <p className="text-sm font-medium text-gray-900 dark:text-slate-100">
+                        {room.name} <span className="ml-1 font-mono text-[11px] text-gray-400 dark:text-slate-500">{room.node}</span>
+                      </p>
+                      <ul className="mt-0.5 space-y-0.5 text-xs text-gray-500 dark:text-slate-400">
+                        {room.devices.map((d) => (
+                          <li key={d.name}>· {d.name} <span className="text-gray-300 dark:text-slate-600">({CATEGORY_LABELS[d.category]})</span></li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <InlineError>{formError}</InlineError>
+
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <p className="text-xs text-gray-400 dark:text-slate-500">
+                  Hệ thống tạo nhà, phòng, Gateway, Node và mã kích hoạt trong một lần — lỗi ở bất kỳ bước nào thì không có gì được lưu.
+                </p>
+                <button type="submit" disabled={submitting || name.trim().length < 2} className={BTN_PRIMARY}>
+                  {submitting && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                  {submitting ? "Đang tạo…" : "Tạo Smart Home →"}
                 </button>
               </div>
-            </div>
+            </form>
           )}
 
-          {step === 1 && home && (
+          {/* Bước 2 — phòng & thiết bị đã sinh */}
+          {step === 1 && result && (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600 dark:text-slate-300">
-                Hệ thống đã tự sinh <strong>{rooms.length} phòng</strong> và <strong>{devices.length} thiết bị</strong> theo template <span className="font-mono">{home.package}</span>.
-              </p>
-              <div className="space-y-2">
-                {rooms.map((room) => (
+              <div className="flex items-start gap-2.5 rounded border border-success/30 bg-success-soft px-3 py-2.5 text-sm text-success">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>Đã tạo <span className="font-semibold">{result.home.name}</span> (trạng thái <span className="font-semibold">Unclaimed</span>) theo template {result.home.package}.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <CountCheck label="phòng" actual={result.rooms.length} expected={expected.rooms} />
+                <CountCheck label="Gateway" actual={result.gateway ? 1 : 0} expected={expected.gateways} />
+                <CountCheck label="Node" actual={result.nodes.length} expected={expected.nodes} />
+                <CountCheck label="thiết bị" actual={resultDevices.length} expected={expected.devices} />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {result.rooms.map((room) => (
                   <div key={room.id} className="rounded border border-gray-100 dark:border-slate-700 p-3">
                     <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">{room.name}</p>
                     <ul className="mt-1 space-y-0.5 pl-3 text-xs text-gray-500 dark:text-slate-400">
-                      {devices.filter((d) => d.room_id === room.id).map((d) => (
-                        <li key={d.id}>· {d.device_name} <span className="capitalize text-gray-300 dark:text-slate-600">({d.category})</span></li>
+                      {resultDevices.filter((d) => d.room_id === room.id).map((d) => (
+                        <li key={d.id}>· {d.device_name} <span className="text-gray-300 dark:text-slate-600">({CATEGORY_LABELS[d.category]})</span></li>
                       ))}
                     </ul>
                   </div>
                 ))}
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={handleGenerateUids}
-                  className="rounded bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:brightness-90">
-                  Sinh UID Gateway &amp; Node →
-                </button>
+                <button type="button" onClick={() => setStep(2)} className={BTN_PRIMARY}>Xem UID Gateway &amp; Node →</button>
               </div>
             </div>
           )}
 
-          {step === 2 && gateway && (
+          {/* Bước 3 — UID để flash tại kho (không có secret) */}
+          {step === 2 && result && (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600 dark:text-slate-300">
-                Gateway và {nodeGroups.length} Node (mỗi phòng và mỗi cửa là 1 node phần cứng riêng) đã được sinh UID —
-                Operator dùng các UID này để flash WiFi + Secret Key vật lý tại kho.
-              </p>
+              <div className="flex items-start gap-2.5 rounded border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-gray-600 dark:text-slate-300">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+                <p>
+                  Dùng các UID dưới đây khi flash firmware tại kho. <span className="font-semibold">Secret Key của Gateway/Node không bao giờ hiển thị trên Dashboard</span> —
+                  công cụ flash nội bộ lấy secret trực tiếp từ hệ thống và ghi vào thiết bị. Khi hoạt động, Gateway và Node xác thực bằng cặp UID + Secret đã flash.
+                </p>
+              </div>
 
-              <div className="rounded border border-gray-100 dark:border-slate-700 p-4">
-                <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Gateway UID</p>
-                <p className="mt-1 font-mono text-sm text-gray-900 dark:text-slate-100">{gateway.uid}</p>
+              <div className="flex items-center justify-between gap-3 rounded border border-gray-100 dark:border-slate-700 p-4">
+                <div className="flex items-center gap-3">
+                  <Server className="h-4 w-4 text-gray-400 dark:text-slate-500" />
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Gateway UID</p>
+                    <p className="mt-0.5 font-mono text-sm text-gray-900 dark:text-slate-100">{result.gateway.uid}</p>
+                  </div>
+                </div>
+                <span className="text-xs text-gray-400 dark:text-slate-500">Firmware {result.gateway.firmware_version ?? "—"}</span>
               </div>
 
               <div className="overflow-hidden rounded border border-gray-100 dark:border-slate-700">
-                <div className="border-b border-gray-100 dark:border-slate-700 bg-[#F4F5F7] dark:bg-slate-900 px-4 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Node UID ({nodeGroups.length})</p>
+                <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-700 bg-[#F4F5F7] dark:bg-slate-900 px-4 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-slate-500">Node UID ({result.nodes.length})</p>
+                  <button type="button" onClick={copyUids} className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:brightness-90">
+                    {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                    {copied ? "Đã sao chép" : "Sao chép tất cả UID"}
+                  </button>
                 </div>
                 <ul className="divide-y divide-gray-100 dark:divide-slate-700">
-                  {nodeGroups.map((node) => (
-                    <li key={node.uid} className="flex items-center justify-between gap-3 px-4 py-2">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 dark:text-slate-100">{node.label}</p>
-                        <p className="text-xs text-gray-400 dark:text-slate-500">{node.deviceNames.join(", ")}</p>
+                  {result.nodes.map((node) => (
+                    <li key={node.node_uid} className="flex items-center justify-between gap-3 px-4 py-2">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <Cpu className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-slate-500" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 dark:text-slate-100">{node.room_name}</p>
+                          <p className="truncate text-xs text-gray-400 dark:text-slate-500">{node.device_names.join(", ")}</p>
+                        </div>
                       </div>
-                      <span className="font-mono text-xs text-gray-700 dark:text-slate-300">{node.uid}</span>
+                      <span className="shrink-0 font-mono text-xs text-gray-700 dark:text-slate-300">{node.node_uid}</span>
                     </li>
                   ))}
                 </ul>
               </div>
 
-              <p className="text-xs text-gray-400 dark:text-slate-500">
-                Operator flash firmware, cấu hình WiFi &amp; thiết lập Secret Key trực tiếp tại kho cho cả Gateway và từng Node —
-                Dashboard không bao giờ hiển thị Secret Key. Khi hoạt động, Gateway và Node xác thực lẫn nhau bằng cặp UID + Secret Key đã flash.
-              </p>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setStep(3)}
-                  className="rounded bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:brightness-90">
-                  Sinh mã kích hoạt →
-                </button>
+              <div className="flex justify-between gap-2 pt-2">
+                <button type="button" onClick={() => setStep(1)} className={BTN_SECONDARY}>← Quay lại</button>
+                <button type="button" onClick={() => setStep(3)} className={BTN_PRIMARY}>Xem mã kích hoạt →</button>
               </div>
             </div>
           )}
 
-          {step === 3 && (
+          {/* Bước 4 — mã kích hoạt + QR + in tem (FR-2.4, 2.5) */}
+          {step === 3 && result && (
             <div className="space-y-4">
-              <p className="text-sm text-gray-600 dark:text-slate-300">Mã kích hoạt và QR để in tem — khách hàng quét khi đăng ký trên Mobile App.</p>
-              <div className="flex flex-col items-center gap-3 rounded border border-gray-100 dark:border-slate-700 p-6">
-                <div className="flex h-32 w-32 items-center justify-center rounded border-2 border-dashed border-gray-300 dark:border-slate-600 bg-gray-50 dark:bg-slate-900">
-                  <QrCode className="h-14 w-14 text-gray-400 dark:text-slate-500" />
-                </div>
-                <p className="font-mono text-lg font-bold tracking-widest text-gray-900 dark:text-slate-100">{activationCode}</p>
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setStep(4)}
-                  className="rounded bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:brightness-90">
-                  Xác nhận in tem →
-                </button>
+              <ActivationCodePanel activation={result.activation} homeName={result.home.name} packageCode={result.home.package} />
+              <div className="flex justify-between gap-2 pt-2">
+                <button type="button" onClick={() => setStep(2)} className={BTN_SECONDARY}>← Quay lại</button>
+                <button type="button" onClick={() => setStep(4)} className={BTN_PRIMARY}>Đã in tem, tiếp tục →</button>
               </div>
             </div>
           )}
 
-          {step === 4 && home && (
+          {/* Bước 5 — sẵn sàng bán + gán chủ (tuỳ chọn) */}
+          {step === 4 && result && (
             <div className="flex flex-col items-center gap-3 py-6 text-center">
               <CheckCircle2 className="h-12 w-12 text-success" />
               <p className="text-base font-semibold text-gray-900 dark:text-slate-100">Sẵn sàng bán — Ready to Sell</p>
-              <p className="max-w-sm text-sm text-gray-500 dark:text-slate-400">
-                <span className="font-medium">{home.name}</span> đã được đóng gói với mã kích hoạt <span className="font-mono">{activationCode}</span>, sẵn sàng xuất kho.
+              <p className="max-w-md text-sm text-gray-500 dark:text-slate-400">
+                <span className="font-medium">{result.home.name}</span> ({result.home.package}) đã được đóng gói kèm tem kích hoạt, nằm trong Provisioning Queue chờ xuất kho.
               </p>
 
-              {assignedOwnerName ? (
+              {owner ? (
                 <div className="flex flex-col items-center gap-1">
                   <StatusBadge status="active" label="Đã kích hoạt" />
-                  <p className="text-sm text-gray-600 dark:text-slate-300">Đã gán cho khách hàng <span className="font-medium">{assignedOwnerName}</span>.</p>
+                  <p className="text-sm text-gray-600 dark:text-slate-300">
+                    Đã gán cho khách hàng <span className="font-medium">{owner.name}</span> <span className="font-mono text-xs">({owner.user_tag})</span>.
+                  </p>
                 </div>
               ) : (
                 <>
                   <StatusBadge status="unclaimed" />
-                  <div className="w-full max-w-sm rounded border border-dashed border-gray-200 dark:border-slate-600 p-3 text-center">
+                  <div className="w-full max-w-md rounded border border-dashed border-gray-200 dark:border-slate-600 p-3 text-center">
                     <p className="text-xs text-gray-500 dark:text-slate-400">
-                      Nếu khách hàng đã có tài khoản trên Mobile App (thay vì chờ họ tự quét QR), Operator có thể gán quyền sở hữu ngay bây giờ.
+                      Khách hàng đã có tài khoản trên ứng dụng? Thay vì chờ khách tự quét QR, bạn có thể gán quyền sở hữu ngay bằng User ID.
                     </p>
-                    <button type="button" onClick={() => setAssignOpen(true)}
-                      className="mt-2 inline-flex items-center gap-1.5 rounded border border-brand/30 bg-brand-soft px-3.5 py-1.5 text-sm font-semibold text-brand transition hover:brightness-95">
+                    <button type="button" onClick={() => setAssignOpen(true)} className={`mt-2 ${BTN_BRAND_SOFT}`}>
                       <KeyRound className="h-3.5 w-3.5" /> Gán cho khách hàng (User ID)
                     </button>
                   </div>
                 </>
               )}
 
-              <div className="mt-2 flex gap-2">
-                <Link href={`/smart-homes/${home.id}`} className="rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-slate-300 hover:bg-gray-50 dark:hover:bg-slate-600">
-                  Xem chi tiết nhà
-                </Link>
-                <button type="button" onClick={() => router.push("/smart-homes")}
-                  className="rounded bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:brightness-90">
-                  Về danh sách Smart Homes
-                </button>
+              <div className="mt-2 flex flex-wrap justify-center gap-2">
+                <Link href={`/smart-homes/${result.home.id}`} className={BTN_SECONDARY}>Xem chi tiết nhà</Link>
+                <button type="button" onClick={resetWizard} className={BTN_SECONDARY}>Tạo nhà khác</button>
+                <Link href="/smart-homes" className={BTN_PRIMARY}>Về danh sách Smart Homes</Link>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {home && (
+      {result && assignOpen && (
         <AssignOwnerModal
-          open={assignOpen}
-          homeName={home.name}
+          open
+          homeId={result.home.id}
+          homeName={result.home.name}
+          initialQuery={result.home.expected_owner_name ?? ""}
           onClose={() => setAssignOpen(false)}
-          onAssign={handleAssignOwner}
+          onAssigned={(customer) => {
+            setOwner(customer);
+            void revalidateDashboard("/smart-homes", "/stats");
+            showToast(`Đã gán "${result.home.name}" cho ${customer.name}.`);
+          }}
         />
       )}
     </div>

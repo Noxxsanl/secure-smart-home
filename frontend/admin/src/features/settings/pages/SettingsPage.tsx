@@ -1,18 +1,25 @@
 "use client";
 
 import { Settings as SettingsIcon, Home, Cpu } from "lucide-react";
-import { rooms, devices } from "@smarthome/shared/mock/seed";
+import { CATEGORY_LABELS, ROOM_TYPE_LABELS } from "@smarthome/console/lib/labels";
 
+// Trang cấu hình hệ thống CHƯA nối backend: danh mục dưới đây là giá trị cố định theo hợp đồng V2
+// (chỉ để tra cứu), chưa có API đọc/ghi cấu hình — chỉnh sửa danh mục là hạng mục phase sau.
 export default function SettingsPage() {
-  const roomTypes = Array.from(new Set(rooms.map((r) => r.room_type)));
-  const deviceCategories = Array.from(new Set(devices.map((d) => d.category)));
-
   return (
     <div className="w-full space-y-3">
       <div>
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Settings</h1>
+        <h1 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-gray-900 dark:text-slate-100">
+          Settings
+          <span
+            title="Trang này chưa có API backend — chỉ hiển thị danh mục cố định."
+            className="rounded bg-warning-soft px-2 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/30"
+          >
+            Chưa nối backend
+          </span>
+        </h1>
         <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">
-          Danh mục hệ thống hiện tại. Quản lý chỉnh sửa danh mục (thêm/sửa Room Type, Device Category, MQTT Broker) là hạng mục mở rộng ở phase sau.
+          Danh mục hệ thống hiện tại (chỉ xem). Chỉnh sửa danh mục (thêm/sửa Room Type, Device Category, MQTT Broker) là hạng mục mở rộng ở phase sau.
         </p>
       </div>
 
@@ -23,9 +30,9 @@ export default function SettingsPage() {
             <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Room Types</p>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {roomTypes.map((t) => (
-              <span key={t} className="rounded bg-gray-100 dark:bg-slate-700 px-2 py-1 text-xs font-medium capitalize text-gray-600 dark:text-slate-300">
-                {t.replace("_", " ")}
+            {Object.values(ROOM_TYPE_LABELS).map((label) => (
+              <span key={label} className="rounded bg-gray-100 dark:bg-slate-700 px-2 py-1 text-xs font-medium text-gray-600 dark:text-slate-300">
+                {label}
               </span>
             ))}
           </div>
@@ -37,9 +44,9 @@ export default function SettingsPage() {
             <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Device Categories</p>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {deviceCategories.map((c) => (
-              <span key={c} className="rounded bg-gray-100 dark:bg-slate-700 px-2 py-1 text-xs font-medium capitalize text-gray-600 dark:text-slate-300">
-                {c.replace("_", " ")}
+            {Object.values(CATEGORY_LABELS).map((label) => (
+              <span key={label} className="rounded bg-gray-100 dark:bg-slate-700 px-2 py-1 text-xs font-medium text-gray-600 dark:text-slate-300">
+                {label}
               </span>
             ))}
           </div>
@@ -50,7 +57,9 @@ export default function SettingsPage() {
             <SettingsIcon className="h-4 w-4 text-brand" />
             <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">MQTT Broker</p>
           </div>
-          <p className="text-sm text-gray-500 dark:text-slate-400">mqtt://broker-1.smarthome.local:8883 (TLS) — cấu hình chi tiết chưa khả dụng trong bản mock này.</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400">
+            Broker 2 chỉ nhận kết nối TLS (cổng 8883) — chi tiết cấu hình chưa hiển thị ở trang này.
+          </p>
         </div>
       </div>
     </div>

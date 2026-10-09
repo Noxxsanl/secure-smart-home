@@ -5,6 +5,7 @@
 import { Router, Request, Response } from "express";
 import pool from "../config/db";
 import { validateDevice } from "../middleware/validateDevice";
+import { onTelemetryIngested } from "../modules/devices/telemetry.service";
 import { log, logDataRecvWithPrune } from "../services/auditLogger";
 
 const router = Router();
@@ -88,13 +89,16 @@ router.post("/", validateDevice, async (req: Request, res: Response): Promise<vo
   );
   const receivedAt: Date = sdRows[0]?.received_at ?? new Date();
 
-  // Giữ chỉ 150 bản ghi gần nhất cho mỗi sensor
-  await pool.execute(
-    `DELETE FROM sensor_data WHERE device_id = ? AND id NOT IN (
-       SELECT id FROM (SELECT id FROM sensor_data WHERE device_id = ? ORDER BY id DESC LIMIT 150) t
-     )`,
-    [sensor.id, sensor.id]
-  );
+  // V2: không còn prune "150 dòng/sensor" ở đây — sensor_data giữ theo THỜI GIAN (job retention
+  // hằng giờ, TELEMETRY_RETENTION_DAYS) để biểu đồ 7 ngày có đủ dữ liệu.
+  // Hook phát bus telemetry/device_state + thông báo cửa mở. Gọi TRƯỚC khi cập nhật last_seen bên
+  // dưới vì hook cần last_seen cũ để biết thiết bị vừa online trở lại; hook không bao giờ ném lỗi.
+  await onTelemetryIngested({
+    sensorDbId: sensor.id,
+    gatewayDbId: gateway.id,
+    data,
+    receivedAt,
+  });
 
   // Dùng IP do firmware tự báo (gateway_ip / sensor_ip trong body).
   // Fallback về HTTP client IP nếu firmware cũ chưa gửi field này.

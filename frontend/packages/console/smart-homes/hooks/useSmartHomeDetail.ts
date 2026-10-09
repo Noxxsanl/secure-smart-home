@@ -1,31 +1,26 @@
-import useSWR from "swr";
-import {
-  mockDelay, smartHomeStore, customerStore, gatewayStore, roomStore,
-  homeMemberStore, homeTimelineStore, deviceStore, automationStore, cameraStore,
-} from "@smarthome/shared/mock/store";
+"use client";
 
-function buildDetail(id: number) {
-  const home = smartHomeStore.get(id);
-  if (!home) return null;
-  return {
-    home,
-    owner: home.customer_id ? customerStore.get(home.customer_id) : null,
-    gateway: home.gateway_id ? gatewayStore.get(home.gateway_id) : null,
-    rooms: roomStore.listByHome(id),
-    members: homeMemberStore.listByHome(id),
-    timeline: homeTimelineStore.listByHome(id),
-    devices: deviceStore.listByHome(id),
-    automationRules: automationStore.listByHome(id),
-    cameras: cameraStore.listByHome(id),
-  };
-}
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { smartHomeKey } from "@smarthome/console/api/smartHomes.api";
+import { INVALID_ROUTE_ID_ERROR } from "@smarthome/console/lib/ids";
+import type { SmartHomeDetail } from "@smarthome/console/api/types";
 
-export type SmartHomeDetail = NonNullable<ReturnType<typeof buildDetail>>;
+export type { SmartHomeDetail } from "@smarthome/console/api/types";
 
-export function useSmartHomeDetail(id: number) {
-  const { data, isLoading, mutate } = useSWR(
-    Number.isFinite(id) ? `/mock/smart-homes/${id}` : null,
-    () => mockDelay(buildDetail(id))
+/**
+ * GET /smart-homes/:id. Operator xem nhà đã kích hoạt mà không có quyền →
+ * `access.restricted = true` (dữ liệu khách hàng đã được backend lược bỏ).
+ * `id = null` (đường dẫn sai) → lỗi 404 ngay, không gọi API.
+ */
+export function useSmartHomeDetail(id: number | null, options: { poll?: boolean } = {}) {
+  const { data, error, isLoading, mutate } = useDashboardSWR<SmartHomeDetail>(
+    id !== null ? smartHomeKey(id) : null,
+    { refreshInterval: options.poll === false ? 0 : 10_000 }
   );
-  return { detail: data ?? null, isLoading, refresh: mutate };
+  return {
+    detail: data ?? null,
+    isLoading: id !== null && isLoading,
+    error: id === null ? INVALID_ROUTE_ID_ERROR : error,
+    refresh: () => mutate(),
+  };
 }

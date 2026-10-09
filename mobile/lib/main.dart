@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 
 export 'app.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(
+    // No automatic provider retries: failures are shown with a retry button.
+    ProviderScope(retry: (_, _) => null, child: const SmartHomeApp()),
+  );
 }

@@ -1,18 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { notFound, useParams } from "next/navigation";
-import { RefreshCw, Search, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { useLogEntries } from "@smarthome/console/logs/hooks/useLogEntries";
+import { useSmartHomes } from "@smarthome/console/smart-homes/hooks/useSmartHomes";
 import { usePermissions, useStaffRole } from "@smarthome/console/auth/usePermissions";
 import LogTable from "@smarthome/console/logs/components/LogTable";
-import ConfirmDialog from "@smarthome/shared/ui/ConfirmDialog";
+import ConfirmModal from "@smarthome/console/components/ConfirmModal";
+import { LoadErrorBar } from "@smarthome/console/components/PageStates";
 import { useToast } from "@smarthome/shared/ui/Toast";
-import { logStore } from "@smarthome/shared/mock/store";
 import { LOG_CATEGORY_ICONS, logCategoriesFor } from "@smarthome/console/logs/config";
-import type { LogCategory, LogSeverity } from "@smarthome/shared/mock/types";
+import { deleteLogs } from "@smarthome/console/api/logs.api";
+import { useDebouncedValue } from "@smarthome/console/lib/hooks";
+import { localInputToIso } from "@smarthome/console/lib/format";
+import {
+  BTN_DANGER, BTN_SECONDARY, BTN_SM, CARD, INPUT, SEARCH_INPUT, SEGMENTED, SELECT_SM, TOOLBAR, segmentButton,
+} from "@smarthome/console/lib/ui";
+import type { LogCategory, LogFilters, Severity } from "@smarthome/console/api/types";
 
-const SEVERITIES: { value: LogSeverity | "all"; label: string }[] = [
+const SEVERITIES: { value: Severity | "all"; label: string }[] = [
   { value: "all", label: "Tất cả" },
   { value: "critical", label: "Critical" },
   { value: "warning", label: "Warning" },
@@ -20,27 +27,58 @@ const SEVERITIES: { value: LogSeverity | "all"; label: string }[] = [
   { value: "success", label: "Success" },
 ];
 
+const PAGE_SIZES = [25, 50, 100, 200];
+
 export default function LogCategoryPage() {
   const { category } = useParams<{ category: string }>();
-  const cat = (category as LogCategory) ?? "gateway";
-  // Chỉ những loại log role hiện tại được xem — gõ URL loại khác sẽ nhận 404.
-  const config = logCategoriesFor(useStaffRole()).find((c) => c.category === cat);
-  const Icon = LOG_CATEGORY_ICONS[cat] ?? LOG_CATEGORY_ICONS.gateway;
+  // Chỉ những loại log role hiện tại được xem — gõ URL loại khác sẽ nhận 404
+  // (backend cũng trả 403 nếu Operator gọi thẳng API).
+  const config = logCategoriesFor(useStaffRole()).find((c) => c.category === category);
+  if (!config) notFound();
+  // key = loại log → chuyển loại thì toàn bộ bộ lọc/trang/lựa chọn được đặt lại.
+  return <LogCategoryView key={config.category} category={config.category} label={config.label} />;
+}
 
-  const { isAdmin } = usePermissions();
+function LogCategoryView({ category, label }: { category: LogCategory; label: string }) {
+  const Icon = LOG_CATEGORY_ICONS[category];
+  const { canDeleteLogs } = usePermissions();
   const { showToast } = useToast();
-  const { logs, isLoading, refresh } = useLogEntries(cat);
+  const { homes } = useSmartHomes({}, { poll: false });
 
-  const [severity, setSeverity] = useState<LogSeverity | "all">("all");
+  const [severity, setSeverity] = useState<Severity | "all">("all");
+  const [homeId, setHomeId] = useState<number | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [actor, setActor] = useState("");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(50);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const filtered = useMemo(() => {
-    return logs
-      .filter((l) => severity === "all" || l.severity === severity)
-      .filter((l) => (search.trim() ? l.message.toLowerCase().includes(search.toLowerCase()) : true));
-  }, [logs, severity, search]);
+  const debouncedActor = useDebouncedValue(actor, 350);
+  const debouncedSearch = useDebouncedValue(search, 350);
+
+  const filters: LogFilters = {
+    home_id: homeId,
+    severity: severity === "all" ? null : severity,
+    from: localInputToIso(from),
+    to: localInputToIso(to),
+    actor: debouncedActor,
+    q: debouncedSearch,
+    page,
+    limit,
+  };
+  const { logs, total, isLoading, isValidating, error, refresh } = useLogEntries(category, filters);
+
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const firstShown = total === 0 ? 0 : (page - 1) * limit + 1;
+  const lastShown = Math.min(total, page * limit);
+  const hasFilter = severity !== "all" || homeId !== null || !!from || !!to || !!actor || !!search;
+
+  function clearFilters() {
+    setSeverity("all"); setHomeId(null); setFrom(""); setTo(""); setActor(""); setSearch(""); setPage(1);
+  }
 
   function handleToggle(id: number) {
     setSelectedIds((prev) => {
@@ -61,16 +99,14 @@ export default function LogCategoryPage() {
     });
   }
 
-  function handleDeleteSelected() {
-    logStore.bulkDelete(Array.from(selectedIds));
-    const count = selectedIds.size;
+  async function handleDeleteSelected() {
+    const ids = Array.from(selectedIds);
+    await deleteLogs(category, ids);
     setSelectedIds(new Set());
-    refresh();
-    showToast(`Đã xoá ${count} log.`);
-    setConfirmDelete(false);
+    setPage(1);
+    await refresh();
+    showToast(`Đã xoá ${ids.length} log.`);
   }
-
-  if (!config) notFound();
 
   return (
     <div className="w-full space-y-3">
@@ -79,67 +115,168 @@ export default function LogCategoryPage() {
           <Icon className="h-4 w-4 text-gray-500 dark:text-slate-400" />
         </div>
         <div>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">{config.label}</h1>
-          <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">{filtered.length} sự kiện.</p>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">{label}</h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">
+            {isLoading && logs.length === 0 ? "Đang tải…" : `${total} sự kiện${hasFilter ? " khớp bộ lọc" : ""}.`}
+            {" "}Log chỉ ghi thêm, tự cập nhật mỗi 30 giây.
+          </p>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2.5">
-        <div className="flex items-center rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-0.5 gap-0.5">
-          {SEVERITIES.map(({ value, label }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setSeverity(value)}
-              className={`rounded px-2.5 py-1 text-xs font-semibold transition ${severity === value ? "bg-brand-soft text-brand" : "text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200"}`}
-            >
-              {label}
+      <div className={`overflow-hidden ${CARD}`}>
+        <div className={TOOLBAR}>
+          <div className={SEGMENTED}>
+            {SEVERITIES.map(({ value, label: text }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => { setSeverity(value); setPage(1); }}
+                className={segmentButton(severity === value)}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            {hasFilter && (
+              <button type="button" onClick={clearFilters} className={BTN_SM}>
+                <X className="h-3 w-3" /> Xoá bộ lọc
+              </button>
+            )}
+            <button type="button" onClick={() => void refresh()} className={BTN_SM}>
+              <RefreshCw className={`h-3 w-3 ${isValidating ? "animate-spin" : ""}`} /> Làm mới
             </button>
-          ))}
+          </div>
         </div>
-        <div className="relative min-w-48 max-w-72 flex-1">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-slate-500" />
-          <input
-            type="text" placeholder="Tìm trong thông điệp…"
-            value={search} onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-full rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 pl-8 pr-3 text-sm text-gray-900 dark:text-slate-100 placeholder:text-gray-300 dark:placeholder:text-slate-500 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
-          />
-        </div>
-        <button type="button" onClick={() => refresh()}
-          className="inline-flex items-center gap-1.5 rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-slate-400 transition hover:bg-gray-50 dark:hover:bg-slate-700">
-          <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} /> Làm mới
-        </button>
-      </div>
 
-      {isAdmin && selectedIds.size > 0 && (
-        <div className="flex items-center justify-between rounded-md border border-warning/30 bg-warning-soft px-4 py-2.5">
-          <span className="text-sm font-semibold text-warning">{selectedIds.size} đã chọn</span>
-          <button type="button" onClick={() => setConfirmDelete(true)}
-            className="inline-flex items-center gap-1.5 rounded bg-critical px-3 py-1.5 text-sm font-semibold text-white transition hover:brightness-90">
-            <Trash2 className="h-3.5 w-3.5" /> Xoá đã chọn
-          </button>
+        <div className="grid gap-2.5 border-b border-gray-200 dark:border-slate-700 px-4 py-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div>
+            <label htmlFor="log-home" className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-slate-400">Smart Home</label>
+            <select
+              id="log-home"
+              value={homeId ?? ""}
+              onChange={(e) => { setHomeId(e.target.value ? Number(e.target.value) : null); setPage(1); }}
+              className={`${SELECT_SM} w-full`}
+            >
+              <option value="">Tất cả nhà</option>
+              {homes.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="log-from" className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-slate-400">Từ lúc</label>
+            <input
+              id="log-from" type="datetime-local" value={from}
+              onChange={(e) => { setFrom(e.target.value); setPage(1); }}
+              className={`${INPUT} h-8 text-xs`}
+            />
+          </div>
+          <div>
+            <label htmlFor="log-to" className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-slate-400">Đến lúc</label>
+            <input
+              id="log-to" type="datetime-local" value={to}
+              onChange={(e) => { setTo(e.target.value); setPage(1); }}
+              className={`${INPUT} h-8 text-xs`}
+            />
+          </div>
+          <div>
+            <label htmlFor="log-actor" className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-slate-400">Người thực hiện</label>
+            <input
+              id="log-actor" type="text" value={actor} placeholder="Tên đăng nhập…"
+              onChange={(e) => { setActor(e.target.value); setPage(1); }}
+              className={`${INPUT} h-8 text-xs`}
+            />
+          </div>
+          <div>
+            <label htmlFor="log-q" className="mb-1 block text-[11px] font-medium text-gray-500 dark:text-slate-400">Tìm trong thông điệp</label>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-slate-500" />
+              <input
+                id="log-q" type="text" value={search} placeholder="Từ khoá…"
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                className={SEARCH_INPUT}
+              />
+            </div>
+          </div>
         </div>
-      )}
 
-      <div className="overflow-hidden rounded-md border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800">
+        {canDeleteLogs && selectedIds.size > 0 && (
+          <div className="flex items-center justify-between gap-3 border-b border-warning/30 bg-warning-soft px-4 py-2.5">
+            <span className="text-sm font-semibold text-warning">{selectedIds.size} log đã chọn</span>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setSelectedIds(new Set())} className={BTN_SECONDARY}>Bỏ chọn</button>
+              <button type="button" onClick={() => setConfirmDelete(true)} className={BTN_DANGER}>
+                <Trash2 className="h-3.5 w-3.5" /> Xoá đã chọn
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!!error && <LoadErrorBar error={error} onRetry={() => void refresh()} />}
+
         <LogTable
-          logs={filtered}
-          isAdmin={isAdmin}
+          logs={logs}
+          selectable={canDeleteLogs}
           selectedIds={selectedIds}
           onToggle={handleToggle}
           onToggleAll={handleToggleAll}
+          emptyTitle={isLoading ? "Đang tải…" : page > totalPages ? "Trang này không còn log" : "Không có sự kiện nào"}
+          emptyDescription={
+            page > totalPages
+              ? "Dữ liệu vừa thay đổi. Quay về trang cuối để xem tiếp."
+              : hasFilter ? "Thử nới lỏng bộ lọc hoặc mở rộng khoảng thời gian." : "Loại log này chưa ghi nhận sự kiện nào."
+          }
         />
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 dark:border-slate-700 bg-[#F4F5F7] dark:bg-slate-900 px-4 py-2.5 text-xs text-gray-500 dark:text-slate-400">
+          <span>
+            {total === 0 ? "Không có dòng nào" : `Dòng ${firstShown}–${lastShown} / ${total}`}
+          </span>
+          <div className="flex items-center gap-2">
+            <label htmlFor="log-limit" className="sr-only">Số dòng mỗi trang</label>
+            <select
+              id="log-limit" value={limit}
+              onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
+              className={SELECT_SM}
+            >
+              {PAGE_SIZES.map((n) => <option key={n} value={n}>{n} dòng/trang</option>)}
+            </select>
+            <button
+              type="button" onClick={() => setPage(Math.max(1, Math.min(page, totalPages) - 1))}
+              disabled={page <= 1} className={BTN_SM} aria-label="Trang trước"
+            >
+              <ChevronLeft className="h-3 w-3" />
+            </button>
+            <span className="font-medium text-gray-700 dark:text-slate-300">Trang {Math.min(page, totalPages)}/{totalPages}</span>
+            <button
+              type="button" onClick={() => setPage(Math.min(totalPages, page + 1))}
+              disabled={page >= totalPages} className={BTN_SM} aria-label="Trang sau"
+            >
+              <ChevronRight className="h-3 w-3" />
+            </button>
+            {page > totalPages && (
+              <button type="button" onClick={() => setPage(totalPages)} className={BTN_SM}>Về trang cuối</button>
+            )}
+          </div>
+        </div>
       </div>
 
-      <ConfirmDialog
-        open={confirmDelete}
-        title="Xoá log đã chọn"
-        description={`Xoá vĩnh viễn ${selectedIds.size} log đã chọn?`}
-        confirmLabel="Xoá"
-        danger
-        onConfirm={handleDeleteSelected}
-        onCancel={() => setConfirmDelete(false)}
-      />
+      {confirmDelete && (
+        <ConfirmModal
+          title="Xoá log đã chọn"
+          subtitle={label}
+          icon={Trash2}
+          danger
+          description={
+            <>
+              Xoá vĩnh viễn <span className="font-semibold">{selectedIds.size}</span> dòng log? Hành động không hoàn tác được;
+              việc xoá được ghi lại bằng một dòng log riêng (không xoá được dòng đó).
+            </>
+          }
+          confirmLabel="Xoá"
+          onConfirm={handleDeleteSelected}
+          onClose={() => setConfirmDelete(false)}
+        />
+      )}
     </div>
   );
 }

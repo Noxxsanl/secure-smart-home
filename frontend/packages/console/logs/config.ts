@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Server, Cpu, QrCode, Radio, ShieldAlert, Fingerprint, Activity, Workflow, UploadCloud, AlertOctagon,
 } from "lucide-react";
-import type { LogCategory } from "@smarthome/shared/mock/types";
+import type { LogCategory } from "@smarthome/console/api/types";
 import type { StaffRole } from "@smarthome/console/auth/usePermissions";
 
 // docs/05 §5.3 — Operator chỉ thấy 5 loại log vận hành; Security/Auth/Activity/
@@ -19,6 +19,11 @@ export const LOG_CATEGORY_CONFIG: { category: LogCategory; label: string; roles:
   { category: "ota",        label: "OTA Log",            roles: ["admin", "operator"] },
   { category: "error",      label: "Error Log",          roles: ["admin"] },
 ];
+
+/** Tên hiển thị của một loại log (VD "gateway" → "Gateway Log"). */
+export function logCategoryLabel(category: LogCategory): string {
+  return LOG_CATEGORY_CONFIG.find((c) => c.category === category)?.label ?? "Log";
+}
 
 export function logCategoriesFor(role: StaffRole) {
   return LOG_CATEGORY_CONFIG.filter((c) => c.roles.includes(role));

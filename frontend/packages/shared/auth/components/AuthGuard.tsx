@@ -7,16 +7,16 @@ import { useAuth } from "@smarthome/shared/auth/hooks/useAuth";
 import { PORTAL_LABELS } from "@smarthome/shared/auth/types";
 import FullPageSpinner from "@smarthome/shared/ui/FullPageSpinner";
 
-// Bảo vệ toàn bộ route private của một app: chưa đăng nhập → về trang login;
-// phiên thuộc role khác (không xảy ra với mock vì login đã chặn, nhưng giữ lại
-// phòng khi /me của backend thật trả role khác) → chặn và hướng dẫn đúng cổng.
+// Bảo vệ toàn bộ route private của một app: chưa đăng nhập / mất phiên → về
+// trang login (kèm lý do để proxy không đẩy ngược lại); phiên thuộc role khác
+// (backend dùng cookie riêng theo cổng nên hiếm khi xảy ra) → chặn và hướng dẫn đúng cổng.
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, portal, logout } = useAuth();
+  const { user, portal, logout, loginRedirect } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!user) router.replace(portal.loginPath);
-  }, [user, router, portal.loginPath]);
+    if (!user) router.replace(loginRedirect);
+  }, [user, router, loginRedirect]);
 
   if (!user) return <FullPageSpinner />;
 

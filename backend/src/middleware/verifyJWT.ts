@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import { findAuthUserById } from "../modules/auth/auth.repository";
 
 export interface JWTPayload {
   id: number;
@@ -28,13 +29,35 @@ export async function verifyJWT(
     return;
   }
 
+  let payload: JWTPayload & { typ?: unknown };
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload;
-    // Gắn payload để các handler phía sau (rbac, routes) có thể đọc role/id
-    (req as any).user = payload;
-    next();
+    payload = jwt.verify(token, process.env.JWT_SECRET!) as JWTPayload & { typ?: unknown };
   } catch {
     // Bắt cả TokenExpiredError lẫn JsonWebTokenError
     res.status(401).json({ error: "INVALID_TOKEN" });
+    return;
   }
+
+  // Token V2 (dashboard/portal) ký cùng JWT_SECRET nhưng luôn có `typ` — không chấp nhận ở kênh legacy,
+  // nếu không khách hàng tự đăng ký có thể dán cookie sh_user vào cookie `token` để đọc thiết bị mọi nhà.
+  if (payload.typ !== undefined) {
+    res.status(401).json({ error: "INVALID_TOKEN" });
+    return;
+  }
+
+  // Nạp lại user mỗi request để tài khoản bị khoá/xoá/đổi role mất quyền ngay (FR-11.4),
+  // và chỉ nhân viên mới dùng được các route legacy.
+  const user = await findAuthUserById(Number(payload.id));
+  if (!user || user.role !== payload.role || (user.role !== "admin" && user.role !== "operator")) {
+    res.status(401).json({ error: "INVALID_TOKEN" });
+    return;
+  }
+  if (user.status === "locked") {
+    res.status(403).json({ error: "ACCOUNT_LOCKED" });
+    return;
+  }
+
+  // Gắn payload để các handler phía sau (rbac, routes) có thể đọc role/id
+  (req as any).user = payload;
+  next();
 }

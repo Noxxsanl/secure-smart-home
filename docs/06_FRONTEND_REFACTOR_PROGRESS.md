@@ -144,3 +144,28 @@
 **Lệch tài liệu cần quyết định:** PRD 13 §2.2 và FR-1.4 ghi *không* có Web cho khách hàng (USER chỉ dùng Mobile). App `user/` được làm theo yêu cầu trực tiếp — cần cập nhật PRD/docs 01, 05 nếu giữ hướng này.
 
 **Kiểm tra đã chạy:** `npm run typecheck` (5 workspace) pass; `npm run lint` 0 lỗi (3 warning cũ ở `packages/shared/ui/Select.tsx`); `npm run build` cả 3 app pass; smoke test trình duyệt headless (Edge qua CDP) trên bản production — 62/62 luồng pass, không có exception runtime. Chưa kiểm được build Docker và `nginx -t` (Docker daemon không chạy lúc kiểm tra).
+
+---
+
+## 13. Nối backend thật (V2)
+
+Từ đợt này 3 app web gọi API thật thay cho `packages/shared/mock/`. Chi tiết cách chạy: [`frontend/README.md`](../frontend/README.md); hợp đồng API: [`03`](03_BACKEND_REFACTOR_SMARTHOME.md) §9.
+
+**Hạ tầng chung**
+- **HTTP client dùng chung** `packages/shared/api/http.ts`: `api()`, `apiFetcher` (cho SWR), `apiErrorCode`; lỗi ném `FetchError` (`errors.ts`), mã lỗi `body.error` được map sang hướng dẫn tiếng Việt (không hiện mã thô).
+- **Header `X-Portal: admin|operator|user`** gắn vào mọi request; backend dùng để chọn cookie đúng cổng và chặn CSRF (request ghi thiếu header → `403 CSRF_CHECK_FAILED`).
+- **Cookie HttpOnly theo cổng:** `sh_admin` / `sh_operator` / `sh_user` — 3 app dev chạy chung host `localhost` nên không ghi đè phiên của nhau.
+- **`src/proxy.ts`** mỗi app (Next 16, thay `middleware`): chỉ là cổng UX (chưa có cookie → `/login`, đã có → trang chủ); không xác thực, backend kiểm JWT mọi request.
+- **`rewrites` `/api/:path*` → `${BACKEND_URL ?? "http://localhost:5000"}/api/:path*`** trong `next.config.ts` mỗi app → cùng origin, không cần CORS. Không còn route proxy `/api/[...path]`.
+- Kênh: Admin/Operator → `/api/dashboard/**`; app `user` → `/api/portal/**`.
+
+**Trang đã dùng API thật**
+- Admin + Operator: đăng nhập, Dashboard (stats), Smart Homes (danh sách, chi tiết, Provisioning Wizard — trả Activation Code 1 lần), Customers, Gateways, Devices, OTA & Firmware, Logs Center, Notifications, Automation, Team, Operator Access.
+- User (cổng khách hàng): đăng ký/đăng nhập, Tổng quan, Phòng, Thiết bị (bật/tắt), Tự động hoá + gợi ý thói quen, Thông báo, Thành viên & lời mời, Thêm Smart Home (Activation Code), Hồ sơ. Dữ liệu cập nhật bằng SWR polling (web không có WebSocket).
+
+**Vẫn còn mock**
+- **AI Dashboard** (`packages/console/ai`) — hiện badge "Dữ liệu mô phỏng".
+- **Admin Settings** (`admin/src/features/settings`).
+- `packages/shared/mock/` vì thế vẫn được giữ lại.
+
+**Lệch còn lại:** app `user` vẫn ngoài phạm vi PRD 13 §2.2 / FR-1.4 (xem mục 12).

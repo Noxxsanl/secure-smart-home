@@ -5,11 +5,15 @@ class BottomNavItem {
     required this.label,
     required this.icon,
     required this.selectedIcon,
+    this.badgeCount = 0,
   });
 
   final String label;
   final IconData icon;
   final IconData selectedIcon;
+
+  /// Unread counter shown as a badge (0 hides it).
+  final int badgeCount;
 }
 
 class AppBottomNavigationBar extends StatelessWidget {
@@ -39,6 +43,9 @@ class AppBottomNavigationBar extends StatelessWidget {
             children: List.generate(items.length, (index) {
               final item = items[index];
               final isSelected = selectedIndex == index;
+              final color = isSelected
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant;
 
               return Expanded(
                 child: Semantics(
@@ -48,7 +55,6 @@ class AppBottomNavigationBar extends StatelessWidget {
                     key: ValueKey<String>('nav-${item.label}'),
                     onTap: () => onSelected(index),
                     child: Column(
-                      mainAxisAlignment: MainAxisAlignment.start,
                       children: [
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 220),
@@ -63,32 +69,27 @@ class AppBottomNavigationBar extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 9),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 180),
+                        Badge(
+                          isLabelVisible: item.badgeCount > 0,
+                          label: Text(
+                            item.badgeCount > 99 ? '99+' : '${item.badgeCount}',
+                          ),
                           child: Icon(
                             isSelected ? item.selectedIcon : item.icon,
-                            key: ValueKey<bool>(isSelected),
-                            color: isSelected
-                                ? colorScheme.primary
-                                : colorScheme.onSurfaceVariant,
+                            color: color,
                           ),
                         ),
                         const SizedBox(height: 3),
-                        AnimatedDefaultTextStyle(
-                          duration: const Duration(milliseconds: 180),
+                        Text(
+                          item.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: isSelected
-                                ? colorScheme.primary
-                                : colorScheme.onSurfaceVariant,
+                            color: color,
                             fontSize: 12,
                             fontWeight: isSelected
                                 ? FontWeight.bold
                                 : FontWeight.normal,
-                          ),
-                          child: Text(
-                            item.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],

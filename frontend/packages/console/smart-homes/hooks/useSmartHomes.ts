@@ -1,36 +1,22 @@
-import useSWR from "swr";
-import { mockDelay, smartHomeStore, customerStore, gatewayStore, roomStore } from "@smarthome/shared/mock/store";
-import type { HomeStatus } from "@smarthome/shared/mock/types";
+"use client";
 
-export type SmartHomeListRow = {
-  id: number;
-  name: string;
-  address: string;
-  package: string;
-  status: HomeStatus;
-  ownerName: string | null;
-  gatewayOnline: boolean | null;
-  roomCount: number;
-};
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { smartHomesKey } from "@smarthome/console/api/smartHomes.api";
+import type { HomeStatus, SmartHomeRow } from "@smarthome/console/api/types";
 
-function buildRows(): SmartHomeListRow[] {
-  return smartHomeStore.list().map((home) => {
-    const owner = home.customer_id ? customerStore.get(home.customer_id) : null;
-    const gateway = home.gateway_id ? gatewayStore.get(home.gateway_id) : null;
-    return {
-      id: home.id,
-      name: home.name,
-      address: home.address,
-      package: home.package,
-      status: home.status,
-      ownerName: owner?.name ?? null,
-      gatewayOnline: gateway ? gateway.status === "online" : null,
-      roomCount: roomStore.listByHome(home.id).length,
-    };
-  });
-}
+export type SmartHomeListRow = SmartHomeRow;
 
-export function useSmartHomes() {
-  const { data, isLoading, mutate } = useSWR("/mock/smart-homes", () => mockDelay(buildRows()));
-  return { homes: data ?? [], isLoading, refresh: mutate };
+/** GET /smart-homes?status=&q= — lọc ở server, poll 10 s (danh sách console). */
+export function useSmartHomes(filters: { status?: HomeStatus | null; q?: string } = {}, options: { poll?: boolean } = {}) {
+  const { data, error, isLoading, isValidating, mutate } = useDashboardSWR<SmartHomeRow[]>(
+    smartHomesKey(filters),
+    { refreshInterval: options.poll === false ? 0 : 10_000, keepPreviousData: true }
+  );
+  return {
+    homes: data ?? [],
+    isLoading,
+    isValidating,
+    error,
+    refresh: () => mutate(),
+  };
 }

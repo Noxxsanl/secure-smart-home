@@ -1,20 +1,29 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../shell/presentation/pages/app_shell_page.dart';
-import '../../data/mock_auth_service.dart';
+import '../../../../core/config/app_config.dart';
+import '../../../../core/network/error_messages.dart';
+import '../../../../core/theme/app_theme.dart';
+import '../../../../core/widgets/app_widgets.dart';
+import '../providers/auth_providers.dart';
+import 'register_page.dart';
 
-class LoginPage extends StatefulWidget {
+/// Email + password login (FR-1.1). Errors are shown as Vietnamese guidance.
+class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
+class _LoginPageState extends ConsumerState<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isPasswordVisible = false;
+  bool _busy = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -23,35 +32,32 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void _handleLogin() {
-    if (!_formKey.currentState!.validate()) return;
-
-    final user = MockAuthService.login(
-      email: _emailController.text,
-      password: _passwordController.text,
-    );
-
-    if (user == null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('Email hoặc mật khẩu không đúng.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      return;
+  Future<void> _handleLogin() async {
+    if (_busy || !_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(authControllerProvider.notifier)
+          .login(_emailController.text, _passwordController.text);
+      // On success the root swaps this page for the app.
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = userMessageFor(error, context: ErrorContext.login);
+        _busy = false;
+      });
     }
-
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => AppShellPage(user: user),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final notice = ref.watch(authControllerProvider.select((s) => s.notice));
+    final showDemo = kDebugMode || ref.watch(appConfigProvider).useMock;
+
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -67,32 +73,33 @@ class _LoginPageState extends State<LoginPage> {
                     const Icon(
                       Icons.lock_outline,
                       size: 96,
-                      color: Colors.blue,
+                      color: AppColors.primary,
                     ),
                     const SizedBox(height: 20),
                     const Text(
                       'Chào mừng quay trở lại!',
                       textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     const Text(
                       'Đăng nhập vào hệ thống Smart Home',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(color: AppColors.textSecondary),
                     ),
-                    const SizedBox(height: 36),
+                    const SizedBox(height: 28),
+                    if (notice != null) ...[
+                      InlineBanner(message: notice, kind: BannerKind.warning),
+                      const SizedBox(height: 16),
+                    ],
                     TextFormField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
+                      autofillHints: const [AutofillHints.email],
                       decoration: const InputDecoration(
                         labelText: 'Email',
                         prefixIcon: Icon(Icons.email_outlined),
-                        border: OutlineInputBorder(),
                       ),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
@@ -109,6 +116,7 @@ class _LoginPageState extends State<LoginPage> {
                       controller: _passwordController,
                       obscureText: !_isPasswordVisible,
                       textInputAction: TextInputAction.done,
+                      autofillHints: const [AutofillHints.password],
                       onFieldSubmitted: (_) => _handleLogin(),
                       decoration: InputDecoration(
                         labelText: 'Mật khẩu',
@@ -126,7 +134,6 @@ class _LoginPageState extends State<LoginPage> {
                                 : Icons.visibility_off,
                           ),
                         ),
-                        border: const OutlineInputBorder(),
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
@@ -135,38 +142,67 @@ class _LoginPageState extends State<LoginPage> {
                         return null;
                       },
                     ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 16),
+                      InlineBanner(message: _error!, kind: BannerKind.error),
+                    ],
                     const SizedBox(height: 24),
                     FilledButton(
-                      onPressed: _handleLogin,
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: const Text(
-                        'ĐĂNG NHẬP',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      onPressed: _busy ? null : _handleLogin,
+                      child: _busy
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('ĐĂNG NHẬP'),
                     ),
-                    const SizedBox(height: 20),
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Tài khoản demo',
-                              style: TextStyle(fontWeight: FontWeight.bold),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const RegisterPage(),
+                              ),
                             ),
-                            SizedBox(height: 6),
-                            Text('Email: admin@smarthome.local'),
-                            Text('Mật khẩu: admin123'),
-                          ],
+                      child: const Text('Chưa có tài khoản? Đăng ký'),
+                    ),
+                    if (showDemo) ...[
+                      const SizedBox(height: 12),
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Tài khoản demo',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 6),
+                              const Text('Email: user01@smarthome.local'),
+                              const Text('Mật khẩu: user123'),
+                              const SizedBox(height: 4),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton(
+                                  onPressed: () {
+                                    _emailController.text =
+                                        'user01@smarthome.local';
+                                    _passwordController.text = 'user123';
+                                  },
+                                  child: const Text('Điền sẵn'),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),

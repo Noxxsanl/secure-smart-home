@@ -1,9 +1,12 @@
 import Link from "next/link";
-import { Sofa, BedDouble, CookingPot, Bath, Briefcase, Car, Trees, DoorClosed, Thermometer, Droplets } from "lucide-react";
-import type { RoomSummary } from "@smarthome/shared/mock/portal";
-import type { RoomType } from "@smarthome/shared/mock/types";
+import {
+  Sofa, BedDouble, CookingPot, Bath, Briefcase, Car, Trees, DoorClosed, Thermometer, Droplets,
+  type LucideIcon,
+} from "lucide-react";
+import type { RoomSummary } from "@/lib/api/types";
+import { formatHumidity, formatTemperature } from "@/lib/format";
 
-const ROOM_ICONS: Record<RoomType, React.ElementType> = {
+const ROOM_ICONS: Record<string, LucideIcon> = {
   living_room: Sofa, bedroom: BedDouble, kitchen: CookingPot, bathroom: Bath,
   office: Briefcase, garage: Car, garden: Trees, door: DoorClosed,
 };
@@ -27,15 +30,25 @@ export default function RoomTile({ room }: { room: RoomSummary }) {
       </div>
       <div>
         <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">{room.name}</p>
-        <p className="text-xs text-gray-400 dark:text-slate-500">{room.device_count} thiết bị</p>
+        <p className="text-xs text-gray-400 dark:text-slate-500">
+          {room.device_count} thiết bị
+          {room.device_count > 0 ? ` · ${room.online_count} online` : ""}
+        </p>
       </div>
       {room.has_climate_data ? (
+        // Số đo thiếu (cảm biến chưa gửi nhiệt độ hoặc độ ẩm) hiện "—", không bịa số.
         <div className="flex items-center gap-4 text-xs text-gray-600 dark:text-slate-300">
-          <span className="inline-flex items-center gap-1"><Thermometer className="h-3.5 w-3.5 text-critical" />{room.temperature}°C</span>
-          <span className="inline-flex items-center gap-1"><Droplets className="h-3.5 w-3.5 text-info" />{room.humidity}%</span>
+          <span className="inline-flex items-center gap-1">
+            <Thermometer className="h-3.5 w-3.5 text-critical" />
+            {formatTemperature(room.temperature)}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Droplets className="h-3.5 w-3.5 text-info" />
+            {formatHumidity(room.humidity)}
+          </span>
         </div>
       ) : (
-        <p className="text-xs text-gray-400 dark:text-slate-500">Chưa có cảm biến khí hậu</p>
+        <p className="text-xs text-gray-400 dark:text-slate-500">Chưa có số đo khí hậu</p>
       )}
     </Link>
   );

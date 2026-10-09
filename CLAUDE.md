@@ -6,10 +6,10 @@
 
 | Tầng | Thư mục | Stack | Trạng thái |
 |---|---|---|---|
-| Backend | `backend/src/` | Express 5, TypeScript strict, mysql2, mqtt, JWT cookie, bcrypt | Chạy thật; SQL viết thẳng trong `routes/*.ts`; chưa có WebSocket (gói `ws` có nhưng chưa dùng) |
-| Database | `database/migrations/001_schema.sql`, `backend/src/config/migrate.ts` | MySQL 8, UTC | `users`, `devices`, `sensor_data`, `device_tokens`, `audit_log`, `notifications` |
-| Web (3 app) | `frontend/{admin,operator,user}/`, dùng chung `frontend/packages/{shared,console}` | Next.js **16.2.5**, React 19, Tailwind v4, SWR, npm workspaces | **100% mock** (`packages/shared/mock/`). Mỗi role hệ thống một app (:3001/:3002/:3003). App `user` là cổng web khách hàng — ngoài phạm vi PRD V2 (§2.2, FR-1.4), xem `frontend/README.md` |
-| Mobile | `mobile/lib/` | Flutter, chưa có package nào ngoài SDK | **100% UI mockup**, cho khách hàng (USER) |
+| Backend | `backend/src/` | Express 5, TypeScript strict, mysql2, mqtt, JWT cookie, bcrypt | Chạy thật; cấu trúc `src/modules/<domain>` (xem `backend/src/modules/README.md`) với 3 kênh: `/api/dashboard` (cookie, ADMIN/OPERATOR), `/api/portal` (cookie `sh_user`, khách hàng web), `/api/mobile` (Bearer + refresh token). WebSocket `/api/mobile/ws`. Simulator thiết bị cho `is_simulated=1`, automation engine, gợi ý thói quen. Route cũ (`/api/auth`, `/api/devices`, …) giữ lại cho `scripts/attack_demo*.sh` |
+| Database | `database/migrations/001_schema.sql`, `backend/src/config/migrate.ts` | MySQL 8, UTC | Bảng gốc (`users`, `devices`, `sensor_data`, `device_tokens`, `audit_log`, `notifications`) + V2: `customers`, `smart_homes`, `rooms`, `smart_home_members`, `member_device_access`, `activation_tokens`, `activation_logs`, `refresh_tokens`, `device_commands`, `user_behavior_logs`, `automation_rules`, `automation_history`, `recommendation_history`, `user_feedback`, `operator_home_access`, `firmware`, `ota_jobs`, `ota_history` |
+| Web (3 app) | `frontend/{admin,operator,user}/`, dùng chung `frontend/packages/{shared,console}` | Next.js **16.2.5**, React 19, Tailwind v4, SWR, npm workspaces | **Nối API thật** (client chung `packages/shared/api/http.ts`, rewrites `/api/*` → `BACKEND_URL`), trừ AI Dashboard và Admin Settings vẫn mock (`packages/shared/mock/`). Mỗi role hệ thống một app (:3001/:3002/:3003). App `user` là cổng web khách hàng — ngoài phạm vi PRD V2 (§2.2, FR-1.4), xem `frontend/README.md` |
+| Mobile | `mobile/lib/` | Flutter, Riverpod, `http`, `flutter_secure_storage`, `web_socket_channel`, `mobile_scanner` | Cho khách hàng (USER); repository remote + mock (`--dart-define=USE_MOCK=true`, `API_BASE_URL`); 47 test |
 | Firmware | `firmware/{gateway-node,sensor-node,sensor-node-2}` | PlatformIO + Arduino, `esp32doit-devkit-v1` | Chạy thật. `firmware/ESP32-S3-Touch-LCD-7B` là vendor — không sửa |
 | Hạ tầng | `docker-compose.yml`, `mosquitto/`, `nginx/` | 2 broker Mosquitto (1883 plaintext, 8883 TLS), MySQL host 3308 | Broker 2 chỉ TLS (cert: `scripts/gen_mqtt_certs.sh`, gitignored `mosquitto/certs/`); cả hai vẫn `allow_anonymous true`, chưa ACL |
 | Demo tấn công | `scripts/attack_demo*.sh` | bash + curl + openssl | Dùng khi bảo vệ |
@@ -51,7 +51,8 @@ Prompt giao cho agent phải tự đủ (agent không thấy hội thoại): m�
 
 - Backend: `cd backend && npx tsc --noEmit`
 - Frontend: `cd frontend && npm run typecheck && npm run lint` (`npm run build` khi đổi route/config)
-- Mobile: `cd mobile && flutter analyze && flutter test`
+- Mobile: `cd mobile && flutter analyze && flutter test` (47 test; chạy máy ảo: `--dart-define=API_BASE_URL=…` hoặc `USE_MOCK=true`, xem `docs/11`)
 - Firmware: `pio run -d firmware/<node>`
+- CI: `.github/workflows/ci.yml` chạy các lệnh trên (chỉ tầng có file đổi) + job "Bảo mật repo" chặn commit file bí mật và tắt TLS. Firmware build bằng `include/config_*.example.h` — thêm macro mới thì thêm vào file mẫu, không thì CI đỏ
 
-Chưa có test tự động cho backend/frontend — không nói "tests pass" khi không có test nào chạy.
+Chưa có test tự động cho backend/frontend (mobile có 47 test) — không nói "tests pass" khi không có test nào chạy.

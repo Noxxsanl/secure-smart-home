@@ -1,123 +1,223 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../../devices/data/mock_devices.dart';
-import '../../../devices/models/device.dart';
-import '../../../devices/presentation/pages/device_control_page.dart';
-import '../../../devices/presentation/widgets/circular_gauge.dart';
-import '../../models/room.dart';
+import '../../../../core/utils/date_format.dart';
+import '../../../../core/widgets/app_feedback.dart';
+import '../../../../core/widgets/app_widgets.dart';
+import '../../../../core/widgets/async_views.dart';
+import '../../../../core/widgets/circular_gauge.dart';
+import '../../../devices/presentation/pages/device_detail_page.dart';
+import '../../../devices/presentation/widgets/device_row.dart';
+import '../../../homes/domain/overview.dart';
+import '../../../homes/presentation/providers/homes_providers.dart';
+import '../../domain/room.dart';
+import '../room_presentation.dart';
 
-class RoomDetailPage extends StatefulWidget {
-  const RoomDetailPage({super.key, required this.room});
+/// Room detail (FR-5.2): climate gauge, counters and realtime device rows.
+class RoomDetailPage extends ConsumerStatefulWidget {
+  const RoomDetailPage({super.key, required this.homeId, required this.roomId});
 
-  final Room room;
+  final int homeId;
+  final int roomId;
 
   @override
-  State<RoomDetailPage> createState() => _RoomDetailPageState();
+  ConsumerState<RoomDetailPage> createState() => _RoomDetailPageState();
 }
 
-class _RoomDetailPageState extends State<RoomDetailPage> {
-  late double _temperature = widget.room.temperature;
-  late List<Device> _devices = MockDevices.forRoom(widget.room.id);
-
-  void _toggleDevice(Device device, bool isOn) {
-    setState(() {
-      _devices = _devices
-          .map((d) => d.id == device.id ? d.copyWith(isOn: isOn) : d)
-          .toList();
+class _RoomDetailPageState extends ConsumerState<RoomDetailPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        ref
+            .read(homeOverviewProvider(widget.homeId).notifier)
+            .refreshRoom(widget.roomId),
+      );
     });
+  }
+
+  Future<void> _rename(RoomSummary room) async {
+    final name = await promptText(
+      context,
+      title: 'Đổi tên phòng',
+      label: 'Tên phòng',
+      initial: room.name,
+    );
+    if (name == null || name == room.name || !mounted) return;
+    await runAction(
+      context,
+      () => ref
+          .read(homeOverviewProvider(widget.homeId).notifier)
+          .renameRoom(room.id, name),
+      successMessage: 'Đã đổi tên phòng.',
+    );
+  }
+
+  Future<void> _refresh() async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    try {
+      await ref
+          .read(homeOverviewProvider(widget.homeId).notifier)
+          .refresh(throwOnError: true);
+    } on Object catch (error) {
+      showAppSnack(messenger, userMessageFor(error), error: true);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final overview = ref.watch(homeOverviewProvider(widget.homeId));
+    final room = overview.value?.roomById(widget.roomId);
+    final canRename = overview.value?.role.canRename ?? false;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.room.name),
-        actions: const [
-          Padding(
-            padding: EdgeInsets.only(right: 12),
-            child: Icon(Icons.edit_outlined),
-          ),
+        title: Text(room?.name ?? 'Phòng'),
+        actions: [
+          if (room != null && canRename)
+            IconButton(
+              tooltip: 'Đổi tên phòng',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () => _rename(room),
+            ),
         ],
       ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          children: [
-            Center(
-              child: CircularGauge(
-                value: _temperature,
-                min: 12,
-                max: 32,
-                size: 220,
-                onChanged: (value) => setState(() => _temperature = value),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+      body: AsyncValueView<HomeOverview>(
+        value: overview,
+        onRetry: () => ref.invalidate(homeOverviewProvider(widget.homeId)),
+        builder: (data) {
+          final current = data.roomById(widget.roomId);
+          if (current == null) {
+            return const EmptyState(
+              icon: Icons.meeting_room_outlined,
+              title: 'Phòng không còn tồn tại',
+              message:
+                  'Phòng có thể đã bị xoá hoặc bạn không còn quyền truy cập. Quay lại và kéo xuống để tải lại.',
+            );
+          }
+          final devices = data.devicesInRoom(current.id);
+          final temperature = current.temperature;
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              children: [
+                if (data.gatewayOffline) ...[
+                  const InlineBanner(
+                    kind: BannerKind.warning,
+                    message:
+                        'Gateway ngoại tuyến — số liệu có thể không cập nhật.',
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Center(
+                  child: current.hasClimateData && temperature != null
+                      ? CircularGauge(
+                          value: temperature,
+                          min: 10,
+                          max: 40,
+                          size: 210,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                formatTemperature(temperature),
+                                style: const TextStyle(
+                                  fontSize: 36,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textPrimary,
+                                ),
+                              ),
+                              const Text(
+                                'Nhiệt độ',
+                                style: TextStyle(color: AppColors.textSecondary),
+                              ),
+                            ],
+                          ),
+                        )
+                      : Container(
+                          width: 120,
+                          height: 120,
+                          decoration: const BoxDecoration(
+                            color: AppColors.surfaceTint,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            roomIcon(current.roomType),
+                            size: 56,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                ),
+                const SizedBox(height: 20),
+                Row(
                   children: [
-                    Text(
-                      '${_temperature.round()}°',
-                      style: const TextStyle(
-                        fontSize: 40,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
+                    _StatTile(
+                      label: 'Độ ẩm',
+                      value: current.hasClimateData
+                          ? formatHumidity(current.humidity)
+                          : '--',
                     ),
-                    const Text(
-                      'Temperature',
-                      style: TextStyle(color: AppColors.textSecondary),
+                    _StatTile(
+                      label: 'Online',
+                      value: '${current.onlineCount}/${current.deviceCount}',
+                    ),
+                    _StatTile(
+                      label: 'Đang bật',
+                      value: '${current.onCount}',
                     ),
                   ],
                 ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                _StatTile(
-                  label: 'Felt temp',
-                  value: '${(_temperature - 2).round()}°',
-                ),
-                _StatTile(
-                  label: 'Humidity',
-                  value: '${widget.room.humidity}%',
-                ),
-                _StatTile(
-                  label: 'Power usage',
-                  value: '${widget.room.powerUsage} Kw',
-                ),
-              ],
-            ),
-            const SizedBox(height: 28),
-            const Text(
-              'All Devices',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            if (_devices.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 24),
-                child: Text(
-                  'Chưa có thiết bị nào trong phòng này.',
-                  style: TextStyle(color: AppColors.textSecondary),
-                ),
-              )
-            else
-              ..._devices.map(
-                (device) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _DeviceRow(
-                    device: device,
-                    onToggle: (value) => _toggleDevice(device, value),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => DeviceControlPage(device: device),
+                if (current.climateUpdatedAt != null) ...[
+                  const SizedBox(height: 6),
+                  Center(
+                    child: Text(
+                      'Cập nhật ${formatRelative(current.climateUpdatedAt!)}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
                       ),
                     ),
                   ),
-                ),
-              ),
-          ],
-        ),
+                ],
+                const SizedBox(height: 24),
+                const SectionHeader('Thiết bị'),
+                if (devices.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Text(
+                      'Chưa có thiết bị nào trong phòng này.',
+                      style: TextStyle(color: AppColors.textSecondary),
+                    ),
+                  )
+                else
+                  for (final device in devices)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: DeviceRow(
+                        device: device,
+                        homeSuspended: data.home.isSuspended,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => DeviceDetailPage(
+                              homeId: data.home.id,
+                              deviceId: device.id,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -148,53 +248,6 @@ class _StatTile extends StatelessWidget {
             style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DeviceRow extends StatelessWidget {
-  const _DeviceRow({
-    required this.device,
-    required this.onToggle,
-    required this.onTap,
-  });
-
-  final Device device;
-  final ValueChanged<bool> onToggle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceTint,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(device.icon, color: AppColors.primary),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  device.name,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ),
-              Switch(value: device.isOn, onChanged: onToggle),
-            ],
-          ),
-        ),
       ),
     );
   }

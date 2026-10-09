@@ -3,6 +3,7 @@
 // Hai đường phải luôn đồng bộ logic xác thực khi có thay đổi.
 import pool from "../config/db";
 import { connectBroker } from "../config/mqtt";
+import { onTelemetryIngested } from "../modules/devices/telemetry.service";
 import { verifyGatewayHMAC, verifyDeviceHMAC } from "./hmacService";
 import { log, logDataRecvWithPrune } from "./auditLogger";
 
@@ -112,13 +113,16 @@ async function handleGatewayData(raw: string): Promise<void> {
     [sensor.id, gateway.id, JSON.stringify(data)]
   );
 
-  // Giữ chỉ 150 bản ghi gần nhất cho mỗi sensor
-  await pool.execute(
-    `DELETE FROM sensor_data WHERE device_id = ? AND id NOT IN (
-       SELECT id FROM (SELECT id FROM sensor_data WHERE device_id = ? ORDER BY id DESC LIMIT 150) t
-     )`,
-    [sensor.id, sensor.id]
-  );
+  // V2: không còn prune "150 dòng/sensor" ở đây — sensor_data giữ theo THỜI GIAN (job retention
+  // hằng giờ, TELEMETRY_RETENTION_DAYS) để biểu đồ 7 ngày có đủ dữ liệu.
+  // Hook phát bus telemetry/device_state + thông báo cửa mở. Gọi TRƯỚC khi cập nhật last_seen bên
+  // dưới vì hook cần last_seen cũ để biết thiết bị vừa online trở lại; hook không bao giờ ném lỗi.
+  await onTelemetryIngested({
+    sensorDbId: sensor.id,
+    gatewayDbId: gateway.id,
+    data,
+    receivedAt: new Date(),
+  });
 
   const resolvedGwIp = typeof gateway_ip === "string" && gateway_ip ? gateway_ip : null;
   const resolvedSnIp = typeof sensor_ip  === "string" && sensor_ip  ? sensor_ip  : null;

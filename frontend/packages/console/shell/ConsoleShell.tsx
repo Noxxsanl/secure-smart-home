@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
 import ShellFrame from "@smarthome/shared/app-shell/ShellFrame";
 import NotificationBell from "@smarthome/shared/app-shell/NotificationBell";
 import type { NavSection } from "@smarthome/shared/app-shell/types";
-import { smartHomeStore, gatewayStore, firmwareStore } from "@smarthome/shared/mock/store";
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { badgesKey } from "@smarthome/console/api/stats.api";
+import type { ConsoleBadges } from "@smarthome/console/api/types";
 import { useNotifications } from "@smarthome/console/notifications/hooks/useNotifications";
 
 // Badge keys dùng trong nav config của app admin/operator.
@@ -42,14 +43,19 @@ type ConsoleShellProps = {
 
 export default function ConsoleShell({ brandName, sections, extraRouteLabels, children }: ConsoleShellProps) {
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
+  // GET /stats/badges — poll 15 s; lỗi tạm thời giữ số cũ (keepPreviousData).
+  const { data: stats } = useDashboardSWR<ConsoleBadges>(badgesKey(), {
+    refreshInterval: 15_000,
+    keepPreviousData: true,
+  });
 
-  const staticBadges = useMemo(() => ({
-    unclaimedHomes: smartHomeStore.list().filter((h) => h.status === "unclaimed").length,
-    offlineGateways: gatewayStore.list().filter((g) => g.status === "offline").length,
-    otaInProgress: firmwareStore.listDeployments().filter((d) => d.status === "in_progress").length,
-  }), []);
-
-  const badges: Record<ConsoleBadgeKey, number> = { ...staticBadges, unreadNotifications: unreadCount };
+  const badges: Record<ConsoleBadgeKey, number> = {
+    unclaimedHomes: stats?.unclaimed_homes ?? 0,
+    offlineGateways: stats?.offline_gateways ?? 0,
+    otaInProgress: stats?.ota_in_progress ?? 0,
+    // Chuông và badge cùng nguồn đếm; ưu tiên số của danh sách thông báo (cập nhật ngay khi đánh dấu đã đọc).
+    unreadNotifications: unreadCount || stats?.unread_notifications || 0,
+  };
 
   return (
     <ShellFrame
@@ -61,8 +67,8 @@ export default function ConsoleShell({ brandName, sections, extraRouteLabels, ch
         <NotificationBell
           notifications={notifications}
           unreadCount={unreadCount}
-          onMarkRead={markRead}
-          onMarkAllRead={markAllRead}
+          onMarkRead={(id) => void markRead(id)}
+          onMarkAllRead={() => void markAllRead()}
           viewAllHref="/notifications"
         />
       }

@@ -1,14 +1,20 @@
-import useSWR from "swr";
-import { mockDelay, customerStore, smartHomeStore } from "@smarthome/shared/mock/store";
+"use client";
 
-function buildRows() {
-  return customerStore.list().map((c) => ({
-    ...c,
-    homesCount: smartHomeStore.list().filter((h) => h.customer_id === c.id).length,
-  }));
-}
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { customersKey } from "@smarthome/console/api/customers.api";
+import type { Customer } from "@smarthome/console/api/types";
 
-export function useCustomers() {
-  const { data, isLoading } = useSWR("/mock/customers", () => mockDelay(buildRows()));
-  return { customers: data ?? [], isLoading };
+/** GET /customers?q= — `q` khớp tên / User ID / email / SĐT (lọc ở server), poll 10 s. */
+export function useCustomers(q = "") {
+  const { data, error, isLoading, isValidating, mutate } = useDashboardSWR<Customer[]>(
+    customersKey(q),
+    { refreshInterval: 10_000, keepPreviousData: true }
+  );
+  return {
+    customers: data ?? [],
+    isLoading,
+    isValidating,
+    error,
+    refresh: () => mutate(),
+  };
 }

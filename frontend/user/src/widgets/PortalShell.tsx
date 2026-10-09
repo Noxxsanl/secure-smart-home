@@ -2,16 +2,19 @@
 
 import ShellFrame from "@smarthome/shared/app-shell/ShellFrame";
 import NotificationBell from "@smarthome/shared/app-shell/NotificationBell";
-import { listSuggestions } from "@smarthome/shared/mock/portal";
+import { POLL_NOTIFICATIONS_MS } from "@/lib/api/client";
+import { useHomeOverview } from "@/lib/api/homes";
 import HomeSwitcher from "@/features/home/components/HomeSwitcher";
+import { useCurrentHome } from "@/features/home/providers/CurrentHomeProvider";
 import { useHomeNotifications } from "@/features/notifications/hooks/useHomeNotifications";
-import { useHomeQuery } from "@/lib/portal-swr";
 import { NAV_SECTIONS, ROUTE_LABELS } from "@/config/nav";
 import { PORTAL } from "@/config/portal";
 
 export default function PortalShell({ children }: { children: React.ReactNode }) {
+  const { current, permissions } = useCurrentHome();
   const { notifications, unreadCount, markRead, markAllRead } = useHomeNotifications();
-  const { data: suggestions } = useHomeQuery("suggestions", listSuggestions);
+  // Số gợi ý tự động hoá đang chờ lấy từ overview (GUEST không có quyền xem gợi ý nên không có huy hiệu).
+  const { data: overview } = useHomeOverview(current?.home.id ?? null, POLL_NOTIFICATIONS_MS);
 
   return (
     <ShellFrame
@@ -20,7 +23,7 @@ export default function PortalShell({ children }: { children: React.ReactNode })
       routeLabels={ROUTE_LABELS}
       badges={{
         unreadNotifications: unreadCount,
-        pendingSuggestions: suggestions?.filter((s) => s.status === "pending").length ?? 0,
+        pendingSuggestions: permissions?.canViewAutomation ? (overview?.pending_suggestions ?? 0) : 0,
       }}
       headerActions={
         <>

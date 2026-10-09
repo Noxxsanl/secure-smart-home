@@ -1,134 +1,161 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search, UserCircle, X, KeyRound } from "lucide-react";
-import { customerStore } from "@smarthome/shared/mock/store";
-import type { Customer } from "@smarthome/shared/mock/types";
+import { useState } from "react";
+import { KeyRound, RefreshCw, Search, UserCircle } from "lucide-react";
+import ModalShell from "@smarthome/console/components/ModalShell";
+import { InlineError } from "@smarthome/console/components/PageStates";
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { customersKey } from "@smarthome/console/api/customers.api";
+import { assignOwner } from "@smarthome/console/api/smartHomes.api";
+import { errorMessage } from "@smarthome/console/lib/errors";
+import { useDebouncedValue } from "@smarthome/console/lib/hooks";
+import { BTN_PRIMARY, BTN_SECONDARY, LABEL } from "@smarthome/console/lib/ui";
+import type { Customer, SmartHomeDetailHome } from "@smarthome/console/api/types";
 
 type AssignOwnerModalProps = {
   open: boolean;
+  homeId: number;
   homeName: string;
+  /** Gợi ý ô tìm kiếm (VD tên chủ dự kiến nhập lúc tạo nhà). */
+  initialQuery?: string;
   onClose: () => void;
-  onAssign: (customerId: number) => void;
+  onAssigned: (customer: Customer, home: SmartHomeDetailHome) => void;
 };
 
-// Operator tra cứu khách hàng theo user_tag (handle sinh ra khi khách đăng ký
-// tài khoản trên Mobile App, VD "dat#4821") và gán trực tiếp quyền sở hữu cho
-// Smart Home vừa tạo — thay thế/luồng bổ sung cho việc khách tự quét QR.
-export default function AssignOwnerModal({ open, homeName, onClose, onAssign }: AssignOwnerModalProps) {
-  const [search, setSearch] = useState("");
+// Operator tra cứu khách hàng (GET /customers?q= — tên, user_tag, email, SĐT)
+// rồi gán quyền sở hữu (POST /smart-homes/:id/assign-owner { user_tag }) — luồng
+// bổ sung cho việc khách tự quét QR. Backend xử lý như một lượt claim trong 1
+// transaction, thu hồi mã chưa dùng và ghi activation_logs (operator_assign).
+// Nên render có điều kiện (`{open && <AssignOwnerModal …/>}`) để mỗi lần mở là trạng thái mới.
+export default function AssignOwnerModal({
+  open, homeId, homeName, initialQuery = "", onClose, onAssigned,
+}: AssignOwnerModalProps) {
+  const [search, setSearch] = useState(initialQuery);
   const [selected, setSelected] = useState<Customer | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-  const results = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return [];
-    return customerStore.list().filter(
-      (c) => c.user_tag.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
-    );
-  }, [search]);
+  const query = useDebouncedValue(search.trim(), 300);
+  const { data: results, error: searchError, isLoading } = useDashboardSWR<Customer[]>(
+    open && query.length >= 2 ? customersKey(query) : null,
+    { keepPreviousData: true }
+  );
 
-  if (!open) return null;
-
-  function reset() {
-    setSearch(""); setSelected(null);
+  async function handleConfirm() {
+    if (!selected || submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const home = await assignOwner(homeId, selected.user_tag);
+      onAssigned(selected, home);
+      onClose();
+    } catch (err) {
+      setError(errorMessage(err, {
+        ALREADY_CLAIMED: "Nhà này vừa được kích hoạt (khách tự quét mã hoặc đã được gán). Đóng hộp thoại và tải lại trang để xem chủ nhà hiện tại.",
+        NOT_FOUND: "Không tìm thấy Smart Home này nữa. Tải lại danh sách rồi thử lại.",
+      }));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleClose() {
-    reset();
-    onClose();
-  }
-
-  function handleConfirm() {
-    if (!selected) return;
-    onAssign(selected.id);
-    reset();
-    onClose();
-  }
+  const list = results ?? [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={handleClose} />
-      <div className="relative z-10 w-full max-w-md overflow-hidden rounded-md border border-[#E5EAF0] dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg">
-        <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-700 px-5 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded bg-brand-soft">
-              <KeyRound className="h-3.5 w-3.5 text-brand" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">Gán quyền sở hữu</p>
-              <p className="text-xs text-gray-400 dark:text-slate-500">{homeName}</p>
-            </div>
-          </div>
-          <button type="button" onClick={handleClose}
-            className="flex h-7 w-7 items-center justify-center rounded text-gray-400 dark:text-slate-500 hover:bg-gray-100 dark:hover:bg-slate-700">
-            <X size={14} />
-          </button>
-        </div>
-
-        <div className="space-y-3 px-5 py-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-500 dark:text-slate-400">Tìm khách hàng theo User ID hoặc tên</label>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-slate-500" />
-              <input
-                type="text" autoFocus
-                value={search}
-                onChange={(e) => { setSearch(e.target.value); setSelected(null); }}
-                placeholder="VD: kimanh#1560"
-                className="h-9 w-full rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 pl-8 pr-3 text-sm text-gray-900 dark:text-slate-100 outline-none placeholder:text-gray-300 dark:placeholder:text-slate-500 focus:border-brand focus:ring-2 focus:ring-brand/15"
-              />
-            </div>
-          </div>
-
-          {search.trim() && (
-            <div className="max-h-52 overflow-y-auto rounded border border-gray-100 dark:border-slate-700">
-              {results.length === 0 ? (
-                <p className="px-3 py-4 text-center text-sm text-gray-400 dark:text-slate-500">Không tìm thấy khách hàng nào.</p>
-              ) : (
-                <ul className="divide-y divide-gray-100 dark:divide-slate-700">
-                  {results.map((c) => (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelected(c)}
-                        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left transition
-                          ${selected?.id === c.id ? "bg-brand-soft" : "hover:bg-gray-50 dark:hover:bg-slate-700"}`}
-                      >
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-slate-600">
-                          <UserCircle className="h-4 w-4 text-gray-400 dark:text-slate-400" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">{c.name}</p>
-                          <p className="font-mono text-xs text-gray-400 dark:text-slate-500">{c.user_tag}</p>
-                        </div>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
-
-          {selected && (
-            <div className="rounded border border-brand/30 bg-brand-soft/40 px-3 py-2.5">
-              <p className="text-xs font-semibold uppercase tracking-widest text-brand">Đã chọn</p>
-              <p className="mt-1 text-sm font-medium text-gray-900 dark:text-slate-100">{selected.name} <span className="font-mono text-xs text-gray-500 dark:text-slate-400">({selected.user_tag})</span></p>
-              <p className="text-xs text-gray-500 dark:text-slate-400">{selected.phone} · {selected.email}</p>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 border-t border-gray-100 dark:border-slate-700 px-5 py-3">
-          <button type="button" onClick={handleClose}
-            className="h-9 rounded border border-gray-200 dark:border-slate-600 px-4 text-sm font-medium text-gray-600 dark:text-slate-400 hover:bg-gray-50 dark:hover:bg-slate-700 transition">
-            Huỷ
-          </button>
-          <button type="button" disabled={!selected} onClick={handleConfirm}
-            className="flex h-9 items-center gap-1.5 rounded bg-brand px-4 text-sm font-semibold text-white hover:brightness-90 transition disabled:cursor-not-allowed disabled:opacity-50">
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="Gán quyền sở hữu"
+      subtitle={homeName}
+      icon={KeyRound}
+      busy={submitting}
+      footer={
+        <>
+          <button type="button" onClick={onClose} disabled={submitting} className={BTN_SECONDARY}>Huỷ</button>
+          <button type="button" onClick={handleConfirm} disabled={!selected || submitting} className={BTN_PRIMARY}>
+            {submitting && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
             Cấp quyền sở hữu
           </button>
+        </>
+      }
+    >
+      <div>
+        <label htmlFor="assign-owner-search" className={LABEL}>Tìm khách hàng theo User ID, tên, email hoặc SĐT</label>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 dark:text-slate-500" />
+          <input
+            id="assign-owner-search"
+            type="text"
+            autoFocus
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setSelected(null); setError(""); }}
+            placeholder="VD: kimanh#1560"
+            className="h-9 w-full rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 pl-8 pr-3 text-sm text-gray-900 dark:text-slate-100 outline-none placeholder:text-gray-300 dark:placeholder:text-slate-500 focus:border-brand focus:ring-2 focus:ring-brand/15"
+          />
         </div>
+        <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
+          User ID hiện trong mục Hồ sơ của ứng dụng khách hàng (dạng tên#1234). Nhập ít nhất 2 ký tự.
+        </p>
       </div>
-    </div>
+
+      {query.length >= 2 && (
+        <div className="max-h-56 overflow-y-auto rounded border border-gray-100 dark:border-slate-700">
+          {searchError ? (
+            <p className="px-3 py-4 text-center text-sm text-critical">{errorMessage(searchError)}</p>
+          ) : isLoading && list.length === 0 ? (
+            <p className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-gray-400 dark:text-slate-500">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Đang tìm…
+            </p>
+          ) : list.length === 0 ? (
+            <p className="px-3 py-4 text-center text-sm text-gray-400 dark:text-slate-500">
+              Không tìm thấy khách hàng nào. Nhờ khách đăng ký tài khoản trên ứng dụng trước, rồi tìm lại bằng User ID.
+            </p>
+          ) : (
+            <ul className="divide-y divide-gray-100 dark:divide-slate-700">
+              {list.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => { setSelected(c); setError(""); }}
+                    className={`flex w-full items-center gap-2.5 px-3 py-2 text-left transition
+                      ${selected?.id === c.id ? "bg-brand-soft" : "hover:bg-gray-50 dark:hover:bg-slate-700"}`}
+                  >
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gray-100 dark:bg-slate-600">
+                      <UserCircle className="h-4 w-4 text-gray-400 dark:text-slate-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">{c.name}</p>
+                      <p className="truncate text-xs text-gray-400 dark:text-slate-500">
+                        <span className="font-mono">{c.user_tag}</span>
+                        {c.email ? ` · ${c.email}` : ""}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[11px] text-gray-400 dark:text-slate-500">{c.homes_count} nhà</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {selected && (
+        <div className="rounded border border-brand/30 bg-brand-soft/40 px-3 py-2.5">
+          <p className="text-xs font-semibold uppercase tracking-widest text-brand">Đã chọn</p>
+          <p className="mt-1 text-sm font-medium text-gray-900 dark:text-slate-100">
+            {selected.name} <span className="font-mono text-xs text-gray-500 dark:text-slate-400">({selected.user_tag})</span>
+          </p>
+          <p className="text-xs text-gray-500 dark:text-slate-400">
+            {[selected.phone, selected.email].filter(Boolean).join(" · ") || "Chưa có thông tin liên hệ"}
+          </p>
+          <p className="mt-2 text-xs text-gray-500 dark:text-slate-400">
+            Nhà sẽ chuyển sang <span className="font-semibold">Active</span> với khách hàng này là chủ nhà (OWNER); mã kích hoạt
+            chưa dùng bị thu hồi. Thao tác được ghi vào Provision Log.
+          </p>
+        </div>
+      )}
+
+      <InlineError>{error}</InlineError>
+    </ModalShell>
   );
 }

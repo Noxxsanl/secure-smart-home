@@ -1,16 +1,25 @@
-import useSWR from "swr";
-import { mockDelay, generateSensorData } from "@smarthome/shared/mock/store";
+"use client";
 
-export function useSensorData(id: string | number | null) {
-  const numericId = id === null ? null : Number(id);
-  const { data, error, isLoading } = useSWR(
-    numericId !== null ? `/mock/devices/${numericId}/data` : null,
-    () => mockDelay(generateSensorData(numericId as number))
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { deviceTelemetryKey } from "@smarthome/console/api/devices.api";
+import type { Telemetry, TelemetryRange } from "@smarthome/console/api/types";
+
+/**
+ * GET /devices/:id/telemetry?range=24h|7d — trung bình theo bucket (5 phút / 1 giờ),
+ * cũ → mới. Operator xem nhà đã kích hoạt mà chưa có quyền → lỗi ACCESS_GRANT_REQUIRED
+ * (trang hiển thị hướng dẫn xin quyền, không retry).
+ * `enabled = false` (không phải cảm biến) → không gọi API.
+ */
+export function useSensorData(id: number | null, range: TelemetryRange, enabled = true) {
+  const { data, error, isLoading } = useDashboardSWR<Telemetry>(
+    enabled && id !== null ? deviceTelemetryKey(id, range) : null,
+    { refreshInterval: 30_000 }
   );
-
   return {
-    sensorData: data ?? [],
+    points: data?.points ?? [],
+    latest: data?.latest ?? null,
+    bucketSeconds: data?.bucket_seconds ?? null,
     isLoading,
-    isError: !!error,
+    error,
   };
 }

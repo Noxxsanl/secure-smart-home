@@ -1,16 +1,20 @@
-import useSWR from "swr";
-import { mockDelay, gatewayStore, smartHomeStore } from "@smarthome/shared/mock/store";
+"use client";
 
-export type GatewayListRow = ReturnType<typeof gatewayStore.list>[number] & { homeName: string | null };
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { gatewaysKey } from "@smarthome/console/api/gateways.api";
+import type { Gateway } from "@smarthome/console/api/types";
 
-function buildRows(): GatewayListRow[] {
-  return gatewayStore.list().map((g) => ({
-    ...g,
-    homeName: g.home_id ? smartHomeStore.get(g.home_id)?.name ?? null : null,
-  }));
-}
-
+/** GET /gateways — danh sách Gateway toàn hệ thống (FR-9.1), poll 10 s. */
 export function useGateways() {
-  const { data, isLoading } = useSWR("/mock/gateways", () => mockDelay(buildRows()));
-  return { gateways: data ?? [], isLoading };
+  const { data, error, isLoading, isValidating, mutate } = useDashboardSWR<Gateway[]>(gatewaysKey(), {
+    refreshInterval: 10_000,
+    keepPreviousData: true,
+  });
+  return {
+    gateways: data ?? [],
+    isLoading,
+    isValidating,
+    error,
+    refresh: () => mutate(),
+  };
 }

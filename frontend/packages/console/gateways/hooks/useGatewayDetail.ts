@@ -1,20 +1,23 @@
-import useSWR from "swr";
-import { mockDelay, gatewayStore, smartHomeStore, logStore } from "@smarthome/shared/mock/store";
+"use client";
 
-function buildDetail(id: number) {
-  const gateway = gatewayStore.get(id);
-  if (!gateway) return null;
-  return {
-    gateway,
-    home: gateway.home_id ? smartHomeStore.get(gateway.home_id) : null,
-    provisionLogs: logStore.listByCategory("provision").filter((l) => l.gateway_uid === gateway.uid),
-  };
-}
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { gatewayKey } from "@smarthome/console/api/gateways.api";
+import { INVALID_ROUTE_ID_ERROR } from "@smarthome/console/lib/ids";
+import type { GatewayDetail } from "@smarthome/console/api/types";
 
-export function useGatewayDetail(id: number) {
-  const { data, isLoading, mutate } = useSWR(
-    Number.isFinite(id) ? `/mock/gateways/${id}` : null,
-    () => mockDelay(buildDetail(id))
+/**
+ * GET /gateways/:id → gateway + nhà + các node + log gateway/provision (50 mới nhất).
+ * Poll 5 s để thấy gateway online/offline sau restart. `id = null` → 404 ngay.
+ */
+export function useGatewayDetail(id: number | null) {
+  const { data, error, isLoading, mutate } = useDashboardSWR<GatewayDetail>(
+    id !== null ? gatewayKey(id) : null,
+    { refreshInterval: 5_000 }
   );
-  return { detail: data ?? null, isLoading, refresh: mutate };
+  return {
+    detail: data ?? null,
+    isLoading: id !== null && isLoading,
+    error: id === null ? INVALID_ROUTE_ID_ERROR : error,
+    refresh: () => mutate(),
+  };
 }

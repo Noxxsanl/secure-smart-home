@@ -1,23 +1,23 @@
-import useSWR from "swr";
-import { mockDelay, customerStore, smartHomeStore, warrantyStore, activationStore } from "@smarthome/shared/mock/store";
+"use client";
 
-function buildDetail(id: number) {
-  const customer = customerStore.get(id);
-  if (!customer) return null;
-  const homes = smartHomeStore.list().filter((h) => h.customer_id === id);
-  const warranties = homes.flatMap((h) => warrantyStore.listByHome(h.id));
-  return {
-    customer,
-    homes,
-    warranties,
-    activations: activationStore.listByCustomer(id),
-  };
-}
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { customerKey } from "@smarthome/console/api/customers.api";
+import { INVALID_ROUTE_ID_ERROR } from "@smarthome/console/lib/ids";
+import type { CustomerDetail } from "@smarthome/console/api/types";
 
-export function useCustomerDetail(id: number) {
-  const { data, isLoading } = useSWR(
-    Number.isFinite(id) ? `/mock/customers/${id}` : null,
-    () => mockDelay(buildDetail(id))
+/**
+ * GET /customers/:id → khách hàng + nhà đã mua + bảo hành + lịch sử activation.
+ * `id = null` (đường dẫn sai) → lỗi 404 ngay, không gọi API.
+ */
+export function useCustomerDetail(id: number | null) {
+  const { data, error, isLoading, mutate } = useDashboardSWR<CustomerDetail>(
+    id !== null ? customerKey(id) : null,
+    { refreshInterval: 10_000 }
   );
-  return { detail: data ?? null, isLoading };
+  return {
+    detail: data ?? null,
+    isLoading: id !== null && isLoading,
+    error: id === null ? INVALID_ROUTE_ID_ERROR : error,
+    refresh: () => mutate(),
+  };
 }

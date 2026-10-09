@@ -1,6 +1,6 @@
 "use client";
 
-import { BrainCircuit, Play, Download, Loader2, Sparkles } from "lucide-react";
+import { BrainCircuit, Play, Download, Loader2, Sparkles, Lightbulb } from "lucide-react";
 import { useAiDashboard } from "@smarthome/console/ai/hooks/useAiDashboard";
 import AIOverviewCards from "@smarthome/console/ai/components/AIOverviewCards";
 import ModelStatus from "@smarthome/console/ai/components/ModelStatus";
@@ -13,15 +13,34 @@ import TrainingTimeline from "@smarthome/console/ai/components/TrainingTimeline"
 import FeatureImportance from "@smarthome/console/ai/components/FeatureImportance";
 import DatasetSummary from "@smarthome/console/ai/components/DatasetSummary";
 import NotificationPanel from "@smarthome/console/ai/components/NotificationPanel";
+import { usePermissions } from "@smarthome/console/auth/usePermissions";
 import { useToast } from "@smarthome/shared/ui/Toast";
+import { errorMessage } from "@smarthome/console/lib/errors";
+import { BTN_BRAND_SOFT } from "@smarthome/console/lib/ui";
 import type { AiRecommendation } from "@smarthome/shared/mock/ai";
 
 export default function AiDashboardPage() {
   const {
-    data, isLoading, trainingProgress, isTraining, isPredicting, isExporting,
-    trainModel, runPrediction, exportReport, resolveRecommendation,
+    data, isLoading, trainingProgress, isTraining, isPredicting, isExporting, isAnalyzingHabits,
+    trainModel, runPrediction, exportReport, analyzeHabits, resolveRecommendation,
   } = useAiDashboard();
+  const { canRunAiJob } = usePermissions();
   const { showToast } = useToast();
+
+  // API thật duy nhất của trang: chạy ngay job phân tích thói quen (FR-7.4). Job chỉ TẠO gợi ý
+  // cho khách hàng; không thiết bị nào bị điều khiển trước khi khách chấp nhận (FR-7.5).
+  async function handleAnalyzeHabits() {
+    try {
+      const result = await analyzeHabits();
+      showToast(
+        result.suggestions_created > 0
+          ? `Đã quét ${result.homes_scanned} nhà và tạo ${result.suggestions_created} gợi ý mới cho khách hàng.`
+          : `Đã quét ${result.homes_scanned} nhà — chưa phát hiện thói quen mới đủ điều kiện gợi ý (cần lặp lại ít nhất 5/7 ngày).`
+      );
+    } catch (err) {
+      showToast(errorMessage(err), false);
+    }
+  }
 
   async function handleTrain() {
     const version = await trainModel();
@@ -58,13 +77,33 @@ export default function AiDashboardPage() {
               <BrainCircuit className="h-4 w-4" />
             </span>
             AI Prediction Center
+            <span
+              title="Số liệu model, dự đoán và gợi ý bên dưới là dữ liệu mẫu, chưa nối pipeline AI thật."
+              className="rounded bg-warning-soft px-2 py-0.5 text-[11px] font-semibold text-warning ring-1 ring-warning/30"
+            >
+              Dữ liệu mô phỏng
+            </span>
           </h1>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">
             Monitor AI model performance and Smart Home predictions.
+            {canRunAiJob && " Chỉ nút “Phân tích thói quen ngay” chạy trên dữ liệu thật của khách hàng."}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {canRunAiJob && (
+            <button
+              type="button"
+              onClick={handleAnalyzeHabits}
+              disabled={isAnalyzingHabits}
+              title="Quét thói quen bật/tắt thiết bị của khách hàng và tạo gợi ý tự động hoá (khách phải chấp nhận mới có hiệu lực)"
+              className={BTN_BRAND_SOFT}
+            >
+              {isAnalyzingHabits
+                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Đang phân tích…</>
+                : <><Lightbulb className="h-3.5 w-3.5" /> Phân tích thói quen ngay</>}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleTrain}

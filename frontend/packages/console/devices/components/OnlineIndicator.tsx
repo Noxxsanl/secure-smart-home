@@ -1,36 +1,25 @@
-"use client";
-
 type OnlineIndicatorProps = {
-  lastSeen: string | null;
+  /** Backend tính sẵn: last_seen trong 90 giây gần nhất (NFR-R1). */
+  online: boolean;
 };
 
-// Ngưỡng 60 giây phản chiếu điều kiện TIMESTAMPDIFF(SECOND, last_seen, NOW()) < 60
-// trong các câu SQL của backend và helper isOnline() trong deviceStatus.ts.
-function isOnline(lastSeen: string | null): boolean {
-  if (!lastSeen) return false;
-  const diff = (Date.now() - new Date(lastSeen).getTime()) / 1000;
-  return diff < 60;
-}
-
-export default function OnlineIndicator({ lastSeen }: OnlineIndicatorProps) {
-  const online = isOnline(lastSeen);
-
+export default function OnlineIndicator({ online }: OnlineIndicatorProps) {
   if (online) {
     return (
       <span className="inline-flex items-center gap-1.5">
         <span className="relative flex h-2.5 w-2.5">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-success" />
         </span>
-        <span className="text-xs text-emerald-600">Online</span>
+        <span className="text-xs font-medium text-success">Online</span>
       </span>
     );
   }
 
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="h-2.5 w-2.5 rounded-full bg-gray-300" />
-      <span className="text-xs text-gray-400">Offline</span>
+      <span className="h-2.5 w-2.5 rounded-full bg-gray-300 dark:bg-slate-600" />
+      <span className="text-xs text-gray-400 dark:text-slate-500">Offline</span>
     </span>
   );
 }

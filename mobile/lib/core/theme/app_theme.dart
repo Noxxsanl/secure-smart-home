@@ -11,6 +11,13 @@ class AppColors {
   static const textPrimary = Color(0xFF1B1E2B);
   static const textSecondary = Color(0xFF8A8FA3);
   static const track = Color(0xFFE3E7F5);
+
+  // Severity / status colours (notifications, banners, online dots).
+  static const success = Color(0xFF1FA971);
+  static const warning = Color(0xFFF59E0B);
+  static const critical = Color(0xFFE5484D);
+  static const info = Color(0xFF3A5CFF);
+  static const offline = Color(0xFF9AA0B5);
 }
 
 class AppTheme {
@@ -33,6 +40,7 @@ class AppTheme {
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
+        scrolledUnderElevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: AppColors.textPrimary,
@@ -73,6 +81,18 @@ class AppTheme {
           ),
         ),
       ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
       textTheme: const TextTheme(
         headlineSmall: TextStyle(
           color: AppColors.textPrimary,
@@ -91,6 +111,18 @@ class AppTheme {
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.critical),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.critical, width: 1.5),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
         ),
       ),
     );

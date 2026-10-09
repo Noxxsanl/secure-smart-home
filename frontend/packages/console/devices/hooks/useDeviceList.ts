@@ -1,29 +1,23 @@
-import useSWR from "swr";
-import { mockDelay, deviceStore } from "@smarthome/shared/mock/store";
-import type { ApiDeviceStatus } from "@smarthome/shared/types/api";
-import type { MockDevice } from "@smarthome/shared/mock/types";
+"use client";
 
-export function useDeviceList() {
-  const { data, error, isLoading, mutate } = useSWR<MockDevice[]>(
-    "/mock/devices",
-    () => mockDelay(deviceStore.list())
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { devicesKey } from "@smarthome/console/api/devices.api";
+import type { ConsoleDevice, DeviceListFilters } from "@smarthome/console/api/types";
+
+/**
+ * GET /devices?home_id=&category=&status=&q=&include_gateways= — lọc ở server, poll 10 s.
+ * Mặc định chỉ trả thiết bị node; `include_gateways` thêm cả hàng Gateway.
+ */
+export function useDeviceList(filters: DeviceListFilters = {}) {
+  const { data, error, isLoading, isValidating, mutate } = useDashboardSWR<ConsoleDevice[]>(
+    devicesKey(filters),
+    { refreshInterval: 10_000, keepPreviousData: true }
   );
-
-  const updateStatus = async (id: number, status: ApiDeviceStatus) => {
-    deviceStore.updateStatus(id, status);
-    await mutate();
-  };
-
-  const deleteDevice = async (id: number) => {
-    deviceStore.delete(id);
-    await mutate();
-  };
-
   return {
     devices: data ?? [],
     isLoading,
-    isError: !!error,
-    updateStatus,
-    deleteDevice,
+    isValidating,
+    error,
+    refresh: () => mutate(),
   };
 }

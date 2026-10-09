@@ -1,41 +1,65 @@
 "use client";
 
 import { useState } from "react";
-import { permissionsFor, setDevicePower, type PortalDevice } from "@smarthome/shared/mock/portal";
-import type { MemberRole } from "@smarthome/shared/mock/types";
 import { useToast } from "@smarthome/shared/ui/Toast";
-import { useCurrentHome } from "@/features/home/providers/CurrentHomeProvider";
-import { useRevalidatePortal } from "@/lib/portal-swr";
-import { portalErrorMessage, withTimeout } from "@/lib/errors";
+import { useRevalidate } from "@/lib/api/client";
+import { COMMAND_TIMEOUT_MS, deviceKey, sendDeviceCommand } from "@/lib/api/devices";
+import { homesKey, overviewKey } from "@/lib/api/homes";
+import { roomsPrefix } from "@/lib/api/rooms";
+import type { CustomerDevice } from "@/lib/api/types";
+import { commandErrorMessage } from "@/lib/errors";
 
-const ACK_TIMEOUT_MS = 5000;
+type Options = {
+  /** Nhà đang bị tạm ngưng dịch vụ → mọi lệnh bị từ chối (409 HOME_SUSPENDED). */
+  homeSuspended?: boolean;
+};
 
-// FR-5.3: UI đổi ngay (optimistic), chờ thiết bị xác nhận; lỗi hoặc quá thời
-// gian chờ thì bỏ giá trị tạm để quay về trạng thái đã xác nhận và báo lỗi.
-// `role`: role trong nhà chứa thiết bị, khi trang hiển thị thiết bị của một nhà
-// có thể khác nhà đang chọn (trang phòng/thiết bị mở từ link). Mặc định dùng nhà đang chọn.
-export function useDevicePower(role?: MemberRole) {
-  const { customerId, permissions: currentPermissions } = useCurrentHome();
-  const permissions = role ? permissionsFor(role) : currentPermissions;
+// FR-5.3: UI đổi ngay (optimistic) rồi chờ thiết bị xác nhận qua
+// POST /devices/:id/commands (server chờ ack ≤ 5 s, client huỷ sau 8 s).
+// Lỗi / quá thời gian chờ → bỏ giá trị tạm (hoàn tác) và báo bằng toast tiếng Việt.
+// FR-5.5: thiết bị offline / bị khoá → khoá nút. Quyền lấy từ `device.can_control`.
+export function useDevicePower({ homeSuspended = false }: Options = {}) {
   const { showToast } = useToast();
-  const revalidate = useRevalidatePortal();
+  const revalidate = useRevalidate();
   const [optimistic, setOptimistic] = useState<Record<number, boolean>>({});
 
-  const powerOf = (device: PortalDevice) => optimistic[device.id] ?? device.power;
-  const isPending = (device: PortalDevice) => device.id in optimistic;
-  const canToggle = (device: PortalDevice) =>
-    !!permissions?.canControl && device.online && device.power !== null && !isPending(device);
+  const isPending = (device: CustomerDevice) => device.id in optimistic;
+  const powerOf = (device: CustomerDevice): boolean | null =>
+    device.id in optimistic ? optimistic[device.id] : device.power;
 
-  async function toggle(device: PortalDevice) {
+  /** Lý do không bật/tắt được (để hiện gợi ý), null nếu điều khiển được. */
+  const blockReason = (device: CustomerDevice): string | null => {
+    if (device.category !== "relay" || device.power === null) return "Thiết bị này không bật/tắt được.";
+    if (!device.can_control) return "Vai trò của bạn không được điều khiển thiết bị này.";
+    if (homeSuspended) return "Dịch vụ của nhà đang tạm ngưng nên chưa điều khiển được.";
+    if (device.status === "blocked") return "Thiết bị đã bị khoá vì lý do bảo mật.";
+    if (!device.online) return "Thiết bị đang offline nên không nhận lệnh.";
+    return null;
+  };
+
+  const canToggle = (device: CustomerDevice) => blockReason(device) === null && !isPending(device);
+
+  async function toggle(device: CustomerDevice) {
     if (!canToggle(device)) return;
     const next = !powerOf(device);
     setOptimistic((prev) => ({ ...prev, [device.id]: next }));
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), COMMAND_TIMEOUT_MS);
     try {
-      await withTimeout(setDevicePower(customerId, device.id, next), ACK_TIMEOUT_MS);
-      await revalidate();
+      await sendDeviceCommand(device.id, next ? "turn_on" : "turn_off", controller.signal);
     } catch (err) {
-      showToast(portalErrorMessage(err), false);
+      showToast(commandErrorMessage(err), false);
     } finally {
+      clearTimeout(timer);
+      // Lấy trạng thái đã xác nhận từ server rồi mới bỏ giá trị tạm, để công
+      // tắc không nháy về trạng thái cũ khi lệnh thành công.
+      await revalidate(
+        overviewKey(device.home_id),
+        deviceKey(device.id),
+        roomsPrefix,
+        (key) => key === homesKey,
+      );
       setOptimistic((prev) => {
         const rest = { ...prev };
         delete rest[device.id];
@@ -44,5 +68,7 @@ export function useDevicePower(role?: MemberRole) {
     }
   }
 
-  return { powerOf, isPending, canToggle, toggle };
+  return { powerOf, isPending, canToggle, blockReason, toggle };
 }
+
+export type DevicePowerControl = ReturnType<typeof useDevicePower>;

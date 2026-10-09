@@ -1,26 +1,41 @@
-import useSWR from "swr";
-import { mockDelay, operatorAccessStore, smartHomeStore } from "@smarthome/shared/mock/store";
+"use client";
 
-function buildRows() {
-  return operatorAccessStore.list().map((grant) => ({
-    grant,
-    homeName: smartHomeStore.get(grant.home_id)?.name ?? `Home #${grant.home_id}`,
-    isActive: !grant.revoked_at && new Date(grant.expires_at).getTime() > Date.now(),
-  }));
-}
+import { revalidateDashboard, useDashboardSWR } from "@smarthome/console/api/client";
+import { grantOperatorAccess, operatorAccessKey, revokeOperatorAccess } from "@smarthome/console/api/operatorAccess.api";
+import type { GrantAccessInput, OperatorAccessGrant } from "@smarthome/console/api/types";
 
+/**
+ * GET /operator-access (Admin thấy mọi quyền) + POST /operator-access + POST …/:id/revoke
+ * (FR-9.6). Poll 10 s để trạng thái "đang hiệu lực" luôn mới.
+ */
 export function useOperatorAccess() {
-  const { data, isLoading, mutate } = useSWR("/mock/team/access", () => mockDelay(buildRows()));
+  const { data, error, isLoading, isValidating, mutate } = useDashboardSWR<OperatorAccessGrant[]>(
+    operatorAccessKey(),
+    { refreshInterval: 10_000, keepPreviousData: true }
+  );
 
-  const grant = async (input: { operator_id: number; operator_username: string; home_id: number; reason: string; durationHours: number }) => {
-    operatorAccessStore.grant(input);
-    await mutate();
+  // Quyền truy cập đổi → trang Smart Home chi tiết (restricted/grant) và thống kê Operator cũng đổi.
+  const refreshRelated = () => revalidateDashboard("/operator-access", "/smart-homes", "/stats");
+
+  const grant = async (input: GrantAccessInput) => {
+    const created = await grantOperatorAccess(input);
+    await refreshRelated();
+    return created;
   };
 
   const revoke = async (id: number) => {
-    operatorAccessStore.revoke(id);
-    await mutate();
+    const updated = await revokeOperatorAccess(id);
+    await refreshRelated();
+    return updated;
   };
 
-  return { rows: data ?? [], isLoading, grant, revoke };
+  return {
+    grants: data ?? [],
+    isLoading,
+    isValidating,
+    error,
+    refresh: () => mutate(),
+    grant,
+    revoke,
+  };
 }

@@ -32,3 +32,6 @@ Thumbs.db
 .agents
 .vscode
 CLAUDE.md
+AGENTS.md
+# Firmware upload (backend)
+backend/storage/

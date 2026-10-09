@@ -1,33 +1,35 @@
-import useSWR from "swr";
-import { mockDelay, automationStore, roomStore, deviceStore, smartHomeStore } from "@smarthome/shared/mock/store";
-import type { AutomationRule } from "@smarthome/shared/mock/types";
+"use client";
 
-function buildRows() {
-  return automationStore.list().map((rule) => ({
-    rule,
-    homeName: smartHomeStore.get(rule.home_id)?.name ?? `Home #${rule.home_id}`,
-    roomName: roomStore.get(rule.trigger_room_id)?.name ?? "—",
-    deviceName: deviceStore.get(rule.action_device_id)?.device_name ?? "—",
-  }));
-}
+import { useDashboardSWR } from "@smarthome/console/api/client";
+import { automationKey, setAutomationEnabled } from "@smarthome/console/api/automation.api";
+import type { AutomationRule } from "@smarthome/console/api/types";
 
-export function useAutomation() {
-  const { data, isLoading, mutate } = useSWR("/mock/automation", () => mockDelay(buildRows()));
+/**
+ * GET /automation?home_id= — rule của khách hàng, chỉ xem. Operator chỉ thấy nhà chưa
+ * kích hoạt và nhà đang có quyền truy cập (backend lọc). Poll 10 s.
+ * `setEnabled` (Admin) → PATCH /automation/:id { enabled }; ném lỗi để trang báo cho người dùng.
+ */
+export function useAutomation(homeId: number | null = null) {
+  const { data, error, isLoading, isValidating, mutate } = useDashboardSWR<AutomationRule[]>(
+    automationKey(homeId),
+    { refreshInterval: 10_000, keepPreviousData: true }
+  );
 
-  const toggle = async (id: number) => {
-    automationStore.toggle(id);
-    await mutate();
+  async function setEnabled(rule: AutomationRule, enabled: boolean) {
+    const updated = await setAutomationEnabled(rule.id, enabled);
+    await mutate(
+      (current) => current?.map((r) => (r.id === updated.id ? updated : r)),
+      { revalidate: false }
+    );
+    return updated;
+  }
+
+  return {
+    rules: data ?? [],
+    isLoading,
+    isValidating,
+    error,
+    refresh: () => mutate(),
+    setEnabled,
   };
-
-  const remove = async (id: number) => {
-    automationStore.delete(id);
-    await mutate();
-  };
-
-  const create = async (rule: Omit<AutomationRule, "id" | "enabled">) => {
-    automationStore.create(rule);
-    await mutate();
-  };
-
-  return { rows: data ?? [], isLoading, toggle, remove, create };
 }
