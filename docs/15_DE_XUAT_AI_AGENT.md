@@ -620,7 +620,7 @@ Các chỉ số an toàn được bảo đảm bằng **code tất định** (Po
 | `04` §7.12 | Thêm 5 bảng `agent_*` và cột bổ sung ở mục 10.2 |
 | `07` §14 | Thêm màn Trợ lý, thẻ kế hoạch, luồng xác thực lại |
 | `09` | Thêm mô hình đe doạ ở mục 8.2 |
-| `10`, `12` | Cập nhật lộ trình và brief |
+| `10`, `13` §0 | Cập nhật lộ trình và bản tóm tắt |
 | `CLAUDE.md` | Sửa bất biến số 8 theo mục 7.3 |
 
 ---

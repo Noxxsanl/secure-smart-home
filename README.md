@@ -166,9 +166,9 @@ Default `backend/.env` for Docker:
 PORT=5000
 DB_HOST=mysql
 DB_PORT=3306
-DB_USER=iot_managerIoT
-DB_PASS=iot_managerIoTpassword
-DB_NAME=iot_managerDeviceIoT
+DB_USER=secure_smart_home_app
+DB_PASS=change_me
+DB_NAME=secure_smart_home_iot
 JWT_SECRET=dev_secret_please_change_in_production_min32chars
 MQTT_HOST=mqtt-broker-2
 MQTT_PORT=8883
@@ -178,6 +178,14 @@ ADMIN_PASSWORD=admin123
 ```
 
 > **Note:** `DB_HOST=mysql` and `MQTT_HOST=mqtt-broker-2` are Docker-internal service names.
+
+**MySQL credentials for Docker** live in the root `.env` (gitignored), read by both compose files. `scripts/setup.sh` / `setup.bat` generate it with random passwords; to create it by hand:
+
+```bash
+cp .env.example .env   # then set MYSQL_ROOT_PASSWORD and MYSQL_PASSWORD
+```
+
+In Docker, compose injects `DB_USER` / `DB_PASS` / `DB_NAME` into the backend from this file, overriding `backend/.env`. `docker compose up` refuses to start if `MYSQL_PASSWORD` or `MYSQL_ROOT_PASSWORD` is missing. MySQL is published only on `127.0.0.1:3308`.
 
 ### Step 1b — MQTT TLS certificates
 
@@ -597,9 +605,9 @@ All endpoints except `/api/health` and `/api/auth/login` require a valid JWT in 
 | `PORT` | `5000` | Backend listen port |
 | `DB_HOST` | `localhost` | MySQL host (`mysql` in Docker) |
 | `DB_PORT` | `3306` | MySQL internal port |
-| `DB_USER` | `iot_managerIoT` | MySQL username |
-| `DB_PASS` | `iot_managerIoTpassword` | MySQL password |
-| `DB_NAME` | `iot_managerDeviceIoT` | Database name |
+| `DB_USER` | `secure_smart_home_app` | MySQL username |
+| `DB_PASS` | — (bắt buộc, không có mặc định) | MySQL password |
+| `DB_NAME` | `secure_smart_home_iot` | Database name |
 | `JWT_SECRET` | — | JWT signing key **(required, min 32 chars)** |
 | `MQTT_HOST` | `localhost` | Broker 2 host (`mqtt-broker-2` in Docker) |
 | `MQTT_PORT` | `8883` | Broker 2 TLS port |
@@ -729,21 +737,23 @@ secure-smart-home-iot/
 
 ## Documentation
 
-Detailed technical documentation is in [`docs/`](docs/):
+Detailed technical documentation is in [`docs/`](docs/) (Vietnamese). `docs/` describes the **target architecture (V2)**; the code describes the current state.
 
 | File | Description |
 |------|-------------|
-| [`KIEN_TRUC_HE_THONG.md`](docs/KIEN_TRUC_HE_THONG.md) | Full system architecture |
-| [`GIAO_TIEP_HE_THONG.md`](docs/GIAO_TIEP_HE_THONG.md) | Component handshake details (with code references) |
-| [`BAO_MAT_TRIEN_KHAI.md`](docs/BAO_MAT_TRIEN_KHAI.md) | Security implementation deep dive |
-| [`RBAC_CHI_TIET.md`](docs/RBAC_CHI_TIET.md) | RBAC role matrix and middleware flow |
-| [`THREAT_MODEL_SECURITY-final.md`](docs/THREAT_MODEL_SECURITY-final.md) | STRIDE threat model |
-| [`THREAT_MODEL_SECTION_3_3.md`](docs/THREAT_MODEL_SECTION_3_3.md) | Attack demo scenarios with real device output |
-| [`KET_QUA_TRIEN_KHAI.md`](docs/KET_QUA_TRIEN_KHAI.md) | Deployment results & feature checklist |
-| [`integration_test.md`](docs/integration_test.md) | Integration test checklist & attack scenarios |
-| [`STATUS_CODES.md`](docs/STATUS_CODES.md) | API status codes reference |
-| [`MQTT_DOCKER.md`](docs/MQTT_DOCKER.md) | MQTT broker configuration guide |
-| [`CAU_HOI_PHAN_BIEN.md`](docs/CAU_HOI_PHAN_BIEN.md) | Technical Q&A — design decisions explained |
+| [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](docs/01_SMART_HOME_PRODUCT_ARCHITECTURE.md) | Product architecture, claim/activation, 2-level RBAC |
+| [`02_SMART_HOME_WIFI_PROVISIONING.md`](docs/02_SMART_HOME_WIFI_PROVISIONING.md) | WiFi provisioning, Gateway ↔ Node pairing, key hierarchy |
+| [`03_BACKEND_REFACTOR_SMARTHOME.md`](docs/03_BACKEND_REFACTOR_SMARTHOME.md) | Backend modules, API (§9), MQTT topics (§10), AI-ready design (§18) |
+| [`04_DATABASE_REFACTOR_SMARTHOME.md`](docs/04_DATABASE_REFACTOR_SMARTHOME.md) | Database schema, naming, partition/retention |
+| [`05_FRONTEND_REFACTOR_SMARTHOME.md`](docs/05_FRONTEND_REFACTOR_SMARTHOME.md) | Admin/Operator dashboard design |
+| [`07_MOBILE_APP_ARCHITECTURE.md`](docs/07_MOBILE_APP_ARCHITECTURE.md) | Flutter app architecture |
+| [`08_EMBEDDED_ARCHITECTURE_ESP_IDF.md`](docs/08_EMBEDDED_ARCHITECTURE_ESP_IDF.md) | Firmware architecture (ESP-IDF target) |
+| [`09_SECURITY_ARCHITECTURE.md`](docs/09_SECURITY_ARCHITECTURE.md) | Security architecture, threat model, attack scenarios |
+| [`10_SMART_HOME_PRODUCT_ROADMAP.md`](docs/10_SMART_HOME_PRODUCT_ROADMAP.md) | Product roadmap Prototype → V2 → V3 → Commercial |
+| [`11_CHAY_LOCAL.md`](docs/11_CHAY_LOCAL.md) | Run locally without Docker |
+| [`13_PRD_SMART_HOME.md`](docs/13_PRD_SMART_HOME.md) | **PRD V2** — one-page summary (§0), requirements FR/NFR, acceptance criteria |
+| [`14_MQTT_TLS.md`](docs/14_MQTT_TLS.md) | MQTT TLS implementation, verification and runbook |
+| [`15_DE_XUAT_AI_AGENT.md`](docs/15_DE_XUAT_AI_AGENT.md) | AI Agent change proposal (draft, pending approval) |
 
 ---
 

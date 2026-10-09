@@ -2,7 +2,7 @@
 # 02_SMART_HOME_WIFI_PROVISIONING.md
 
 > Kiến trúc Device Provisioning cho nền tảng Smart Home thương mại — mục tiêu: **khách hàng chỉ nhập WiFi đúng 1 lần**, mọi thiết bị còn lại tự động online mà không cần thao tác mạng thêm.
-> Tài liệu này là tầng **kỹ thuật mạng & embedded**, bổ sung cho [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md) (mô hình dữ liệu Home/Room/Device) và [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) (Claim/Activation, RBAC, business flow bán hàng).
+> Tài liệu này là tầng **kỹ thuật mạng & embedded**, bổ sung cho [`04_DATABASE_REFACTOR_SMARTHOME.md`](04_DATABASE_REFACTOR_SMARTHOME.md) (mô hình dữ liệu Home/Room/Device) và [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) (Claim/Activation, RBAC, business flow bán hàng).
 >
 > Thiết kế hướng tới quy mô: **hàng chục nghìn Gateway, hàng trăm nghìn Node, multi-tenant**.
 
@@ -190,7 +190,7 @@ sequenceDiagram
 | **Activation Token** | Sinh lúc Operator tạo Smart Home (xem `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 5) | Hash trong DB | Liên kết khách hàng ↔ Smart Home, không liên quan trực tiếp tới lớp mạng nhưng là điều kiện tiên quyết trước khi cho phép bắt đầu WiFi Provisioning (Gateway chỉ được provision khi Home đã ở trạng thái đang-claim hợp lệ) |
 | **AES (AES-256-GCM)** | — | — | Thuật toán mã hoá đối xứng dùng cho: (1) mã hoá WiFi credential trong phiên provisioning, (2) mã hoá cấu hình Local AP gửi cho Camera, (3) mã hoá tại rest cho Device/Gateway Secret trong DB |
 | **ECDH (Curve25519)** | Mỗi phiên provisioning/pairing | — | Thiết lập Session Key giữa 2 bên **mà không cần truyền bất kỳ secret nào qua sóng** — chống nghe lén dù kênh truyền (BLE/SoftAP/ESP-NOW) không có mã hoá sẵn |
-| **TLS** | Kết nối Gateway↔Backend (HTTP/MQTT over TLS) | — | Bảo vệ kênh truyền tầng transport giữa Gateway và Cloud (khắc phục điểm yếu hiện tại: Mosquitto đang chạy không TLS — xem `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#12) |
+| **TLS** | Kết nối Gateway↔Backend (HTTP/MQTT over TLS) | — | Bảo vệ kênh truyền tầng transport giữa Gateway và Cloud (khắc phục điểm yếu hiện tại: Mosquitto đang chạy không TLS — xem `09_SECURITY_ARCHITECTURE.md` mục 1.3) |
 | **Challenge-Response** | Lúc Node join Pairing Mode | — | Gateway gửi nonce ngẫu nhiên, Node phải trả lời bằng chữ ký tính từ Node Secret — chứng minh Node sở hữu đúng secret mà không truyền secret đó qua sóng |
 
 ### 6.1. Nguyên tắc bất biến
@@ -298,7 +298,7 @@ sequenceDiagram
 
 ### 9.2. Đặc điểm quan trọng
 
-- **Whitelist theo `home_id`, không phải whitelist toàn cục** — vá đúng lỗ hổng "rò rỉ secret toàn hệ thống" đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md` (mục 1.5.#1): Gateway chỉ nhận diện được Node thuộc đúng Home của nó.
+- **Whitelist theo `home_id`, không phải whitelist toàn cục** — vá đúng lỗ hổng "rò rỉ secret toàn hệ thống" đã nêu ở `09_SECURITY_ARCHITECTURE.md` (§2, #1): Gateway chỉ nhận diện được Node thuộc đúng Home của nó.
 - **Cửa sổ Pairing có thời hạn** (60 giây, có thể gia hạn thủ công qua app) — chống kẻ tấn công chờ sẵn để giả mạo Node.
 - **Node tự động quay lại trạng thái "lắng nghe pairing"** nếu không nhận được heartbeat hợp lệ từ Gateway đã pair trong X giờ (mặc định 24h) — đây là cơ chế **then chốt giúp Replace Gateway không cần factory reset từng Node** (xem Phần 12).
 
@@ -599,6 +599,6 @@ sequenceDiagram
 6. **Đừng để cửa sổ pairing/provisioning mở vô thời hạn** — luôn có timeout, luôn log lại toàn bộ lượt thử.
 7. **Đừng gộp lẫn "Reset mạng" và "Reset quyền sở hữu"** — nhầm lẫn giữa 2 khái niệm này là nguyên nhân phổ biến khiến khách hàng mất dữ liệu ngoài ý muốn hoặc mất quyền truy cập nhà đang dùng.
 8. **Đừng bỏ qua trường hợp khách đổi router thường xuyên** — đây là tình huống thực tế xảy ra thường xuyên hơn "thay Gateway hỏng", phải có luồng UX mượt mà, không bắt phải pair lại từ đầu.
-9. **Đừng hard-code danh sách loại phòng/thiết bị** — mọi mở rộng (Garage, Garden, Office...) phải là thêm dữ liệu, không phải sửa code/schema (nhắc lại nguyên tắc đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md`).
+9. **Đừng hard-code danh sách loại phòng/thiết bị** — mọi mở rộng (Garage, Garden, Office...) phải là thêm dữ liệu, không phải sửa code/schema (nhắc lại nguyên tắc 2 ở `04_DATABASE_REFACTOR_SMARTHOME.md` mục 3).
 10. **Đừng bỏ qua log điều tra bảo mật cho tầng provisioning** — đây là nơi hacker thực tế hay nhắm tới nhất trong vòng đời sản phẩm IoT (giai đoạn onboarding thường có nhiều giả định lỏng lẻo hơn giai đoạn vận hành ổn định).
-11. **Đừng triển khai MQTT không TLS ở bản production thương mại** — cấu hình `allow_anonymous true` không TLS hiện tại chỉ chấp nhận được ở giai đoạn phát triển/demo, phải bật TLS + ACL theo `home_id` trước khi bán ra thị trường thật (kế thừa khuyến nghị đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.4, điểm 5).
+11. **Đừng triển khai MQTT không TLS ở bản production thương mại** — cấu hình `allow_anonymous true` không TLS hiện tại chỉ chấp nhận được ở giai đoạn phát triển/demo, phải bật TLS + ACL theo `home_id` trước khi bán ra thị trường thật (chi tiết ở `09_SECURITY_ARCHITECTURE.md` mục 4).

@@ -1,8 +1,8 @@
 # 13_PRD_SMART_HOME.md
 
 > **Product Requirements Document — Secure Smart Home Platform (V2)**
-> Tài liệu này mô tả **sản phẩm phải làm được gì** ở phiên bản V2 (mục tiêu đồ án) và **khi nào coi là xong**. Tài liệu không mô tả cách hiện thực. Cách hiện thực đã có trong các tài liệu kiến trúc `00`–`10`, được dẫn chiếu ở từng yêu cầu.
-> Bản tóm tắt 1 trang: [`12_PRODUCT_BRIEF.md`](12_PRODUCT_BRIEF.md).
+> Tài liệu này mô tả **sản phẩm phải làm được gì** ở phiên bản V2 (mục tiêu đồ án) và **khi nào coi là xong**. Tài liệu không mô tả cách hiện thực. Cách hiện thực đã có trong các tài liệu kiến trúc `01`–`10`, được dẫn chiếu ở từng yêu cầu.
+> Bản tóm tắt 1 trang: [mục 0](#0-tóm-tắt-một-trang).
 
 | | |
 |---|---|
@@ -17,6 +17,7 @@
 
 ## MỤC LỤC
 
+0. [Tóm tắt một trang](#0-tóm-tắt-một-trang)
 1. [Bối cảnh và vấn đề](#1-bối-cảnh-và-vấn-đề)
 2. [Mục tiêu và phi mục tiêu](#2-mục-tiêu-và-phi-mục-tiêu)
 3. [Người dùng và persona](#3-người-dùng-và-persona)
@@ -32,6 +33,64 @@
 13. [Kế hoạch phát hành](#13-kế-hoạch-phát-hành)
 14. [Truy vết yêu cầu → tài liệu kiến trúc](#14-truy-vết-yêu-cầu--tài-liệu-kiến-trúc)
 15. [Thuật ngữ](#15-thuật-ngữ)
+
+---
+
+## 0. TÓM TẮT MỘT TRANG
+
+> Cho người cần nắm nhanh: giảng viên hướng dẫn, hội đồng, thành viên mới. Gộp từ Product Brief (`12_PRODUCT_BRIEF.md`, 2026-09-24). Persona, rủi ro và danh sách tài liệu không lặp lại ở đây, xem §3, §10, §14.
+
+| | |
+|---|---|
+| **Đề tài** | Thiết kế và xây dựng hệ thống nhà thông minh an toàn dựa trên IoT |
+| **Loại dự án** | Đồ án tốt nghiệp, định hướng sản phẩm thương mại |
+| **Phiên bản mục tiêu** | V2 — MVP thương mại đầy đủ vòng đời (xem [`10`](10_SMART_HOME_PRODUCT_ROADMAP.md)) |
+
+**Vấn đề.** Bản Prototype là **trình quản lý thiết bị**, chưa phải **sản phẩm cho gia đình**:
+
+- **Mô hình dữ liệu sai đối tượng.** Hệ thống quản lý "thiết bị mạng" (Gateway/Sensor gộp chung một bảng) chứ không quản lý "căn nhà → phòng → thiết bị". Không có khách hàng, chủ nhà, thành viên gia đình.
+- **Không có đường đi từ hộp sản phẩm tới tay khách hàng.** Khách chưa tự kích hoạt (claim) được bộ kit đã mua, chưa tự nhập WiFi cho thiết bị. WiFi và secret viết cứng trong firmware.
+- **Bảo mật mới làm một nửa.** HMAC 2 lớp đúng thuật toán, nhưng MQTT chưa có TLS và API để lộ secret của sensor cho mọi gateway đã đăng nhập.
+- **Chưa có ứng dụng cho khách hàng.** Mobile App mới là giao diện mẫu.
+
+**Giải pháp.** Một **nền tảng Smart Home có kênh truy cập tách riêng theo vai trò**, quản lý trọn vòng đời sản phẩm: nhập kho → đóng gói kit → bán → khách kích hoạt → sử dụng → bảo hành.
+
+```
+ Operator (Web)            Khách hàng (Mobile)            Thiết bị (ESP32)
+ ──────────────            ───────────────────            ────────────────
+ Tạo Smart Home  ──QR──▶   Quét QR, claim nhà     ◀──▶   Gateway ── ESP-NOW ── Nodes
+ (unclaimed)               Nhập WiFi 1 lần (BLE)          HMAC 2 lớp + MQTT TLS
+ Theo dõi, OTA, hỗ trợ     Điều khiển, cảnh báo,
+                           mời thành viên, tự động hoá
+```
+
+Ba nguyên tắc sản phẩm cốt lõi:
+
+1. **Khách hàng chỉ dùng Mobile App. Web Dashboard chỉ dành cho Admin/Operator.** Hai kênh dùng hai cơ chế xác thực và hai namespace API riêng.
+2. **Smart Home được tạo trước khi bán.** Khách không "thêm thiết bị" mà chỉ "mở khoá" căn nhà đã cấu hình sẵn bằng QR hoặc Activation Code.
+3. **Bảo mật từ thiết bị đến ứng dụng.** HMAC 2 lớp, MQTT TLS, secret không bao giờ đi tới Mobile, mọi hành động nhạy cảm đều được ghi log.
+
+**Phạm vi V2** (chi tiết ở §4, §6):
+
+| Bắt buộc chạy thật (MUST) | Cố gắng demo (SHOULD) | Chỉ trình bày thiết kế (COULD / WON'T) |
+|---|---|---|
+| Mô hình Home → Room → Device → Sensor → Telemetry | WiFi Provisioning (BLE hoặc SoftAP) | Camera live stream |
+| RBAC 2 tầng: hệ thống + theo từng nhà | Gateway ↔ Node pairing qua ESP-NOW | Feature Store, Recommendation Engine đầy đủ |
+| Claim Smart Home qua QR / Activation Code trên Mobile | OTA firmware (ít nhất 1 lần thành công) | Secure Boot, Flash Encryption |
+| Điều khiển đèn/quạt + xem cảm biến trên Mobile | Push notification (sự kiện thiết bị offline) | Energy Analytics, Voice, Matter/Thread |
+| HMAC 2 lớp + **MQTT TLS** + vá lộ secret | Tự động hoá IF/THEN, mời thành viên | Kubernetes, Kafka, Multi-Region |
+| Admin Dashboard với dữ liệu thật | **Gợi ý tự động hoá theo thói quen (AI cơ bản)** | |
+
+MQTT TLS được nâng lên MUST và AI gợi ý thói quen được đưa vào SHOULD so với roadmap `10`, vì cả hai nằm trong nội dung đề tài đã đăng ký (§11.2).
+
+**Tiêu chí thành công** (chi tiết ở §8):
+
+- Người dùng mới đi từ **mở hộp đến điều khiển được thiết bị đầu tiên trong ≤ 10 phút**, không cần tài liệu hướng dẫn.
+- **0 endpoint** trả secret thiết bị cho client. **100% lượt claim** (thành công và thất bại) được ghi log.
+- Demo end-to-end trước hội đồng trên **phần cứng thật**: Operator tạo nhà → khách claim → điều khiển relay → nhận cảnh báo.
+- Toàn bộ lưu lượng MQTT Gateway ↔ Backend được mã hoá TLS.
+
+Khi hội đồng hỏi về phần chưa làm (AI model thật, Matter…), trả lời bằng tài liệu kiến trúc [`03`](03_BACKEND_REFACTOR_SMARTHOME.md) §18 và [`04`](04_DATABASE_REFACTOR_SMARTHOME.md) §7.12.
 
 ---
 
@@ -54,7 +113,7 @@
 | Firmware | Gateway cầu nối 2 broker, sensor DHT22, HMAC ký payload | WiFi và secret viết cứng trong firmware, chưa có OTA/NVS, chưa có ESP-NOW |
 | Backend | Express + TypeScript, HMAC 2 lớp, tự khoá thiết bị sau 5 lần xác thực lỗi | Không phân lớp, lộ secret sensor qua `sensors.routes.ts`, chưa tách namespace theo kênh |
 | Database | 6 bảng | Bảng `devices` gộp Gateway và Sensor, chưa có Home/Room/Member |
-| Web Dashboard | Đã refactor IA mới (Phase 0–7, xem [`06`](06_FRONTEND_REFACTOR_PROGRESS.md)) | Toàn bộ chạy trên mock data, chưa nối backend |
+| Web Dashboard | Đã refactor IA mới (Phase 0–7 theo [`05`](05_FRONTEND_REFACTOR_SMARTHOME.md) §17) | Toàn bộ chạy trên mock data, chưa nối backend |
 | Mobile | Giao diện mẫu | Chưa có state management, API hay xác thực thật |
 | Bảo mật | HMAC đúng thuật toán | MQTT `allow_anonymous`, không TLS |
 
@@ -538,7 +597,7 @@ M1–M3 là đường găng. Nếu trễ, M4–M5 được cắt theo thứ tự
 | E5, E8 | [`03`](03_BACKEND_REFACTOR_SMARTHOME.md) · [`07`](07_MOBILE_APP_ARCHITECTURE.md) |
 | E7 | [`03`](03_BACKEND_REFACTOR_SMARTHOME.md) §18 · [`04`](04_DATABASE_REFACTOR_SMARTHOME.md) §7.12 |
 | E9 | [`05`](05_FRONTEND_REFACTOR_SMARTHOME.md) · [`08`](08_EMBEDDED_ARCHITECTURE_ESP_IDF.md) §14–15 |
-| E10, E11 | [`04`](04_DATABASE_REFACTOR_SMARTHOME.md) · [`05`](05_FRONTEND_REFACTOR_SMARTHOME.md) · [`06`](06_FRONTEND_REFACTOR_PROGRESS.md) |
+| E10, E11 | [`04`](04_DATABASE_REFACTOR_SMARTHOME.md) · [`05`](05_FRONTEND_REFACTOR_SMARTHOME.md) |
 | E12 | [`09`](09_SECURITY_ARCHITECTURE.md) |
 
 ---

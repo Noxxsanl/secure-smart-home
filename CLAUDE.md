@@ -18,7 +18,7 @@ Luồng dữ liệu: Sensor —`local/sensors/+/data` (Broker 1)→ Gateway veri
 
 ## Tài liệu (`docs/`)
 
-`00` phân tích · `01` product architecture, RBAC, claim · `02` WiFi provisioning · `03` backend (§9 API, §10 MQTT, §18 AI) · `04` database (§6 naming, §7 bảng) · `05` frontend design · `06` tiến độ frontend · `07` mobile · `08` firmware ESP-IDF · `09` security · `10` roadmap · `11` chạy local · `12` brief · `13` **PRD** (FR-x.y, NFR-*, tiêu chí nghiệm thu, §14 truy vết) · `14` MQTT TLS (hiện trạng FR-12.3, cách chạy, việc còn thiếu). PRD 13 thắng roadmap 10 khi mâu thuẫn.
+`01` product architecture, RBAC, claim (§0.1 vì sao bỏ mô hình Device Manager) · `02` WiFi provisioning · `03` backend (§9 API, §10 MQTT, §18 AI) · `04` database (§6 naming, §7 bảng) · `05` frontend design · `07` mobile · `08` firmware ESP-IDF · `09` security · `10` roadmap · `11` chạy local · `13` **PRD** (§0 tóm tắt 1 trang, FR-x.y, NFR-*, tiêu chí nghiệm thu, §14 truy vết) · `14` MQTT TLS (hiện trạng FR-12.3, cách chạy, việc còn thiếu) · `15` đề xuất AI Agent (**draft chờ giảng viên duyệt** — chưa phải yêu cầu). Hiện trạng + việc còn lại của web: `frontend/README.md`. PRD 13 thắng roadmap 10 khi mâu thuẫn. (`00` phân tích, `06` tiến độ frontend, `12` brief đã gộp/gỡ — xem lịch sử git.)
 
 Domain đích: `Customer → SmartHome → Room → Device(Gateway|Node) → Sensor → Telemetry`. API tách theo kênh: `/api/dashboard/**` (cookie, ADMIN/OPERATOR), `/api/mobile/**` (JWT Bearer, USER), `/api/device/**` (HMAC). RBAC 2 tầng: role hệ thống quyết định kênh, role trong nhà (OWNER/CONTROLLER/VIEWER/GUEST) quyết định hành động.
 

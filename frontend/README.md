@@ -109,6 +109,18 @@ Dữ liệu các phần này vẫn lấy từ `packages/shared/mock/` (trong b�
 
 `packages/shared/mock/portal.ts` (API giả kênh khách hàng cũ) không còn được import ở đâu nữa — có thể xoá khi dọn mock.
 
+## Việc còn lại
+
+Chuyển từ nhật ký tiến độ cũ (`docs/06_FRONTEND_REFACTOR_PROGRESS.md`, đã gỡ — còn trong lịch sử git). Thiết kế đích ở [`docs/05`](../docs/05_FRONTEND_REFACTOR_SMARTHOME.md).
+
+- **Responsive mobile** (`05` §16.2, Phase 8): Sidebar mới chỉ collapse icon-only, chưa có chế độ hamburger + overlay trên màn hẹp; bảng mật độ cao (Logs, Gateways) chưa chuyển sang dạng card.
+- **Trang đăng nhập console** (`05` §9.15): chưa có dòng "Cổng quản trị nội bộ — khách hàng dùng Mobile App". Tài khoản khách đăng nhập nhầm cổng vẫn nhận hướng dẫn (`packages/shared/auth/errors.ts`).
+- **Gán thiết bị đã có vào phòng** (`05` §9.5): tab Rooms của Smart Home Detail chỉ xem thiết bị theo phòng; thiết bị mới chỉ tạo được qua Provisioning Wizard.
+- **Biểu đồ theo `sensor_type`** (`05` §9.6): `packages/shared/ui/TelemetryChart.tsx` vẫn chỉ vẽ 2 trường cố định `temperature`/`humidity`.
+- **Automation kéo-thả** (`05` §9.12, Phase 9): chưa làm, đúng khuyến nghị — chỉ đầu tư khi tập trigger/action đã phong phú hơn form IF/THEN.
+
+**Lệch PRD:** app `user/` (cổng web khách hàng) nằm ngoài phạm vi PRD V2 — `docs/13` §2.2 và FR-1.4 quy định khách hàng chỉ dùng Mobile. App được làm theo yêu cầu trực tiếp; nếu giữ hướng này cần cập nhật PRD và `docs/01`, `docs/05`.
+
 ## Docker
 
 `Dockerfile` / `Dockerfile.dev` dùng chung cho cả 3 app, chọn app bằng `--build-arg APP=admin|operator|user`. Trong `docker-compose.yml` có 3 service `frontend-admin`, `frontend-operator`, `frontend-user` (host port 3001/3002/3003). Nginx route theo subdomain: `localhost` / `admin.localhost` → Admin, `operator.localhost` → Operator, `user.localhost` → khách hàng; `/api/` → backend.

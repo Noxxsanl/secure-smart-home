@@ -239,7 +239,7 @@ S10: [auto] viewer → GET audit 200, DELETE audit 403, GET users 403 → cleanu
 
 **Buoc 5 — Reset sau demo:**
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT -e "UPDATE devices SET status='active', fail_count=0 WHERE device_type='gateway';"
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot -e "UPDATE devices SET status='active', fail_count=0 WHERE device_type='gateway';"
 ```
 Hoac vao Dashboard → Devices → chon Gateway → doi status ve `active`.
 
@@ -620,7 +620,7 @@ HTTP 401
 Kiem tra DB van con bang:
 
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot
 ```
 
 ```sql
@@ -680,7 +680,7 @@ Event quan trong:
 ### 12.2 Xem truc tiep MySQL
 
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot
 ```
 
 ```sql
@@ -804,5 +804,5 @@ code hien tai. Dieu nay phu hop local HTTP, nhung production nen bat HTTPS va
 ./scripts/attack_demo_extended.sh "$BACKEND" "$GW_ID" "$GW_SECRET" "$SN_ID" "$SN_SECRET" "admin" "admin123"
 
 # Buoc 3: Reset sau khi xong (de chay lai)
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT -e "UPDATE devices SET status='active', fail_count=0 WHERE device_type='gateway';"
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot -e "UPDATE devices SET status='active', fail_count=0 WHERE device_type='gateway';"
 ```

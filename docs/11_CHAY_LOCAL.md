@@ -78,23 +78,23 @@ Sau khi vào MySQL shell (`mysql>`), chạy lần lượt:
 
 ```sql
 -- Tạo database
-CREATE DATABASE IF NOT EXISTS iot_managerDeviceIoT
+CREATE DATABASE IF NOT EXISTS secure_smart_home_iot
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
 -- Tạo user riêng cho ứng dụng
-CREATE USER IF NOT EXISTS 'iot_managerIoT'@'localhost'
-  IDENTIFIED BY 'iot_managerIoTpassword';
+CREATE USER IF NOT EXISTS 'secure_smart_home_app'@'localhost'
+  IDENTIFIED BY 'change_me';
 
 -- Cấp quyền
-GRANT ALL PRIVILEGES ON iot_managerDeviceIoT.*
-  TO 'iot_managerIoT'@'localhost';
+GRANT ALL PRIVILEGES ON secure_smart_home_iot.*
+  TO 'secure_smart_home_app'@'localhost';
 
 FLUSH PRIVILEGES;
 
 -- Kiểm tra
 SHOW DATABASES;
--- phải thấy: iot_managerDeviceIoT
+-- phải thấy: secure_smart_home_iot
 
 EXIT;
 ```
@@ -103,15 +103,15 @@ EXIT;
 
 ```powershell
 # Chạy file SQL migration (từ thư mục gốc dự án)
-cd e:\WorkSpace\managerDeviceIoT
+cd e:\WorkSpace\secure-smart-home-iot
 
-mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
+mysql -u secure_smart_home_app -p secure_smart_home_iot `
       < database\migrations\001_schema.sql
 ```
 
 Kiểm tra bảng đã tạo:
 ```powershell
-mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
+mysql -u secure_smart_home_app -p secure_smart_home_iot `
       -e "SHOW TABLES;"
 ```
 
@@ -133,7 +133,7 @@ Tạo file `mosquitto\broker1_local.conf`:
 
 ```powershell
 # Tạo thư mục data nếu chưa có
-New-Item -ItemType Directory -Force -Path "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\data"
+New-Item -ItemType Directory -Force -Path "e:\WorkSpace\secure-smart-home-iot\mosquitto\data"
 
 # Tạo file config Broker 1
 @'
@@ -142,8 +142,8 @@ allow_anonymous true
 log_type all
 log_dest stdout
 persistence true
-persistence_location e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\data\broker1\
-'@ | Out-File -Encoding utf8 "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker1_local.conf"
+persistence_location e:\WorkSpace\secure-smart-home-iot\mosquitto\data\broker1\
+'@ | Out-File -Encoding utf8 "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf"
 ```
 
 ### Sinh chứng chỉ TLS cho Broker 2
@@ -164,23 +164,23 @@ Tạo file `mosquitto\broker2_local.conf`:
 # Tạo file config Broker 2 — chỉ listener TLS, không còn cổng plaintext
 @'
 listener 8883
-cafile   e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\certs\ca.crt
-certfile e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\certs\server.crt
-keyfile  e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\certs\server.key
+cafile   e:\WorkSpace\secure-smart-home-iot\mosquitto\certs\ca.crt
+certfile e:\WorkSpace\secure-smart-home-iot\mosquitto\certs\server.crt
+keyfile  e:\WorkSpace\secure-smart-home-iot\mosquitto\certs\server.key
 tls_version tlsv1.2
 allow_anonymous true
 log_type all
 log_dest stdout
 persistence true
-persistence_location e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\data\broker2\
-'@ | Out-File -Encoding utf8 "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker2_local.conf"
+persistence_location e:\WorkSpace\secure-smart-home-iot\mosquitto\data\broker2\
+'@ | Out-File -Encoding utf8 "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf"
 ```
 
 ### Mở Terminal 2 — chạy Broker 1 (port 1883)
 
 ```powershell
 & "C:\Program Files\mosquitto\mosquitto.exe" `
-    -c "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker1_local.conf" `
+    -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf" `
     -v
 ```
 
@@ -195,7 +195,7 @@ Output mong đợi:
 
 ```powershell
 & "C:\Program Files\mosquitto\mosquitto.exe" `
-    -c "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker2_local.conf" `
+    -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf" `
     -v
 ```
 
@@ -215,7 +215,7 @@ Output mong đợi:
 ### Mở Terminal 4 — dành riêng cho Backend
 
 ```powershell
-cd e:\WorkSpace\managerDeviceIoT-RBAC\backend
+cd e:\WorkSpace\secure-smart-home-iot\backend
 ```
 
 ### Tạo file `.env`
@@ -233,9 +233,9 @@ PORT=5000
 # Database
 DB_HOST=localhost
 DB_PORT=3306
-DB_USER=iot_managerIoT
-DB_PASS=iot_managerIoTpassword
-DB_NAME=iot_managerDeviceIoT
+DB_USER=secure_smart_home_app
+DB_PASS=change_me
+DB_NAME=secure_smart_home_iot
 
 # JWT (phải >= 32 ký tự)
 JWT_SECRET=local_dev_secret_key_change_in_production_32chars
@@ -325,7 +325,7 @@ curl http://localhost:5000/api/health
 ### Mở Terminal 5 — dành riêng cho Frontend
 
 ```powershell
-cd e:\WorkSpace\managerDeviceIoT-RBAC\frontend
+cd e:\WorkSpace\secure-smart-home-iot\frontend
 ```
 
 ### Tạo file `.env.local`
@@ -387,8 +387,8 @@ Write-Host "=== Kiểm tra services ===" -ForegroundColor Cyan
 
 # MySQL
 try {
-    $r = mysql -u iot_managerIoT -piot_managerIoTpassword `
-               iot_managerDeviceIoT -e "SELECT 1;" 2>&1
+    $r = mysql -u secure_smart_home_app -p `
+               secure_smart_home_iot -e "SELECT 1;" 2>&1
     Write-Host "[MySQL]     OK" -ForegroundColor Green
 } catch {
     Write-Host "[MySQL]     FAIL" -ForegroundColor Red
@@ -472,17 +472,17 @@ Activation Code để thử luồng claim (Thêm Smart Home / quét QR):
 Mỗi lần mở máy muốn chạy hệ thống, làm theo thứ tự này:
 
 [Terminal 2] Mosquitto Broker 1 (Sensor ↔ Gateway, port 1883)
-  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker1_local.conf" -v
+  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf" -v
 
 [Terminal 3] Mosquitto Broker 2 (Gateway → Backend, TLS port 8883)
-  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\managerDeviceIoT-RBAC\mosquitto\broker2_local.conf" -v
+  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf" -v
 
 [Terminal 4] Backend
-  cd e:\WorkSpace\managerDeviceIoT-RBAC\backend
+  cd e:\WorkSpace\secure-smart-home-iot\backend
   npm run dev
 
 [Terminal 5] Frontend (3 app: 3001 / 3002 / 3003)
-  cd e:\WorkSpace\managerDeviceIoT-RBAC\frontend
+  cd e:\WorkSpace\secure-smart-home-iot\frontend
   npm run dev
 
 → Mở http://localhost:3001 (Admin), :3002 (Operator), :3003 (Khách hàng)
@@ -507,7 +507,7 @@ Chỉ áp dụng cho thiết bị mô phỏng (thiết bị thật → `409 NOT_
 ## Bước 7 — Chạy Mobile (Flutter, tuỳ chọn)
 
 ```powershell
-cd e:\WorkSpace\managerDeviceIoT-RBAC\mobile
+cd e:\WorkSpace\secure-smart-home-iot\mobile
 flutter pub get
 
 # Gọi backend thật — thay <LAN-IP> bằng IP máy chạy backend
@@ -545,7 +545,7 @@ Sai username hoặc password trong `.env`.
 
 ```powershell
 # Kiểm tra kết nối thủ công
-mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT -e "SELECT 1;"
+mysql -u secure_smart_home_app -p secure_smart_home_iot -e "SELECT 1;"
 ```
 
 Nếu lỗi, tạo lại user:
@@ -553,9 +553,9 @@ Nếu lỗi, tạo lại user:
 -- Kết nối bằng root
 mysql -u root -p
 
-DROP USER IF EXISTS 'iot_managerIoT'@'localhost';
-CREATE USER 'iot_managerIoT'@'localhost' IDENTIFIED BY 'iot_managerIoTpassword';
-GRANT ALL ON iot_managerDeviceIoT.* TO 'iot_managerIoT'@'localhost';
+DROP USER IF EXISTS 'secure_smart_home_app'@'localhost';
+CREATE USER 'secure_smart_home_app'@'localhost' IDENTIFIED BY 'change_me';
+GRANT ALL ON secure_smart_home_iot.* TO 'secure_smart_home_app'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
@@ -610,8 +610,8 @@ Stop-Process -Id <PID> -Force
 
 Schema chưa được import. Chạy lại:
 ```powershell
-cd e:\WorkSpace\managerDeviceIoT
-mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
+cd e:\WorkSpace\secure-smart-home-iot
+mysql -u secure_smart_home_app -p secure_smart_home_iot `
       < database\migrations\001_schema.sql
 ```
 
@@ -621,18 +621,18 @@ mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
 
 ```powershell
 # Xem dữ liệu sensor mới nhất trong DB
-mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
+mysql -u secure_smart_home_app -p secure_smart_home_iot `
       -e "SELECT * FROM sensor_data ORDER BY received_at DESC LIMIT 5;"
 
 # Xem audit log
-mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
+mysql -u secure_smart_home_app -p secure_smart_home_iot `
       -e "SELECT event_type, ip_address, details, created_at FROM audit_log ORDER BY created_at DESC LIMIT 10;"
 
 # Xem trạng thái thiết bị
-mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
+mysql -u secure_smart_home_app -p secure_smart_home_iot `
       -e "SELECT device_id, device_type, status, fail_count, last_seen FROM devices;"
 
 # Reset fail_count và unblock thiết bị bằng SQL (thay thế nút Unlock trên UI)
-mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT `
+mysql -u secure_smart_home_app -p secure_smart_home_iot `
       -e "UPDATE devices SET status='active', fail_count=0 WHERE device_id='ESP32-GW-XXXXXXXX';"
 ```

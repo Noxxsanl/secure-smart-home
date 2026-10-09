@@ -2,7 +2,7 @@
 # 01_SMART_HOME_PRODUCT_ARCHITECTURE.md
 
 > Kiến trúc sản phẩm Smart Home SaaS — mô hình **Mobile-only cho khách hàng, Web Dashboard chỉ dành cho Admin/Operator**.
-> Tài liệu này **mở rộng và ràng buộc chặt hơn** tài liệu [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md) (đặc biệt Phần 4 – Database, Phần 5 – RBAC) với một nguyên tắc sản phẩm mới, mang tính quyết định kiến trúc:
+> Đây là tài liệu kiến trúc sản phẩm gốc của V2 (thiết kế bảng chi tiết ở [`04_DATABASE_REFACTOR_SMARTHOME.md`](04_DATABASE_REFACTOR_SMARTHOME.md), ma trận quyền hợp nhất ở [`09_SECURITY_ARCHITECTURE.md`](09_SECURITY_ARCHITECTURE.md) §8). Tài liệu đặt ra một nguyên tắc sản phẩm mang tính quyết định kiến trúc:
 >
 > **User (khách hàng) không bao giờ đăng nhập Web Dashboard. Web Dashboard chỉ tồn tại cho ADMIN và OPERATOR. Khách hàng chỉ tương tác với hệ thống qua Mobile App.**
 
@@ -44,6 +44,30 @@ Quyết định **"User không dùng Web Dashboard"** không phải là một th
 | **RBAC** | Phải kiểm tra **2 tầng độc lập**: (1) role hệ thống (ADMIN/OPERATOR/USER) quyết định được vào Dashboard hay Mobile; (2) role trong từng Smart Home (Owner/Controller/Viewer/Guest) quyết định hành động được phép trên chính căn nhà đó. |
 | **UI** | Dashboard **không có bất kỳ màn hình nào** cho vai trò khách hàng (không "Customer view" trong web). Mobile App là **giao diện duy nhất** khách hàng nhìn thấy sản phẩm — trải nghiệm phải đạt chuẩn app tiêu dùng (Tuya/Xiaomi/Aqara), không phải "web responsive thu nhỏ". |
 | **Business Flow** | Vòng đời 1 Smart Home bắt đầu **trước khi có khách hàng** (Operator tạo home ở trạng thái `unclaimed` khi đóng gói kit) — khác hẳn mô hình cũ nơi thiết bị được đăng ký sau khi đã có user đăng nhập. |
+
+### 0.1. Vì sao bỏ mô hình Device/Gateway/Node Manager
+
+> Gộp từ tài liệu phân tích ban đầu `00_PROJECT_ANALYSIS_SMARTHOME.md` (Phần 2 và 3.3). Các phần còn lại của tài liệu đó đã được [`04`](04_DATABASE_REFACTOR_SMARTHOME.md), [`05`](05_FRONTEND_REFACTOR_SMARTHOME.md), [`09`](09_SECURITY_ARCHITECTURE.md), [`10`](10_SMART_HOME_PRODUCT_ROADMAP.md) thay thế; bản gốc còn trong lịch sử git (commit `dc0ce27`).
+
+Prototype tổ chức toàn bộ DB, API và UI quanh **một registry thiết bị phẳng**: `devices` là bảng toàn cục không có `home_id`/`owner_id`, `/api/devices` trả mọi thiết bị cho bất kỳ ai đã đăng nhập, Dashboard chỉ phân tab Gateway/Sensor. Mô hình này sụp đổ khi thương mại hoá vì:
+
+1. **Không có ranh giới dữ liệu giữa các khách hàng (tenant isolation).** Khách hàng B thấy (hoặc backend không chặn) thiết bị của khách hàng A; `/api/device/sensors` còn trả secret của mọi sensor cho mọi gateway ([`09`](09_SECURITY_ARCHITECTURE.md) §2, #1). Lỗ hổng xảy ra ngay khi có khách hàng thứ hai.
+2. **Sai đơn vị quản lý.** Khách hàng nghĩ theo "nhà tôi có phòng khách, phòng ngủ, phòng bếp", không theo "tôi có 1 gateway và 3 sensor". Tuya/Xiaomi/Aqara vẫn có hub vật lý nhưng giấu nó khỏi người dùng cuối.
+3. **Không mở rộng được loại thiết bị.** `device_type ENUM('sensor','gateway')` không có chỗ cho relay, camera, khoá cửa, cảm biến khói/gas.
+4. **Không vận hành được ở quy mô lớn.** Không lọc được theo `home_id` bằng index — mọi truy vấn dashboard, danh sách, tìm kiếm đều quét toàn hệ thống.
+5. **Operator có quyền ngang Admin trên mọi thiết bị** (`requireRole("admin", "operator")`), vi phạm least-privilege ([`09`](09_SECURITY_ARCHITECTURE.md) §2, #4).
+
+**Kết luận:** đơn vị quản lý chuyển từ **thiết bị mạng** (Gateway/Node — khái niệm kỹ thuật) sang **không gian sống** (Home/Room — khái niệm khách hàng hiểu và mua). Gateway vẫn tồn tại về mặt kỹ thuật nhưng ẩn sau mô hình Home/Room.
+
+| Tiêu chí | Mô hình cũ (Device/Gateway/Node) | Mô hình mới (Customer → Home → Room → Device → Sensor → Telemetry) |
+|---|---|---|
+| Tenant isolation | Không có — API trả toàn bộ dữ liệu hệ thống | Mọi truy vấn lọc qua `home_id` thuộc quyền của người gọi — cô lập bằng thiết kế, không phải "nhớ lọc thủ công" |
+| Trải nghiệm khách hàng | Phải hiểu Gateway/Node là gì | Chỉ cần biết "phòng nào có thiết bị gì" |
+| Mở rộng loại thiết bị | ENUM cứng 2 giá trị | `device_types` là bảng danh mục, thêm loại mới không sửa schema |
+| Phân quyền | Nhị phân admin/operator, phẳng | RBAC 2 tầng; Operator chỉ vào nhà được cấp quyền có thời hạn, có audit |
+| Bán hàng loạt | 1 hệ thống ngầm định 1 chủ sở hữu | Hàng nghìn khách hàng độc lập, mỗi người 1..N nhà |
+| Hiệu năng khi scale | Quét toàn bảng `devices`/`sensor_data` | Index theo `(home_id, …)`, `(room_id, …)` |
+| Automation theo ngữ cảnh | Không biết thiết bị thuộc phòng nào | Rule tham chiếu `room_id`/`home_id` tự nhiên |
 
 ---
 
@@ -105,7 +129,7 @@ flowchart TB
 
 - `/api/dashboard/**` — chỉ chấp nhận session cookie của user có `role_id ∈ {ADMIN, OPERATOR}`. Nếu một tài khoản `USER` cố đăng nhập endpoint này → trả `403 { error: "USE_MOBILE_APP" }`.
 - `/api/mobile/**` — chỉ chấp nhận JWT Bearer của user có `role_id = USER`. Admin/Operator không có tài khoản dùng được namespace này (trừ trường hợp đặc biệt: Admin dùng **App nội bộ Operator** riêng — xem 13.2).
-- `/api/device/**` — không đổi nguyên lý HMAC hiện tại, chỉ bổ sung scope theo `home_id`/`gateway_id` để vá lỗ hổng đã nêu trong `00_PROJECT_ANALYSIS_SMARTHOME.md` (mục 1.5.#1).
+- `/api/device/**` — không đổi nguyên lý HMAC hiện tại, chỉ bổ sung scope theo `home_id`/`gateway_id` để vá lỗ hổng đã nêu trong `09_SECURITY_ARCHITECTURE.md` (§2, #1).
 
 ---
 
@@ -119,7 +143,7 @@ flowchart TB
 | **OPERATOR** | Web Dashboard only | Không | Chuẩn bị thiết bị (nhập kho), khởi tạo Smart Home (unclaimed), cấu hình Gateway, hỗ trợ khách hàng (qua quyền truy cập có thời hạn), theo dõi trạng thái thiết bị, thực hiện OTA, xử lý cảnh báo/ticket bảo hành |
 | **USER** | Mobile App only | Có (owner hoặc member) | Đăng ký/đăng nhập, claim Smart Home, điều khiển thiết bị, xem camera/sensor, automation, notification, quản lý thành viên gia đình, đổi tên phòng/thiết bị |
 
-> **Ràng buộc cứng:** không tồn tại trạng thái nào mà một `USER` có session hợp lệ trên Web Dashboard, và không tồn tại trạng thái nào mà `ADMIN`/`OPERATOR` xuất hiện trong `smart_home_members` với vai trò sở hữu thực sự (Operator chỉ có bản ghi tạm thời trong `operator_home_access`, xem `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.2.7).
+> **Ràng buộc cứng:** không tồn tại trạng thái nào mà một `USER` có session hợp lệ trên Web Dashboard, và không tồn tại trạng thái nào mà `ADMIN`/`OPERATOR` xuất hiện trong `smart_home_members` với vai trò sở hữu thực sự (Operator chỉ có bản ghi tạm thời trong `operator_home_access`, xem `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.2).
 
 ### 2.2. Role trong 1 Smart Home (home-level) — xem Phần 7
 
@@ -459,7 +483,7 @@ erDiagram
 
 ### 8.2. Chi tiết bảng mới / thay đổi trọng yếu
 
-> Các bảng `rooms`, `device_types`, `sensor_types`, `device_sensors`, `telemetry`, `alerts`, `automation_history`, `firmware`, `ota_history` giữ nguyên thiết kế đã đặc tả tại `00_PROJECT_ANALYSIS_SMARTHOME.md` Phần 4.2 — không lặp lại ở đây. Phần dưới chỉ đặc tả các bảng **mới hoặc thay đổi cấu trúc** phục vụ mô hình Claim/Activation & Mobile-only.
+> Các bảng `rooms`, `device_types`, `sensor_types`, `device_sensors`, `telemetry`, `alerts`, `automation_history`, `firmware`, `ota_history` giữ nguyên thiết kế đã đặc tả tại `04_DATABASE_REFACTOR_SMARTHOME.md` Phần 7 — không lặp lại ở đây. Phần dưới chỉ đặc tả các bảng **mới hoặc thay đổi cấu trúc** phục vụ mô hình Claim/Activation & Mobile-only.
 
 #### `roles`
 | Cột | Kiểu | Ràng buộc | Mô tả |
@@ -570,7 +594,7 @@ erDiagram
 | last_snapshot_url | VARCHAR(512) | NULL | |
 
 #### `automations` *(đổi tên từ `automation_rules` cho ngắn gọn, giữ nguyên cấu trúc)*
-Xem `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.2.18 — không đổi.
+Xem `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.8 (`automation_rules`) — không đổi.
 
 #### `notifications`
 Giữ nguyên thiết kế đã sửa ở tài liệu trước (`user_id` thay vì `target_role` cứng) — bổ sung cột `channel ENUM('push','in_app')` và `push_token_snapshot` để phục vụ gửi qua FCM/APNs.
@@ -638,7 +662,7 @@ Giữ nguyên thiết kế đã sửa ở tài liệu trước (`user_id` thay v
 
 ### 9.3. Namespace `/api/device/**` (HMAC — firmware, không đổi nguyên lý)
 
-Giữ nguyên `/api/device/data`, nhưng `/api/device/sensors` (endpoint hiện đang rò rỉ toàn hệ thống) được thay bằng `/api/device/gateways/:gateway_uuid/whitelist` — **chỉ trả danh sách thiết bị thuộc đúng `home_id` của gateway đó**, vá triệt để lỗ hổng đã nêu ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 1.5.#1.
+Giữ nguyên `/api/device/data`, nhưng `/api/device/sensors` (endpoint hiện đang rò rỉ toàn hệ thống) được thay bằng `/api/device/gateways/:gateway_uuid/whitelist` — **chỉ trả danh sách thiết bị thuộc đúng `home_id` của gateway đó**, vá triệt để lỗ hổng đã nêu ở `09_SECURITY_ARCHITECTURE.md` §2, #1.
 
 ---
 
@@ -653,7 +677,7 @@ Giữ nguyên `/api/device/data`, nhưng `/api/device/sensors` (endpoint hiện 
 | Dashboard Auth | HttpOnly cookie, SameSite=strict, giữ nguyên cơ chế hiện tại |
 | Cross-channel protection | Middleware kiểm tra `roles.channel` — tài khoản `USER` gọi `/api/dashboard/**` → 403; tài khoản `ADMIN/OPERATOR` gọi `/api/mobile/**` → 403 |
 | Operator quyền hạn | Không có quyền mặc định trên Home đã claim — chỉ qua `operator_home_access` có `expires_at` + `reason` bắt buộc, mọi hành động ghi `audit_logs` |
-| MQTT | Topic namespace theo `home/{home_id}/gateway/{gateway_uuid}/...`; broker cần ACL theo home (kế thừa khuyến nghị `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.4, điểm 5) |
+| MQTT | Topic namespace theo `home/{home_id}/gateway/{gateway_uuid}/...`; broker cần ACL theo home (chi tiết ở `09_SECURITY_ARCHITECTURE.md` mục 4.3) |
 | Ownership Transfer / Gateway Replace | Dùng lại cơ chế `activation_tokens` (khác `token_type`) — cùng chuẩn bảo mật: 1 lần dùng, hết hạn ngắn hơn (7 ngày), log đầy đủ |
 
 ---
@@ -885,7 +909,7 @@ sequenceDiagram
 
 ## 18. GHI CHÚ TRIỂN KHAI / LIÊN KẾT ROADMAP
 
-Tài liệu này **bổ sung** cho roadmap đã đề xuất tại `00_PROJECT_ANALYSIS_SMARTHOME.md` Phần 12, với thứ tự ưu tiên điều chỉnh:
+Tài liệu này **bổ sung** cho roadmap ở `10_SMART_HOME_PRODUCT_ROADMAP.md`, với thứ tự ưu tiên điều chỉnh:
 
 1. **Trước Phase 3 (Smart Home Module) của roadmap cũ**, cần chèn thêm: thiết kế & triển khai `activation_tokens`/`activation_logs`/`gateway_activation`, tách namespace API `/api/mobile/**` vs `/api/dashboard/**`, đổi cơ chế auth Mobile sang JWT Bearer + refresh token (thay cookie hiện tại).
 2. Phần 15 (Thay thế Gateway) và Phần 16 (Reset/Chuyển quyền) nên triển khai **cùng Phase 5 (Device Module)** vì dùng chung transaction pattern "reassign devices theo home/gateway".

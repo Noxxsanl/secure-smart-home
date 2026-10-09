@@ -6,7 +6,7 @@
 > Đây là **tài liệu tổng hợp cấp cao nhất**, đứng trên toàn bộ 9 tài liệu kiến trúc đã biên soạn trong workspace — không lặp lại chi tiết kỹ thuật đã có, mà **tổng hợp thành lộ trình sản phẩm** với góc nhìn CTO: đánh đổi, rủi ro, ưu tiên, và tính khả thi trong khung thời gian một đồ án tốt nghiệp.
 >
 > **Nguồn tham chiếu (không lặp lại nội dung, chỉ dẫn chiếu):**
-> - [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md), [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md), [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — mô hình dữ liệu, Claim/Activation, Provisioning kỹ thuật.
+> - [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md), [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — mô hình dữ liệu, Claim/Activation, Provisioning kỹ thuật.
 > - [`05_FRONTEND_REFACTOR_SMARTHOME.md`](05_FRONTEND_REFACTOR_SMARTHOME.md) — Dashboard Admin/Operator.
 > - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) — 22 module Service, API, MQTT, và mục 18 — Event Sourcing/Feature Store/Recommendation Engine (AI-Ready).
 > - [`04_DATABASE_REFACTOR_SMARTHOME.md`](04_DATABASE_REFACTOR_SMARTHOME.md) — ~45 bảng nghiệp vụ + mục 7.12 — 17 bảng AI-Ready, Partition/Retention.
@@ -418,6 +418,8 @@ quadrantChart
 ---
 
 ## 10. NHỮNG PHẦN NÊN HOÀN THÀNH TRƯỚC KHI BẢO VỆ ĐỒ ÁN
+
+> **Phạm vi V2 chính thức nằm ở [`13_PRD_SMART_HOME.md`](13_PRD_SMART_HOME.md) §4 và §11.2.** PRD đã điều chỉnh 2 điểm so với bảng dưới: MQTT TLS lên **MUST**, gợi ý thói quen bằng thống kê lên **SHOULD**. Khi mâu thuẫn, PRD thắng.
 
 > Góc nhìn thực tế của CTO tư vấn: phạm vi V2 như liệt kê (Multi Home, Mobile, 2 Dashboard, RBAC, TLS, Provisioning, Pairing, OTA, Notification, Camera, Rule Engine, Logging, Monitoring, AI-Ready) là **phạm vi của 1 sản phẩm MVP thật, không phải phạm vi hợp lý cho 1 người trong 1 học kỳ**. Dưới đây là phân loại MoSCoW thực tế để buổi bảo vệ vừa **có demo chạy được thuyết phục**, vừa **thể hiện tư duy kiến trúc sản phẩm thật** (chính là điều hội đồng đánh giá cao nhất, không phải số lượng tính năng).
 

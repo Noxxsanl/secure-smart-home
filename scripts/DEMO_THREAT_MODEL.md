@@ -682,7 +682,7 @@ Terminal in tổng kết script extended:
 
 **Kiểm tra DB trực tiếp:**
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot
 ```
 ```sql
 -- Thống kê số lần mỗi loại event
@@ -712,7 +712,7 @@ Sau khi cả 2 script chạy xong, Gateway vẫn bị `blocked`. Reset để ch�
 
 **Cách 2 — SQL (nhanh hơn):**
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT -e "UPDATE devices SET status='active', fail_count=0 WHERE device_type='gateway';"
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot -e "UPDATE devices SET status='active', fail_count=0 WHERE device_type='gateway';"
 ```
 
 Sau khi reset, có thể chạy lại toàn bộ 11 scenario từ đầu bất kỳ lúc nào.
@@ -1715,7 +1715,7 @@ SELECT COUNT(*) FROM devices;
 ```powershell
 # Kết nối vào MySQL container
 docker exec -it managerdeviceiot-mysql-1 `
-    mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT
+    mysql -u secure_smart_home_app -p secure_smart_home_iot
 ```
 
 ```sql

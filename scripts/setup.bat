@@ -38,6 +38,17 @@ if errorlevel 1 (
 
 echo [OK] Docker Compose san sang.
 
+:: .env goc cho docker compose - mat khau MySQL ngau nhien, khong commit
+findstr /b /r /c:"MYSQL_PASSWORD=." .env >nul 2>&1
+if errorlevel 1 (
+    powershell -NoProfile -Command "$g={-join((48..57)+(65..90)+(97..122)|Get-Random -Count 32|%%{[char]$_})}; $l='MYSQL_ROOT_PASSWORD='+(&$g),'MYSQL_DATABASE=secure_smart_home_iot','MYSQL_USER=secure_smart_home_app','MYSQL_PASSWORD='+(&$g); [IO.File]::WriteAllLines((Join-Path (Get-Location) '.env'),$l)"
+    echo [OK] Da tao .env ^(mat khau MySQL ngau nhien^).
+    docker volume ls -q | findstr /e "_mysql_data" >nul 2>&1
+    if not errorlevel 1 echo [WARN] Volume mysql_data da ton tai voi mat khau cu - doi bang ALTER USER hoac "docker compose down -v" ^(mat du lieu^).
+) else (
+    echo [OK] .env ^(MySQL^) da ton tai.
+)
+
 :: Setup backend .env
 if not exist "backend\.env" (
     if exist "backend\.env.example" (

@@ -4,7 +4,6 @@
 > Kiến trúc Backend — từ **IoT Demo (Gateway → Device → Sensor → Dashboard)** sang **Commercial Smart Home Platform** vận hành hàng nghìn Smart Home.
 > Vai trò biên soạn: Principal Software Architect / Senior Backend Engineer / IoT Solution Architect / Cloud Architect / Technical Lead.
 > Tài liệu **chỉ thiết kế — không viết code, không sửa code**. Ràng buộc chặt với 3 tài liệu đã có trong repo — tài liệu này **không lặp lại toàn bộ chi tiết DB/RBAC/Provisioning** đã đặc tả ở đó mà **tham chiếu + bổ sung lớp Service/Module/API/Event Flow** còn thiếu:
-> - [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md) — schema DB đề xuất, RBAC 3 role, so sánh mô hình cũ/mới.
 > - [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) — Claim/Activation flow, tách namespace API Mobile/Dashboard, RBAC theo Home.
 > - [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — Gateway/Node/Camera provisioning, Key Hierarchy, ESP-NOW/Local-AP topology.
 > - [`05_FRONTEND_REFACTOR_SMARTHOME.md`](05_FRONTEND_REFACTOR_SMARTHOME.md) — IA/Dashboard Admin-Operator, để đối chiếu API nào Dashboard cần gọi.
@@ -155,7 +154,7 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 | `connectionLimit: 10` cứng | `config/db.ts:16` — không cấu hình theo tải thực tế, không dùng biến môi trường; ở quy mô nhiều instance backend, tổng connection tới MySQL có thể vượt giới hạn `max_connections` nếu scale ngang mà không kiểm soát. |
 | Rate limiter in-memory (`express-rate-limit`) | `app.ts:29-55` — đúng cho 1 instance duy nhất, **sai hoàn toàn khi chạy nhiều pod/container** (mỗi instance đếm rate limit riêng, kẻ tấn công có thể vượt giới hạn thật bằng cách round-robin qua nhiều instance) — cần chuyển sang Redis-backed store (`rate-limit-redis`) khi scale ngang. |
 | Cache "online device" in-memory (`Set<number>`) | `deviceStatus.ts:6` — cùng vấn đề: chỉ đúng khi có 1 instance backend; nhiều instance sẽ có nhiều cache lệch nhau, dashboard các client khác nhau thấy trạng thái khác nhau tuỳ instance nào phục vụ request. |
-| `sensor_data` giới hạn cứng 150 bản ghi/thiết bị | `data.routes.ts:91-97`, `mqttDataService.ts:115-121` — đủ cho biểu đồ realtime ngắn hạn, **không đủ cho báo cáo lịch sử dài hạn** (30/90 ngày) mà sản phẩm thương mại cần — cần kiến trúc rollup/partition riêng (đã phác thảo ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.4, sẽ cụ thể hoá thêm ở Phần 11/14 bên dưới cho phần Log). |
+| `sensor_data` giới hạn cứng 150 bản ghi/thiết bị | `data.routes.ts:91-97`, `mqttDataService.ts:115-121` — đủ cho biểu đồ realtime ngắn hạn, **không đủ cho báo cáo lịch sử dài hạn** (30/90 ngày) mà sản phẩm thương mại cần — cần kiến trúc rollup/partition riêng (chi tiết ở `04_DATABASE_REFACTOR_SMARTHOME.md` mục 10–11, phần Log ở Phần 14 bên dưới). |
 | Không có message queue ngoài MQTT | Không có Kafka/RabbitMQ/Redis Streams cho các luồng nghiệp vụ nội bộ (OTA rollout hàng loạt, gửi notification hàng loạt) — mọi xử lý hàng loạt hiện tại phải làm tuần tự trong 1 request HTTP, dễ timeout khi số lượng thiết bị lớn. |
 
 ### 1.10. Maintainability / Code Smell
@@ -206,7 +205,7 @@ flowchart TB
 
 ### 1.13. Domain Separation
 
-**Không có domain nào được phân tách.** `devices` là bảng duy nhất gánh cả 2 khái niệm hoàn toàn khác nhau về vòng đời và quyền sở hữu: **Gateway** (hạ tầng mạng, thuộc về 1 Smart Home) và **Sensor** (thiết bị đo lường, thuộc về 1 Room trong Smart Home) — được phân biệt chỉ bằng 1 cột ENUM `device_type`. Không có khái niệm `Customer`, `SmartHome`, `Room` ở bất kỳ đâu trong code — đúng như tài liệu `00_PROJECT_ANALYSIS_SMARTHOME.md` Phần 2 đã kết luận, đây là vấn đề gốc rễ cần giải quyết trước mọi vấn đề khác.
+**Không có domain nào được phân tách.** `devices` là bảng duy nhất gánh cả 2 khái niệm hoàn toàn khác nhau về vòng đời và quyền sở hữu: **Gateway** (hạ tầng mạng, thuộc về 1 Smart Home) và **Sensor** (thiết bị đo lường, thuộc về 1 Room trong Smart Home) — được phân biệt chỉ bằng 1 cột ENUM `device_type`. Không có khái niệm `Customer`, `SmartHome`, `Room` ở bất kỳ đâu trong code — đúng như `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 0.1 đã kết luận, đây là vấn đề gốc rễ cần giải quyết trước mọi vấn đề khác.
 
 ### 1.14. Đánh giá theo góc nhìn AI-Ready
 
@@ -357,7 +356,7 @@ flowchart TB
 
 ## 5. DOMAIN DESIGN
 
-> Chi tiết đầy đủ từng bảng/cột đã đặc tả ở `00_PROJECT_ANALYSIS_SMARTHOME.md` Phần 4 và `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 8 — phần này chỉ tóm tắt **ranh giới domain** để phân định phạm vi của 22 service ở Phần 6, tránh 2 service đọc/ghi chồng lấn cùng 1 bảng.
+> Chi tiết đầy đủ từng bảng/cột đã đặc tả ở `04_DATABASE_REFACTOR_SMARTHOME.md` Phần 7 và `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 8 — phần này chỉ tóm tắt **ranh giới domain** để phân định phạm vi của 22 service ở Phần 6, tránh 2 service đọc/ghi chồng lấn cùng 1 bảng.
 
 ```mermaid
 erDiagram
@@ -477,7 +476,7 @@ flowchart LR
 | **OPERATOR** | Dashboard | Không — chỉ truy cập tạm thời qua `operator_home_access` (có `reason`+`expires_at`) |
 | **USER** | Mobile | Có (Owner/Controller/Viewer/Guest trong từng Home — RBAC 2 tầng, xem `01_SMART_HOME_PRODUCT_ARCHITECTURE.md` Phần 7) |
 
-### 8.2. Permission Matrix (rút gọn theo module — chi tiết đầy đủ ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 5.2)
+### 8.2. Permission Matrix (rút gọn theo module — ma trận hợp nhất 2 tầng ở `09_SECURITY_ARCHITECTURE.md` mục 8.2)
 
 | Permission | ADMIN | OPERATOR (có access) | USER (Owner) |
 |---|:---:|:---:|:---:|
@@ -635,7 +634,7 @@ Mọi topic đều bắt đầu bằng `home_id` — đây là thay đổi quan 
 
 ## 11. OTA DESIGN
 
-### 11.1. Domain Model tóm tắt (chi tiết bảng ở `00_PROJECT_ANALYSIS_SMARTHOME.md` mục 4.2.20-21)
+### 11.1. Domain Model tóm tắt (chi tiết bảng ở `04_DATABASE_REFACTOR_SMARTHOME.md` mục 7.9)
 
 - **Firmware**: `id, device_type_id, version (semver), binary_url, checksum_sha256, release_notes, is_stable`.
 - **OTA Job**: 1 lần rollout, phạm vi (toàn hệ thống / theo home / theo gateway/device cụ thể), trạng thái tổng (`pending/running/completed/failed_partial`).

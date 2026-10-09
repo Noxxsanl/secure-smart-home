@@ -13,11 +13,11 @@
 -- Tên bảng/cột theo docs/04 §6–7 và CONTRACT_V2 §1.
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS iot_managerDeviceIoT
+CREATE DATABASE IF NOT EXISTS secure_smart_home_iot
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE iot_managerDeviceIoT;
+USE secure_smart_home_iot;
 
 -- --------------------------------------------------------
 -- Table: users

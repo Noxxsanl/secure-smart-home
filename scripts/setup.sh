@@ -39,6 +39,23 @@ else
 fi
 ok "Docker Compose sẵn sàng ($COMPOSE_CMD)."
 
+# .env gốc cho docker compose — mật khẩu MySQL ngẫu nhiên, không commit
+if ! grep -q '^MYSQL_PASSWORD=.' .env 2>/dev/null; then
+    gen_pw() { openssl rand -hex 16 2>/dev/null || tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; }
+    {
+        echo "MYSQL_ROOT_PASSWORD=$(gen_pw)"
+        echo "MYSQL_DATABASE=secure_smart_home_iot"
+        echo "MYSQL_USER=secure_smart_home_app"
+        echo "MYSQL_PASSWORD=$(gen_pw)"
+    } > .env
+    ok "Đã tạo .env (mật khẩu MySQL ngẫu nhiên)."
+    if docker volume ls -q | grep -q '_mysql_data$'; then
+        warn "Volume mysql_data đã tồn tại với mật khẩu cũ — đổi bằng ALTER USER hoặc 'docker compose down -v' (mất dữ liệu)."
+    fi
+else
+    ok ".env (MySQL) đã tồn tại."
+fi
+
 # Setup backend .env
 if [ ! -f "backend/.env" ]; then
     if [ -f "backend/.env.example" ]; then

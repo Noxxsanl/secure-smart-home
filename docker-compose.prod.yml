@@ -4,17 +4,18 @@ services:
     container_name: iot-mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: iot_managerDeviceIoT
-      MYSQL_USER: iot_managerIoT
-      MYSQL_PASSWORD: iot_managerIoTpassword
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Thiếu MYSQL_ROOT_PASSWORD trong .env (xem .env.example)}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-secure_smart_home_iot}
+      MYSQL_USER: ${MYSQL_USER:-secure_smart_home_app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Thiếu MYSQL_PASSWORD trong .env (xem .env.example)}
     volumes:
       - mysql_data:/var/lib/mysql
       - ./database/migrations:/docker-entrypoint-initdb.d
     networks:
       - iot-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "iot_managerIoT", "-piot_managerIoTpassword"]
+      # Đọc biến trong container — không để mật khẩu trong docker inspect
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysqladmin ping -h localhost -u \"$$MYSQL_USER\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -63,6 +64,11 @@ services:
       - ./backend/.env
     environment:
       - DB_HOST=mysql
+      - DB_PORT=3306
+      # Cùng nguồn với service mysql (.env gốc) — không phải khai báo mật khẩu 2 nơi
+      - DB_USER=${MYSQL_USER:-secure_smart_home_app}
+      - DB_PASS=${MYSQL_PASSWORD:?Thiếu MYSQL_PASSWORD trong .env (xem .env.example)}
+      - DB_NAME=${MYSQL_DATABASE:-secure_smart_home_iot}
       # Backend chỉ kết nối Broker 2 (gateway → backend layer) qua TLS
       - MQTT_HOST=mqtt-broker-2
       - MQTT_PORT=8883

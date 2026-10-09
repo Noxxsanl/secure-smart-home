@@ -11,7 +11,7 @@ const pool = mysql.createPool({
   port: Number(process.env.DB_PORT) || 3306,
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASS || "",
-  database: process.env.DB_NAME || "iot_managerDeviceIoT",
+  database: process.env.DB_NAME || "secure_smart_home_iot",
   waitForConnections: true,
   connectionLimit: 10, // phù hợp lượng request đồng thời dự kiến; tăng nếu thấy log pool exhaustion
   queueLimit: 0,       // 0 = hàng đợi không giới hạn; không bỏ request khi burst traffic

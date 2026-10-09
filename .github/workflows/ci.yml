@@ -79,7 +79,8 @@ jobs:
             -e '\.setInsecure[[:space:]]*\(' \
             -- ':!*.md' ':!firmware/ESP32-S3-Touch-LCD-7B' || true)
           if [ -n "$hits" ]; then
-            echo "::error::Không được tắt kiểm chứng TLS (rejectUnauthorized: false / setInsecure()):"
+            # Không viết nguyên văn mẫu bị chặn ở đây — git grep phía trên quét cả chính file này.
+            echo "::error::Không được tắt kiểm chứng TLS (rejectUnauthorized=false hoặc setInsecure):"
             echo "$hits"
             exit 1
           fi

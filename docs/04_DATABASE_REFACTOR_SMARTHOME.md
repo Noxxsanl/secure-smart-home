@@ -4,7 +4,6 @@
 > Thiết kế lại Database — từ **schema demo 5 bảng (users/devices/sensor_data/device_tokens/audit_log)** sang **Database chuẩn cho Commercial Smart Home Platform** hỗ trợ hàng nghìn khách hàng, hàng chục nghìn thiết bị.
 > Vai trò biên soạn: Principal Database Architect / Senior Solution Architect / Data Architect / Backend Architect.
 > Tài liệu **chỉ thiết kế — không viết SQL, không sửa code**. Ràng buộc chặt với các tài liệu đã có, không lặp lại mà **hệ thống hoá + bổ sung** phần Index/Partition/Retention/Naming còn thiếu:
-> - [`00_PROJECT_ANALYSIS_SMARTHOME.md`](00_PROJECT_ANALYSIS_SMARTHOME.md) — đề xuất schema sơ bộ Phần 4 (nguồn tham chiếu chính cho các bảng nghiệp vụ lõi).
 > - [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](01_SMART_HOME_PRODUCT_ARCHITECTURE.md) — Claim/Activation, `smart_home_members`, RBAC theo Home.
 > - [`02_SMART_HOME_WIFI_PROVISIONING.md`](02_SMART_HOME_WIFI_PROVISIONING.md) — `gateway_provision`, `wifi_profiles`, `device_pairing`, Key Hierarchy.
 > - [`03_BACKEND_REFACTOR_SMARTHOME.md`](03_BACKEND_REFACTOR_SMARTHOME.md) — ranh giới domain/service sở hữu từng nhóm bảng (Phần 5, 6).
@@ -206,7 +205,7 @@ So sánh trực tiếp với mô hình cũ:
 
 ## 5. ERD TỔNG THỂ
 
-> ERD được tách thành 4 sơ đồ theo domain để giữ khả năng đọc được (1 sơ đồ duy nhất ~45 bảng sẽ không thể đọc) — đúng nguyên tắc đã áp dụng ở `00_PROJECT_ANALYSIS_SMARTHOME.md`.
+> ERD được tách thành 4 sơ đồ theo domain để giữ khả năng đọc được (1 sơ đồ duy nhất ~45 bảng sẽ không thể đọc).
 
 ### 5.1. ERD — Identity, Customer & Smart Home (lõi nghiệp vụ)
 

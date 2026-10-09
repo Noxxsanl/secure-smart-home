@@ -208,9 +208,9 @@ PORT=5000
 
 DB_HOST=localhost
 DB_PORT=3308
-DB_USER=iot_managerIoT
-DB_PASS=iot_managerIoTpassword
-DB_NAME=iot_managerDeviceIoT
+DB_USER=secure_smart_home_app
+DB_PASS=change_me
+DB_NAME=secure_smart_home_iot
 
 JWT_SECRET=local_dev_secret_key_change_in_production_32chars
 
@@ -469,7 +469,7 @@ Kiem tra:
 Kiem tra truc tiep DB:
 
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot
 ```
 
 ```sql
@@ -549,7 +549,7 @@ http://localhost:3000/audit
 **Buoc 7 — Reset sau demo (PowerShell):**
 
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT -e "UPDATE devices SET status='active', fail_count=0 WHERE device_type='gateway';"
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot -e "UPDATE devices SET status='active', fail_count=0 WHERE device_type='gateway';"
 ```
 
 **Loi thuong gap:**
@@ -754,7 +754,7 @@ GATEWAY_AUTH_FAIL NOT_FOUND      (S8)
 
 Kiem tra DB:
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT -e "SELECT event_type, COUNT(*) FROM audit_log GROUP BY event_type ORDER BY COUNT(*) DESC;"
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot -e "SELECT event_type, COUNT(*) FROM audit_log GROUP BY event_type ORDER BY COUNT(*) DESC;"
 ```
 
 ---
@@ -788,7 +788,7 @@ docker compose logs -f backend
 ### 12.3 Xem DB
 
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot
 ```
 
 ```sql
@@ -819,7 +819,7 @@ active
 ### 13.2 Reset bang SQL
 
 ```powershell
-docker exec -it iot-mysql mysql -u iot_managerIoT -piot_managerIoTpassword iot_managerDeviceIoT
+docker exec -it iot-mysql mysql -u secure_smart_home_app -p secure_smart_home_iot
 ```
 
 ```sql
