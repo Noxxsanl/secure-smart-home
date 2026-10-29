@@ -13,7 +13,7 @@ export type TelemetryRange = "24h" | "7d";
 /**
  * Một dòng `devices` đã join home/room/gateway (xem DEVICE_SELECT_SQL). `device_type` vẫn
  * là 'sensor' | 'gateway' (danh tính node cho HMAC); loại chức năng nằm ở `category`.
- * TINYINT đọc ra là 0/1 — dùng toBool() khi map sang DTO.
+ * BOOLEAN pg đọc ra là true/false — dùng toBool() khi map sang DTO.
  */
 export interface DeviceRow {
   id: number;
@@ -32,13 +32,13 @@ export interface DeviceRow {
   room_id: number | null;
   gateway_device_id: number | null;
   node_uid: string | null;
-  power_state: number | null;
+  power_state: boolean | null;
   firmware_version: string | null;
   rssi: number | null;
   wifi_ssid: string | null;
   provision_status: ProvisionStatus;
-  is_simulated: number;
-  sim_online: number;
+  is_simulated: boolean;
+  sim_online: boolean;
   // ── cột join ──
   home_name: string | null;
   home_status: HomeStatus | null;

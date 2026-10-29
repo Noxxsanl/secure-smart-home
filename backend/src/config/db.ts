@@ -1,31 +1,35 @@
-import mysql from "mysql2/promise";
+import { Pool, types } from "pg";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// timezone "+00:00" ép tất cả giá trị Date được lưu/đọc theo UTC,
-// tránh lỗi ngầm khi timezone của OS server khác timezone của MySQL.
+// pg trả COUNT(*) và BIGINT (INT8, oid 20) dạng chuỗi vì có thể vượt 2^53. Id/đếm của đồ án
+// luôn nhỏ hơn nhiều, nên ép về number để DTO và phép so sánh `===` không bị bất ngờ.
+types.setTypeParser(20, (value) => Number(value));
+// Cột DATE (oid 1082) mặc định bị pg đổi thành Date theo múi giờ của process → dễ lệch ngày.
+// Giữ nguyên chuỗi 'YYYY-MM-DD' đúng như giá trị lưu trong DB.
+types.setTypeParser(1082, (value) => value);
+// NUMERIC (oid 1700) cố ý giữ là chuỗi (không mất độ chính xác); toNumberOrNull() ở lib/db.ts xử lý.
+
+// `options: -c TimeZone=UTC` ép MỌI connection mới của pool chạy session UTC ngay từ lúc handshake.
+// NOW(), CURRENT_TIMESTAMP, EXTRACT(EPOCH …) đều theo múi giờ SESSION; nếu server PostgreSQL
+// không chạy UTC thì `expires_at > NOW()` (so Date ghi từ Node với NOW()) sẽ lệch nhiều giờ.
+// Cột TIMESTAMPTZ lưu tuyệt đối, nên Date của Node đi vào/ra luôn đúng thời điểm.
 // Frontend tự chuyển đổi sang giờ địa phương khi hiển thị.
-const pool = mysql.createPool({
+const pool = new Pool({
   host: process.env.DB_HOST || "localhost",
-  port: Number(process.env.DB_PORT) || 3306,
-  user: process.env.DB_USER || "root",
+  port: Number(process.env.DB_PORT) || 5432,
+  user: process.env.DB_USER, // bắt buộc (config/env.ts) — không fallback về superuser `postgres` (least privilege)
   password: process.env.DB_PASS || "",
   database: process.env.DB_NAME || "secure_smart_home_iot",
-  waitForConnections: true,
-  connectionLimit: 10, // phù hợp lượng request đồng thời dự kiến; tăng nếu thấy log pool exhaustion
-  queueLimit: 0,       // 0 = hàng đợi không giới hạn; không bỏ request khi burst traffic
-  timezone: "+00:00",
+  max: 10, // phù hợp lượng request đồng thời dự kiến; tăng nếu thấy log pool exhaustion
+  options: "-c TimeZone=UTC",
 });
 
-// Tuỳ chọn `timezone` ở trên chỉ ảnh hưởng cách mysql2 chuyển Date <-> chuỗi; còn NOW(),
-// CURRENT_TIMESTAMP, UNIX_TIMESTAMP() của MySQL dùng múi giờ của SESSION. Nếu server MySQL
-// không chạy UTC thì `expires_at > NOW()` (so Date ghi từ Node với NOW()) sẽ lệch nhiều giờ.
-// Ép mỗi connection mới về UTC để mọi so sánh thời gian trong SQL khớp với giá trị Date của Node.
-pool.pool.on("connection", (connection) => {
-  connection.query("SET time_zone = '+00:00'", (err) => {
-    if (err) console.error("[db] failed to set session time_zone to UTC:", err.message);
-  });
+// Lỗi trên connection đang rảnh (DB restart, mất mạng) được pg phát ra qua sự kiện `error` của pool;
+// không có handler thì Node coi là uncaught exception và sập cả backend. Ghi log, pool tự tạo connection mới.
+pool.on("error", (err) => {
+  console.error("[db] idle client error:", err.message);
 });
 
 export default pool;

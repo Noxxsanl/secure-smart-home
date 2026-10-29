@@ -23,7 +23,7 @@ final _zoneSuffix = RegExp(r'(Z|[+-]\d{2}:?\d{2})$');
 final _dateTimePrefix = RegExp(r'^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}');
 
 /// Parses an API timestamp. Values without a zone designator are UTC
-/// (the backend's MySQL pool runs in UTC).
+/// (the backend's PostgreSQL session runs in UTC).
 DateTime? parseApiDate(Object? value) {
   if (value is! String) return null;
   var text = value.trim();
@@ -51,7 +51,7 @@ extension JsonReader on Map<String, dynamic> {
     return null;
   }
 
-  /// Accepts numbers and numeric strings (mysql2 returns DECIMAL as string).
+  /// Accepts numbers and numeric strings (pg returns NUMERIC/DECIMAL as string).
   double? readDoubleOrNull(String key) {
     final value = this[key];
     if (value is num) return value.toDouble();

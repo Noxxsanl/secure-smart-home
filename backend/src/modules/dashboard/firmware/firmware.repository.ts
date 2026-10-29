@@ -10,7 +10,7 @@ interface FirmwareDbRow {
   size_bytes: number;
   checksum_sha256: string;
   release_notes: string | null;
-  is_stable: number;
+  is_stable: boolean;
   created_at: Date;
   uploaded_by_username: string | null;
 }
@@ -71,12 +71,13 @@ export async function insertFirmware(input: {
   const result = await runSql(
     `INSERT INTO firmware
        (target_type, version, file_name, size_bytes, checksum_sha256, storage_path, release_notes, is_stable, uploaded_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [input.type, input.version, input.fileName, input.sizeBytes, input.checksum, input.storagePath, input.releaseNotes, input.stable ? 1 : 0, input.uploadedBy]
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+     RETURNING id`,
+    [input.type, input.version, input.fileName, input.sizeBytes, input.checksum, input.storagePath, input.releaseNotes, input.stable, input.uploadedBy]
   );
   return result.insertId;
 }
 
 export async function setFirmwareStable(id: number, stable: boolean): Promise<void> {
-  await runSql("UPDATE firmware SET is_stable = ? WHERE id = ?", [stable ? 1 : 0, id]);
+  await runSql("UPDATE firmware SET is_stable = ? WHERE id = ?", [stable, id]);
 }

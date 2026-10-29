@@ -95,8 +95,8 @@ export async function listRoomSummaries(
        LEFT JOIN (
          SELECT d.room_id,
                 COUNT(*) AS device_count,
-                SUM(d.last_seen IS NOT NULL AND TIMESTAMPDIFF(SECOND, d.last_seen, NOW()) < ${ONLINE_WINDOW_SECONDS}) AS online_count,
-                SUM(d.category = 'relay' AND d.power_state = 1) AS on_count
+                COUNT(*) FILTER (WHERE d.last_seen IS NOT NULL AND d.last_seen > NOW() - make_interval(secs => ${ONLINE_WINDOW_SECONDS})) AS online_count,
+                COUNT(*) FILTER (WHERE d.category = 'relay' AND d.power_state = TRUE) AS on_count
            FROM devices d
           WHERE d.home_id = ? AND d.device_type <> 'gateway' ${deviceFilter}
           GROUP BY d.room_id
@@ -169,7 +169,8 @@ export async function insertHome(
 ): Promise<number> {
   const result = await runSql(
     `INSERT INTO smart_homes (name, package_code, address, expected_owner_name, status, created_by)
-     VALUES (?, ?, ?, ?, 'unclaimed', ?)`,
+     VALUES (?, ?, ?, ?, 'unclaimed', ?)
+     RETURNING id`,
     [input.name, input.packageCode, input.address, input.expectedOwnerName, input.createdBy],
     db
   );
@@ -181,7 +182,7 @@ export async function insertRoom(
   input: { homeId: number; name: string; roomType: string; sortOrder: number }
 ): Promise<number> {
   const result = await runSql(
-    "INSERT INTO rooms (home_id, name, room_type, sort_order) VALUES (?, ?, ?, ?)",
+    "INSERT INTO rooms (home_id, name, room_type, sort_order) VALUES (?, ?, ?, ?) RETURNING id",
     [input.homeId, input.name, input.roomType, input.sortOrder],
     db
   );
@@ -199,7 +200,7 @@ export interface NewDeviceRecord {
   roomId: number | null;
   gatewayDeviceId: number | null;
   nodeUid: string | null;
-  powerState: 0 | null;
+  powerState: false | null;
   firmwareVersion: string;
   location: string | null;
   simulated: boolean;
@@ -213,7 +214,8 @@ export async function insertDevice(db: Queryable, device: NewDeviceRecord): Prom
        (device_id, device_name, device_type, secret_key, status, location, fail_count, created_by,
         home_id, room_id, gateway_device_id, node_uid, category, power_state, firmware_version,
         provision_status, is_simulated, sim_online, last_seen)
-     VALUES (?, ?, ?, ?, 'active', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+     VALUES (?, ?, ?, ?, 'active', ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
+     RETURNING id`,
     [
       device.uid,
       device.name,
@@ -229,7 +231,7 @@ export async function insertDevice(db: Queryable, device: NewDeviceRecord): Prom
       device.powerState,
       device.firmwareVersion,
       device.simulated ? "provisioned" : "pending",
-      device.simulated ? 1 : 0,
+      device.simulated,
       device.simulated ? new Date() : null,
     ],
     db

@@ -62,7 +62,7 @@ const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const LOGIN_WINDOW = 15 * MINUTE;
 
-// Legacy: /api/auth/login – 10 request / 15 phút (giữ nguyên cho scripts/attack_demo*.sh)
+// Legacy: /api/auth/login – 10 request / 15 phút (giữ nguyên cho tests/security/attack_demo*.sh)
 const authLimiter = makeLimiter(LOGIN_WINDOW, 10, "Too many login attempts, try again later");
 // Legacy: /api/device/data – 60 request / phút (firmware); các route khác có hạn mức riêng bên dưới
 const deviceDataLimiter = makeLimiter(MINUTE, 60, "Device data rate limit exceeded");
@@ -125,7 +125,7 @@ app.use((req: Request, res: Response) => {
 
 // Error middleware: HttpError → { error, detail?, …extra } đúng quy ước skill backend §7;
 // lỗi body-parser (JSON hỏng, body quá lớn) → 400/413; còn lại là lỗi không lường trước → 500 và ghi
-// audit_log category `error`. Phản hồi 500 không lộ chi tiết nội bộ (message của mysql2 có thể chứa SQL/giá trị).
+// audit_log category `error`. Phản hồi 500 không lộ chi tiết nội bộ (message của driver pg có thể chứa SQL/giá trị).
 app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   if (res.headersSent) {
     next(err);

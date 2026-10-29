@@ -5,7 +5,7 @@ import {
 import type { NavSection } from "@smarthome/shared/app-shell/types";
 import { logNavChildren } from "@smarthome/console/logs/config";
 
-// Sidebar ADMIN — docs/05 §5.2.
+// Sidebar ADMIN — docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md §5.2.
 export const NAV_SECTIONS: NavSection[] = [
   {
     section: "Tổng quan",

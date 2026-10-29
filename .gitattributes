@@ -1,0 +1,3 @@
+# Script shell chạy trong container Linux (vd. database/init/00_init.sh) phải luôn là LF:
+# CRLF làm hỏng shebang ("bash\r: No such file") khi checkout trên Windows.
+*.sh text eol=lf

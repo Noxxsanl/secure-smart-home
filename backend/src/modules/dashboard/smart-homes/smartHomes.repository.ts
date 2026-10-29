@@ -87,7 +87,9 @@ export async function listHomeRows(filter: HomeListFilter, db: Queryable = pool)
   }
   if (filter.q !== undefined) {
     const pattern = likePattern(filter.q);
-    clauses.push("(h.name LIKE ? OR h.address LIKE ? OR oc.full_name LIKE ? OR g.device_id LIKE ?)");
+    clauses.push(
+      "(unaccent(h.name) ILIKE unaccent(?) OR unaccent(h.address) ILIKE unaccent(?) OR unaccent(oc.full_name) ILIKE unaccent(?) OR unaccent(g.device_id) ILIKE unaccent(?))"
+    );
     params.push(pattern, pattern, pattern, pattern);
   }
   if (filter.memberUserId !== undefined) {
@@ -153,7 +155,7 @@ export async function listMembers(homeId: number): Promise<ConsoleMember[]> {
        LEFT JOIN users u ON u.id = m.user_id
        LEFT JOIN customers c ON c.user_id = m.user_id
       WHERE m.home_id = ?
-      ORDER BY FIELD(m.member_role, 'OWNER', 'CONTROLLER', 'VIEWER', 'GUEST'), m.id`,
+      ORDER BY CASE m.member_role WHEN 'OWNER' THEN 1 WHEN 'CONTROLLER' THEN 2 WHEN 'VIEWER' THEN 3 ELSE 4 END, m.id`,
     [homeId]
   );
   return rows.map((row): ConsoleMember => {

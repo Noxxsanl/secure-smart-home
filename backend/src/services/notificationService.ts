@@ -1,4 +1,4 @@
-import pool from "../config/db";
+import { runSql } from "../lib/db";
 
 interface CreateNotificationParams {
   title: string;
@@ -21,7 +21,7 @@ export async function createNotification(params: CreateNotificationParams): Prom
     related_device_id = null,
   } = params;
   try {
-    await pool.execute(
+    await runSql(
       `INSERT INTO notifications
          (title, message, type, actor_id, actor_username, actor_role, target_role, related_device_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -1,0 +1,9 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Secure Smart Home IoT API",
+    "version": "0.0.0",
+    "description": "TẠM — file này sẽ được sinh tự động từ backend; hiện chưa có công cụ sinh. Danh sách API hiện có: docs/API_DESIGN.md."
+  },
+  "paths": {}
+}

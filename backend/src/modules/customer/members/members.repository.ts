@@ -26,6 +26,8 @@ const MEMBER_LIST_SQL = `
     LEFT JOIN users u ON u.id = m.user_id
     LEFT JOIN customers c ON c.user_id = m.user_id`;
 
+// Email so bằng LOWER(col) = LOWER(?) vì PostgreSQL phân biệt hoa/thường (khớp unique index LOWER(email)).
+
 /** Thành viên hiệu lực + lời mời còn hạn của nhà (OWNER đứng đầu). */
 export async function listHomeMembers(homeId: number, onlyMemberId?: number, db?: Queryable): Promise<MemberListRow[]> {
   const params: SqlParam[] = [homeId];
@@ -78,7 +80,7 @@ export async function filterHomeDeviceIds(homeId: number, ids: readonly number[]
 }
 
 export async function findUserIdByEmail(email: string): Promise<number | null> {
-  const row = await queryOne<{ id: number }>("SELECT id FROM users WHERE email = ? AND role = 'user'", [email]);
+  const row = await queryOne<{ id: number }>("SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND role = 'user'", [email]);
   return row?.id ?? null;
 }
 
@@ -89,8 +91,8 @@ export async function emailAlreadyInHome(homeId: number, email: string): Promise
        FROM smart_home_members m
        LEFT JOIN users u ON u.id = m.user_id
       WHERE m.home_id = ?
-        AND ((m.user_id IS NOT NULL AND u.email = ? AND (m.expires_at IS NULL OR m.expires_at > NOW()))
-          OR (m.user_id IS NULL AND m.invite_email = ? AND m.invite_expires_at > NOW()))
+        AND ((m.user_id IS NOT NULL AND LOWER(u.email) = LOWER(?) AND (m.expires_at IS NULL OR m.expires_at > NOW()))
+          OR (m.user_id IS NULL AND LOWER(m.invite_email) = LOWER(?) AND m.invite_expires_at > NOW()))
       LIMIT 1`,
     [homeId, email, email]
   );
@@ -120,7 +122,8 @@ export async function insertInvite(db: Queryable, invite: NewInvite): Promise<nu
   const result = await runSql(
     `INSERT INTO smart_home_members
        (home_id, user_id, member_role, display_name, invite_email, invite_expires_at, invited_by, expires_at)
-     VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
+     RETURNING id`,
     [invite.homeId, invite.role, invite.name, invite.email, invite.inviteExpiresAt, invite.invitedBy, invite.expiresAt],
     db
   );
@@ -169,7 +172,7 @@ export async function listInvitationsForEmail(email: string): Promise<Invitation
        JOIN smart_homes h ON h.id = m.home_id
        LEFT JOIN users iu ON iu.id = m.invited_by
        LEFT JOIN customers ic ON ic.user_id = m.invited_by
-      WHERE m.user_id IS NULL AND m.invite_email = ? AND m.invite_expires_at > NOW()
+      WHERE m.user_id IS NULL AND LOWER(m.invite_email) = LOWER(?) AND m.invite_expires_at > NOW()
         AND (m.expires_at IS NULL OR m.expires_at > NOW())
       ORDER BY m.created_at DESC, m.id DESC`,
     [email]
@@ -187,7 +190,7 @@ export async function lockInviteForEmail(db: Queryable, inviteId: number, email:
   return queryOne<PendingInviteRow>(
     `SELECT id, home_id, member_role
        FROM smart_home_members
-      WHERE id = ? AND user_id IS NULL AND invite_email = ? AND invite_expires_at > NOW()
+      WHERE id = ? AND user_id IS NULL AND LOWER(invite_email) = LOWER(?) AND invite_expires_at > NOW()
         AND (expires_at IS NULL OR expires_at > NOW())
       FOR UPDATE`,
     [inviteId, email],
@@ -216,7 +219,7 @@ export async function hasEffectiveMembership(db: Queryable, homeId: number, user
 
 export async function deleteInviteForEmail(inviteId: number, email: string): Promise<{ home_id: number } | null> {
   const row = await queryOne<{ home_id: number }>(
-    "SELECT home_id FROM smart_home_members WHERE id = ? AND user_id IS NULL AND invite_email = ?",
+    "SELECT home_id FROM smart_home_members WHERE id = ? AND user_id IS NULL AND LOWER(invite_email) = LOWER(?)",
     [inviteId, email]
   );
   if (!row) return null;

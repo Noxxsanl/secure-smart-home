@@ -5,7 +5,7 @@ import '../../../../core/widgets/settings_tile.dart';
 
 /// About (moved from the old bottom-nav tab into Profile). The gateway
 /// Bluetooth/OTA card was removed: firmware updates are an operator task
-/// (docs/07 §1.5), not a customer feature.
+/// (docs/architecture/MOBILE_APP_ARCHITECTURE.md §1.5), not a customer feature.
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 

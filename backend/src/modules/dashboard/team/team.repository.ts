@@ -35,12 +35,12 @@ export async function getStaff(id: number): Promise<StaffAccount | null> {
 }
 
 export async function staffUsernameExists(username: string): Promise<boolean> {
-  const row = await queryOne<{ id: number }>("SELECT id FROM users WHERE username = ?", [username]);
+  const row = await queryOne<{ id: number }>("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", [username]);
   return row !== null;
 }
 
 export async function insertStaff(input: { username: string; passwordHash: string; role: "operator" }): Promise<number> {
-  const result = await runSql("INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, 'active')", [
+  const result = await runSql("INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, 'active') RETURNING id", [
     input.username,
     input.passwordHash,
     input.role,

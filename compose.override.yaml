@@ -1,0 +1,5 @@
+# Dev — Docker Compose tự nạp file này cùng compose.yaml khi chạy `docker compose up`
+# (không nạp khi dùng `-f compose.prod.yaml`).
+# TẠM: compose.yaml hiện vẫn chứa toàn bộ cấu hình dev. Khi tách cấu hình nền / dev, chuyển phần
+# chỉ dành cho dev (bind mount source, cổng 127.0.0.1:5433, simulator…) sang đây.
+services: {}

@@ -7,7 +7,7 @@
 //   assignOwner          → activation_logs + audit ACTIVATION_SUCCESS (claim) | OWNER_ASSIGNED (operator)
 import { env } from "../../config/env";
 import { buildQrPayload, formatActivationCode, generateActivationCode, hashActivationCode } from "../../lib/activationCode";
-import { isDuplicateKeyError, queryOne, runSql, toIsoRequired, type Queryable } from "../../lib/db";
+import { queryOne, runSql, toIsoRequired, type Queryable } from "../../lib/db";
 import { HttpError, notFound } from "../../lib/http";
 import { getHomeRow } from "./homes.repository";
 import type { ActivationCodeIssued, HomeRow } from "./homes.types";
@@ -62,21 +62,23 @@ export async function issueActivationCode(
 
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     const code12 = generateActivationCode();
-    try {
-      await runSql(
-        "INSERT INTO activation_tokens (home_id, code_hash, expires_at, created_by) VALUES (?, ?, ?, ?)",
-        [input.homeId, hashActivationCode(code12), expiresAt, input.createdBy],
-        conn
-      );
+    // ON CONFLICT DO NOTHING thay vì bắt lỗi 23505: trong PostgreSQL một câu lệnh lỗi làm HỎNG cả transaction
+    // (mọi lệnh sau đó báo "current transaction is aborted"), nên không thể thử lại sau khi trùng khoá.
+    // Đích chỉ định = uq_activation_tokens_code_hash, để lỗi khác (vd FK home_id) không bị nuốt.
+    const inserted = await runSql(
+      `INSERT INTO activation_tokens (home_id, code_hash, expires_at, created_by) VALUES (?, ?, ?, ?)
+       ON CONFLICT (code_hash) DO NOTHING`,
+      [input.homeId, hashActivationCode(code12), expiresAt, input.createdBy],
+      conn
+    );
+    if (inserted.affectedRows > 0) {
       return {
         code: formatActivationCode(code12),
         qr_payload: buildQrPayload(code12),
         expires_at: toIsoRequired(expiresAt),
       };
-    } catch (err) {
-      // Trùng code_hash (xác suất ~2^-60) → sinh mã khác; lỗi khác thì ném tiếp
-      if (!isDuplicateKeyError(err, "uq_activation_tokens_code_hash")) throw err;
     }
+    // Trùng code_hash (xác suất ~2^-60) → sinh mã khác
   }
   throw new Error("issueActivationCode: could not generate a unique code");
 }

@@ -9,7 +9,7 @@ import '../../../members/presentation/providers/members_providers.dart';
 import '../providers/homes_providers.dart';
 
 /// Shown instead of the shell when the user has no Smart Home yet
-/// (docs/07 §13): claim a kit or answer an invitation.
+/// (docs/architecture/MOBILE_APP_ARCHITECTURE.md §13): claim a kit or answer an invitation.
 class OnboardingPage extends ConsumerWidget {
   const OnboardingPage({super.key});
 

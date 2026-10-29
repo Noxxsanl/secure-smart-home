@@ -20,7 +20,7 @@ class RealtimeMessage {
 }
 
 /// A source of realtime events: the backend WebSocket, or the in-memory mock.
-/// The app never talks MQTT directly (docs/07 §11, invariant 7).
+/// The app never talks MQTT directly (docs/architecture/MOBILE_APP_ARCHITECTURE.md §11, invariant 7).
 abstract class RealtimeSource {
   Stream<RealtimeMessage> get messages;
   Stream<RealtimeStatus> get statuses;
@@ -31,7 +31,7 @@ abstract class RealtimeSource {
   Future<void> dispose();
 }
 
-/// Reconnect delay: 1 s, 2 s, 4 s, 8 s, 16 s, then 30 s (docs/07 §11.3).
+/// Reconnect delay: 1 s, 2 s, 4 s, 8 s, 16 s, then 30 s (docs/architecture/MOBILE_APP_ARCHITECTURE.md §11.3).
 Duration backoffDelay(int attempt) =>
     Duration(seconds: math.min(30, 1 << math.min(attempt < 0 ? 0 : attempt, 5)));
 

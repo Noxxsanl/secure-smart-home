@@ -73,7 +73,7 @@ export async function insertGrant(
   db: Queryable = pool
 ): Promise<number> {
   const result = await runSql(
-    "INSERT INTO operator_home_access (operator_user_id, home_id, reason, granted_by, expires_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO operator_home_access (operator_user_id, home_id, reason, granted_by, expires_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
     [input.operatorId, input.homeId, input.reason, input.grantedBy, input.expiresAt],
     db
   );

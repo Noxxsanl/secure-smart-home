@@ -42,7 +42,7 @@ final realtimeSourceProvider = Provider<RealtimeSource>((ref) {
 });
 
 /// Keeps the app in sync (FR-5.6): applies WebSocket events to the providers
-/// and, while the socket is down, polls REST every 15 s (docs/07 §11.3).
+/// and, while the socket is down, polls REST every 15 s (docs/architecture/MOBILE_APP_ARCHITECTURE.md §11.3).
 class RealtimeController extends Notifier<RealtimeStatus> {
   static const pollInterval = Duration(seconds: 15);
 

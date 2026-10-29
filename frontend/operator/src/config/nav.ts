@@ -5,7 +5,7 @@ import {
 import type { NavSection } from "@smarthome/shared/app-shell/types";
 import { logNavChildren } from "@smarthome/console/logs/config";
 
-// Sidebar OPERATOR — docs/05 §5.3: không có "Quản trị hệ thống" (Team, Operator
+// Sidebar OPERATOR — docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md §5.3: không có "Quản trị hệ thống" (Team, Operator
 // Access, Settings) và chỉ 5 loại log vận hành.
 export const NAV_SECTIONS: NavSection[] = [
   {

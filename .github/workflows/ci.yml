@@ -23,6 +23,7 @@ jobs:
       pull-requests: read
     outputs:
       backend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.backend == 'true' }}
+      database: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.database == 'true' }}
       frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
       mobile: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.mobile == 'true' }}
       firmware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.firmware == 'true' }}
@@ -34,7 +35,11 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
-              - 'database/**'
+              - 'infra/postgres/**'
+              - '.github/workflows/ci.yml'
+            database:
+              - 'infra/postgres/**'
+              - 'backend/src/config/migrate.ts'
               - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
@@ -45,8 +50,7 @@ jobs:
             firmware:
               - 'firmware/gateway-node/**'
               - 'firmware/sensor-node/**'
-              - 'firmware/sensor-node-2/**'
-              - 'scripts/gen_mqtt_certs.sh'
+              - 'infra/pki/gen_mqtt_certs.sh'
               - '.github/workflows/ci.yml'
 
   # Bất biến 3 (CLAUDE.md): không commit credential/khoá, không tắt kiểm chứng TLS.
@@ -63,9 +67,9 @@ jobs:
             -e '(^|/)mqtt_ca_cert\.h$' \
             -e '(^|/)\.env$' \
             -e '(^|/)\.env(\..+)?\.local$' \
-            -e '^mosquitto/certs/' \
+            -e '^infra/mosquitto/certs/' \
             -e '\.(key|pem|p12|pfx)$' \
-            | grep -v '^mosquitto/certs/README\.md$' || true)
+            | grep -v '^infra/mosquitto/certs/\.gitkeep$' || true)
           if [ -n "$bad" ]; then
             echo "::error::File bí mật bị commit — xoá khỏi git (git rm --cached) và đổi secret:"
             echo "$bad"
@@ -77,7 +81,7 @@ jobs:
           hits=$(git grep -nE \
             -e 'rejectUnauthorized[[:space:]]*:[[:space:]]*false' \
             -e '\.setInsecure[[:space:]]*\(' \
-            -- ':!*.md' ':!firmware/ESP32-S3-Touch-LCD-7B' || true)
+            -- ':!*.md' || true)
           if [ -n "$hits" ]; then
             # Không viết nguyên văn mẫu bị chặn ở đây — git grep phía trên quét cả chính file này.
             echo "::error::Không được tắt kiểm chứng TLS (rejectUnauthorized=false hoặc setInsecure):"
@@ -102,6 +106,46 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+
+  # Bắt lỗi cú pháp/thứ tự FK của schema PostgreSQL sớm (backend chỉ chạy tsc, không chạm DB).
+  # PostgreSQL ở đây là service container dùng-một-lần; mật khẩu chỉ có tác dụng trong job này.
+  database:
+    name: Database (schema PostgreSQL)
+    needs: changes
+    if: needs.changes.outputs.database == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci_throwaway
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: ci_throwaway
+      PGDATABASE: ci
+    steps:
+      - uses: actions/checkout@v7
+      - name: Áp dụng 001_schema.sql
+        run: psql -v ON_ERROR_STOP=1 -f infra/postgres/migrations/001_schema.sql
+      # Idempotent: chạy lần hai không được lỗi (backend và setup có thể nạp lại file này).
+      - name: Áp dụng lại 001_schema.sql (idempotent)
+        run: psql -v ON_ERROR_STOP=1 -q -f infra/postgres/migrations/001_schema.sql
+      - name: Kiểm tra số bảng và trigger
+        run: |
+          tables=$(psql -At -c "SELECT count(*) FROM pg_tables WHERE schemaname='public'")
+          triggers=$(psql -At -c "SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal")
+          echo "tables=$tables triggers=$triggers"
+          [ "$tables" -ge 24 ] && [ "$triggers" -ge 4 ]
 
   frontend:
     name: Frontend (typecheck, lint, build)
@@ -162,8 +206,6 @@ jobs:
             config: config_gw
           - node: sensor-node
             config: config_1
-          - node: sensor-node-2
-            config: config_2
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -185,6 +227,6 @@ jobs:
       # mqtt_ca_cert.h cũng bị gitignore — sinh CA dùng-một-lần trên runner (không upload đi đâu).
       - name: Sinh CA tạm cho gateway
         if: matrix.node == 'gateway-node'
-        run: bash scripts/gen_mqtt_certs.sh
+        run: bash infra/pki/gen_mqtt_certs.sh
 
       - run: pio run -d firmware/${{ matrix.node }}

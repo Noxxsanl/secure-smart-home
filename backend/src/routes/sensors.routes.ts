@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import pool from "../config/db";
+import { queryRows } from "../lib/db";
 import { verifyGatewayHMAC } from "../services/hmacService";
 
 const router = Router();
@@ -25,7 +25,7 @@ router.get("/", async (req: Request, res: Response): Promise<void> => {
   // (devices.gateway_device_id) cộng các sensor cũ chưa gán gateway (gateway_device_id IS NULL — phần
   // cứng đăng ký qua /api/devices/register, hành vi cũ giữ nguyên). Nếu không lọc, gateway của nhà A
   // lấy được secret của mọi thiết bị nhà B.
-  const [rows] = await pool.execute<any[]>(
+  const rows = await queryRows<{ device_id: string; secret_key: string }>(
     `SELECT device_id, secret_key FROM devices
      WHERE device_type = 'sensor' AND status = 'active'
        AND (gateway_device_id IS NULL OR gateway_device_id = ?)`,

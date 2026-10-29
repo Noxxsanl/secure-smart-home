@@ -10,7 +10,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docker.com)
 [![PlatformIO](https://img.shields.io/badge/PlatformIO-ESP32-orange?logo=platformio)](https://platformio.org)
-[![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql)](https://mysql.com)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 
 </div>
 
@@ -107,7 +107,7 @@ Codebase hiện tại đã có phần nền tảng (Gateway, Server, Dashboard, 
 │  [Mosquitto Broker 1 :1883]  ─────── Sensor ↔ Gateway only          │
 │  [Mosquitto Broker 2 :8883]  ─────── Gateway → Backend, TLS only    │
 │                                           │                           │
-│  [Nginx :80] ──/api/*──▶ [Backend Express :5000] ──▶ [MySQL :3306]  │
+│  [Nginx :80] ──/api/*──▶ [Backend Express :5000] ──▶ [PostgreSQL :5432] │
 │              ──/*──────▶ [Next.js Frontend :3000]                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -133,8 +133,8 @@ HMAC#1 (sensor)      + forwards enc. payload       HMAC#2 (gw)       HMAC#2 + HM
 | Layer | Technology |
 |-------|------------|
 | **Frontend** | Next.js 16, React 19, TailwindCSS v4, Recharts, SWR |
-| **Backend** | Node.js 20, Express 5, TypeScript, mysql2, mqtt.js |
-| **Database** | MySQL 8.0 |
+| **Backend** | Node.js 20, Express 5, TypeScript, pg (hand-written SQL, no ORM), mqtt.js |
+| **Database** | PostgreSQL 16 |
 | **Message Broker** | Eclipse Mosquitto 2 (×2 independent instances) |
 | **Security** | HMAC-SHA256 (mbedTLS on firmware, Node.js crypto on backend), bcrypt (cost 12), JWT HttpOnly cookie, Helmet, express-rate-limit |
 | **Firmware** | C++ / PlatformIO, ESP32 DOIT DevKit V1, DHT22 |
@@ -147,7 +147,7 @@ HMAC#1 (sensor)      + forwards enc. payload       HMAC#2 (gw)       HMAC#2 + HM
 ### Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop) ≥ 24.x (running)
-- Free ports: `80`, `3000`, `5000`, `1883`, `8883`, `3308`
+- Free ports: `80`, `3000`, `5000`, `1883`, `8883`, `5433`
 - `openssl` (bundled with Git Bash on Windows) to generate the MQTT TLS certificates
 
 ### Step 1 — Environment file
@@ -164,8 +164,8 @@ Default `backend/.env` for Docker:
 
 ```env
 PORT=5000
-DB_HOST=mysql
-DB_PORT=3306
+DB_HOST=postgres
+DB_PORT=5432
 DB_USER=secure_smart_home_app
 DB_PASS=change_me
 DB_NAME=secure_smart_home_iot
@@ -177,25 +177,27 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 ```
 
-> **Note:** `DB_HOST=mysql` and `MQTT_HOST=mqtt-broker-2` are Docker-internal service names.
+> **Note:** `DB_HOST=postgres` and `MQTT_HOST=mqtt-broker-2` are Docker-internal service names.
 
-**MySQL credentials for Docker** live in the root `.env` (gitignored), read by both compose files. `scripts/setup.sh` / `setup.bat` generate it with random passwords; to create it by hand:
+**PostgreSQL credentials for Docker** live in the root `.env` (gitignored), read by both compose files. `scripts/setup.sh` / `setup.bat` generate it with random passwords; to create it by hand:
 
 ```bash
-cp .env.example .env   # then set MYSQL_ROOT_PASSWORD and MYSQL_PASSWORD
+cp .env.example .env   # then set POSTGRES_PASSWORD and POSTGRES_APP_PASSWORD
 ```
 
-In Docker, compose injects `DB_USER` / `DB_PASS` / `DB_NAME` into the backend from this file, overriding `backend/.env`. `docker compose up` refuses to start if `MYSQL_PASSWORD` or `MYSQL_ROOT_PASSWORD` is missing. MySQL is published only on `127.0.0.1:3308`.
+In Docker, compose injects `DB_USER` / `DB_PASS` / `DB_NAME` into the backend from this file, overriding `backend/.env`. `docker compose up` refuses to start if `POSTGRES_PASSWORD` or `POSTGRES_APP_PASSWORD` is missing. On first start (empty `pg_data` volume) `infra/postgres/init/00_init.sh` creates the non-superuser app role (`POSTGRES_APP_USER`) and applies `infra/postgres/migrations/001_schema.sql` as that role. PostgreSQL is published only on `127.0.0.1:5433` (container port 5432).
+
+> **Migrated from MySQL (2026-10-27):** the database moved from MySQL 8 to PostgreSQL 16. Old data is **not** migrated (reset; demo data is re-seeded). The old `mysql_data` volume is left untouched and no longer used.
 
 ### Step 1b — MQTT TLS certificates
 
 Broker 2 only accepts MQTT over TLS. Generate a local CA and the broker certificate once, passing the LAN IP the Gateway will use (`MQTT_BROKER2_HOST`):
 
 ```bash
-bash scripts/gen_mqtt_certs.sh 192.168.1.100
+bash infra/pki/gen_mqtt_certs.sh 192.168.1.100
 ```
 
-This writes `mosquitto/certs/` (gitignored) and `firmware/gateway-node/include/mqtt_ca_cert.h`. If the LAN IP changes, run it again — the CA is reused, so the Gateway does not need reflashing. Verify with `bash scripts/check_mqtt_tls.sh`.
+This writes `infra/mosquitto/certs/` (gitignored) and `firmware/gateway-node/include/mqtt_ca_cert.h`. If the LAN IP changes, run it again — the CA is reused, so the Gateway does not need reflashing. Verify with `bash tests/security/check_mqtt_tls.sh`.
 
 ### Step 2 — Start the stack
 
@@ -234,7 +236,7 @@ iot-frontend         running                 0.0.0.0:3000->3000/tcp
 iot-backend          running (healthy)       0.0.0.0:5000->5000/tcp
 iot-mqtt-broker-1    running                 0.0.0.0:1883->1883/tcp
 iot-mqtt-broker-2    running                 0.0.0.0:8883->8883/tcp
-iot-mysql            running (healthy)       0.0.0.0:3308->3306/tcp
+iot-postgres         running (healthy)       127.0.0.1:5433->5432/tcp
 ```
 
 ### Step 4 — Access
@@ -246,7 +248,7 @@ iot-mysql            running (healthy)       0.0.0.0:3308->3306/tcp
 | **Backend API** | http://localhost:5000 |
 | **Health check** | http://localhost:5000/api/health |
 | **MQTT Broker 1** | `mqtt://localhost:1883` |
-| **MQTT Broker 2** | `mqtts://localhost:8883` (CA: `mosquitto/certs/ca.crt`) |
+| **MQTT Broker 2** | `mqtts://localhost:8883` (CA: `infra/mosquitto/certs/ca.crt`) |
 
 **Default credentials:**
 
@@ -271,7 +273,7 @@ docker compose down -v                  # Stop + wipe all data
 docker compose up -d --build backend    # Rebuild after code change
 
 # Production build
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f compose.prod.yaml up -d --build
 ```
 
 ---
@@ -281,13 +283,19 @@ docker compose -f docker-compose.prod.yml up -d --build
 ### Prerequisites
 
 - Node.js ≥ 20, npm ≥ 10
-- MySQL 8.0
-- Mosquitto MQTT Broker (2 instances: 1883 plaintext, 8883 TLS — certificates from `scripts/gen_mqtt_certs.sh`)
+- PostgreSQL 16
+- Mosquitto MQTT Broker (2 instances: 1883 plaintext, 8883 TLS — certificates from `infra/pki/gen_mqtt_certs.sh`)
 
 **Tip:** Run only the infrastructure in Docker, backends locally:
 
 ```bash
-docker compose up -d mysql mqtt-broker-1 mqtt-broker-2
+docker compose up -d postgres mqtt-broker-1 mqtt-broker-2
+```
+
+The compose file publishes PostgreSQL on `127.0.0.1:5433`, so the locally running backend uses `DB_HOST=localhost` and `DB_PORT=5433`. Without Docker, apply the schema by hand:
+
+```bash
+psql -v ON_ERROR_STOP=1 -U <app_user> -d secure_smart_home_iot -f infra/postgres/migrations/001_schema.sql
 ```
 
 ### Backend
@@ -296,7 +304,7 @@ docker compose up -d mysql mqtt-broker-1 mqtt-broker-2
 cd backend
 cp .env.example .env
 # Edit .env: DB_HOST=localhost, MQTT_HOST=localhost, MQTT_PORT=8883
-# (MQTT_CA_FILE defaults to ../mosquitto/certs/ca.crt)
+# (MQTT_CA_FILE defaults to ../infra/mosquitto/certs/ca.crt)
 npm install
 npm run dev
 # API at http://localhost:5000
@@ -603,21 +611,21 @@ All endpoints except `/api/health` and `/api/auth/login` require a valid JWT in 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `5000` | Backend listen port |
-| `DB_HOST` | `localhost` | MySQL host (`mysql` in Docker) |
-| `DB_PORT` | `3306` | MySQL internal port |
-| `DB_USER` | `secure_smart_home_app` | MySQL username |
-| `DB_PASS` | — (bắt buộc, không có mặc định) | MySQL password |
+| `DB_HOST` | `localhost` | PostgreSQL host (`postgres` in Docker) |
+| `DB_PORT` | `5433` | PostgreSQL port (host-published dev port; `5432` inside Docker) |
+| `DB_USER` | `secure_smart_home_app` | PostgreSQL username (non-superuser app role) |
+| `DB_PASS` | — (bắt buộc, không có mặc định) | PostgreSQL password |
 | `DB_NAME` | `secure_smart_home_iot` | Database name |
 | `JWT_SECRET` | — | JWT signing key **(required, min 32 chars)** |
 | `MQTT_HOST` | `localhost` | Broker 2 host (`mqtt-broker-2` in Docker) |
 | `MQTT_PORT` | `8883` | Broker 2 TLS port |
-| `MQTT_CA_FILE` | `../mosquitto/certs/ca.crt` | CA used to verify Broker 2 (`/certs/mqtt-ca.crt` in Docker) |
+| `MQTT_CA_FILE` | `../infra/mosquitto/certs/ca.crt` | CA used to verify Broker 2 (`/certs/mqtt-ca.crt` in Docker) |
 | `FRONTEND_URL` | `http://localhost` | Frontend origin for CORS |
-| `ADMIN_USERNAME` | `admin` | Seeded admin username |
-| `ADMIN_PASSWORD` | `admin123` | Seeded admin password |
+| `ADMIN_USERNAME` | `admin` | Admin username for `npm run seed` |
+| `ADMIN_PASSWORD` | — | Admin password for `npm run seed` **(required; ≥ 12 chars in production)** |
 
 > `.env` is excluded from git. **Never commit credentials.**
-> In production: rotate `JWT_SECRET` (use `openssl rand -hex 32`), change `ADMIN_PASSWORD`.
+> The schema seeds no accounts. In development the demo seed (`SEED_DEMO_DATA`) creates `admin` / `admin123`. In production create the admin with `docker compose exec backend npm run seed` (reads `ADMIN_USERNAME`/`ADMIN_PASSWORD`), and rotate `JWT_SECRET` (use `openssl rand -hex 32`).
 
 ---
 
@@ -635,15 +643,15 @@ audit_log     — Immutable security event log
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | INT PK | Auto-increment |
+| `id` | INT PK | Identity (`GENERATED BY DEFAULT AS IDENTITY`) |
 | `device_id` | VARCHAR UNIQUE | Unique device identifier (`ESP32-SN-XXXXXXXX`) |
 | `device_name` | VARCHAR | Display name |
-| `device_type` | ENUM | `gateway` or `sensor` |
+| `device_type` | VARCHAR + CHECK | `gateway` or `sensor` |
 | `secret_key` | VARCHAR(64) | HMAC signing key (hex, never exposed after registration) |
-| `status` | ENUM | `inactive` / `active` / `blocked` |
+| `status` | VARCHAR + CHECK | `inactive` / `active` / `blocked` |
 | `location` | VARCHAR | Physical location |
 | `fail_count` | INT | Consecutive auth failures (auto-block at 5) |
-| `last_seen` | DATETIME | Last successful data reception |
+| `last_seen` | TIMESTAMPTZ | Last successful data reception |
 | `last_ip` | VARCHAR | Last seen IP address |
 | `created_by` | INT FK | User who registered the device |
 
@@ -651,11 +659,11 @@ audit_log     — Immutable security event log
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | INT PK | Auto-increment |
+| `id` | INT PK | Identity |
 | `device_id` | INT FK | Sensor device |
 | `gateway_id` | INT FK | Gateway that forwarded the reading |
-| `payload` | JSON | `{ "temperature": 28.5, "humidity": 65.2 }` |
-| `received_at` | DATETIME | Backend reception timestamp |
+| `payload` | JSONB | `{ "temperature": 28.5, "humidity": 65.2 }` |
+| `received_at` | TIMESTAMPTZ | Backend reception timestamp |
 
 > Auto-pruned: keeps the **150 most recent records per device** after each insert.
 
@@ -710,27 +718,37 @@ Both signatures are independently re-verified by the backend regardless of what 
 
 ```
 secure-smart-home-iot/
-├── frontend/                  Next.js 16 + React 19 + TailwindCSS v4    → :3000
-├── backend/                   Express 5 + TypeScript + MySQL             → :5000
+├── contracts/                 Protocol definitions (placeholders for now)
+│   ├── asyncapi.yaml          MQTT topics, both hops
+│   ├── datapoints.yaml        Shared datapoint model
+│   └── openapi.json           REST API (to be generated from the backend)
+├── backend/                   Express 5 + TypeScript + PostgreSQL (pg)   → :5000
+├── frontend/                  Next.js 16 monorepo: admin / operator / user → :3001 / :3002 / :3003
+├── mobile/                    Flutter app for customers
+├── agent/                     AI Agent (empty — proposal pending approval)
 ├── firmware/
+│   ├── gateway-node/          ESP32: dual-broker bridge + local HMAC verifier
 │   ├── sensor-node/           ESP32: DHT22 reader + HMAC publisher
-│   ├── sensor-node-2/         ESP32: second sensor node
-│   └── gateway-node/          ESP32: dual-broker bridge + local HMAC verifier
-├── database/
-│   └── migrations/            001_schema.sql — MySQL 8.0
-├── mosquitto/
-│   ├── broker1/               MQTT Broker 1 (Sensor ↔ Gateway)          → :1883
-│   ├── broker2/               MQTT Broker 2 (Gateway → Backend, TLS)    → :8883
-│   └── certs/                 TLS certificates (gitignored, gen_mqtt_certs.sh)
-├── nginx/                     Reverse proxy config                       → :80
-├── scripts/
-│   ├── setup.bat              Windows automated setup
-│   ├── setup.sh               Linux / macOS / WSL automated setup
-│   ├── gen_mqtt_certs.sh      Local CA + Broker 2 TLS certificate
-│   └── check_mqtt_tls.sh      MQTT TLS acceptance check (FR-12.3)
-├── docs/                      14 technical documentation files
-├── docker-compose.yml         Development stack (6 services)
-└── docker-compose.prod.yml    Production stack
+│   ├── camera/                ESP32-CAM (empty)
+│   └── livingRoom/            Living-room node (empty)
+├── infra/
+│   ├── postgres/              init/00_init.sh (app role) + migrations/001_schema.sql (PostgreSQL 16 baseline)
+│   ├── mosquitto/             broker1/ (:1883, Sensor ↔ Gateway), broker2/ (:8883 TLS, Gateway → Backend),
+│   │                          certs/ (gitignored, only .gitkeep is committed)
+│   ├── nginx/                 Reverse proxy config                       → :80
+│   ├── pki/                   gen_mqtt_certs.sh — local CA + Broker 2 TLS certificate
+│   └── media/                 Camera media server (empty)
+├── tests/
+│   ├── security/              attack_demo*.sh, check_mqtt_tls.sh (FR-12.3), attack/demo guides
+│   ├── performance/           (empty)
+│   ├── kws/                   (empty)
+│   └── e2e/                   (empty)
+├── scripts/                   setup.sh (Linux/macOS/WSL), setup.bat (Windows)
+├── docs/                      16 technical docs (general at root; architecture/, firmware/, guides/, proposals/)
+├── compose.yaml               Base stack (8 services; currently also holds the dev settings)
+├── compose.override.yaml      Dev overrides, auto-loaded by `docker compose` (placeholder)
+├── compose.prod.yaml          Production stack (`docker compose -f compose.prod.yaml …`)
+└── Makefile                   make dev / prod / certs / migrate / test-security
 ```
 
 ---
@@ -739,21 +757,57 @@ secure-smart-home-iot/
 
 Detailed technical documentation is in [`docs/`](docs/) (Vietnamese). `docs/` describes the **target architecture (V2)**; the code describes the current state.
 
+**General (`docs/`)** — cross-cutting documents for the whole project:
+
 | File | Description |
 |------|-------------|
-| [`01_SMART_HOME_PRODUCT_ARCHITECTURE.md`](docs/01_SMART_HOME_PRODUCT_ARCHITECTURE.md) | Product architecture, claim/activation, 2-level RBAC |
-| [`02_SMART_HOME_WIFI_PROVISIONING.md`](docs/02_SMART_HOME_WIFI_PROVISIONING.md) | WiFi provisioning, Gateway ↔ Node pairing, key hierarchy |
-| [`03_BACKEND_REFACTOR_SMARTHOME.md`](docs/03_BACKEND_REFACTOR_SMARTHOME.md) | Backend modules, API (§9), MQTT topics (§10), AI-ready design (§18) |
-| [`04_DATABASE_REFACTOR_SMARTHOME.md`](docs/04_DATABASE_REFACTOR_SMARTHOME.md) | Database schema, naming, partition/retention |
-| [`05_FRONTEND_REFACTOR_SMARTHOME.md`](docs/05_FRONTEND_REFACTOR_SMARTHOME.md) | Admin/Operator dashboard design |
-| [`07_MOBILE_APP_ARCHITECTURE.md`](docs/07_MOBILE_APP_ARCHITECTURE.md) | Flutter app architecture |
-| [`08_EMBEDDED_ARCHITECTURE_ESP_IDF.md`](docs/08_EMBEDDED_ARCHITECTURE_ESP_IDF.md) | Firmware architecture (ESP-IDF target) |
-| [`09_SECURITY_ARCHITECTURE.md`](docs/09_SECURITY_ARCHITECTURE.md) | Security architecture, threat model, attack scenarios |
-| [`10_SMART_HOME_PRODUCT_ROADMAP.md`](docs/10_SMART_HOME_PRODUCT_ROADMAP.md) | Product roadmap Prototype → V2 → V3 → Commercial |
-| [`11_CHAY_LOCAL.md`](docs/11_CHAY_LOCAL.md) | Run locally without Docker |
-| [`13_PRD_SMART_HOME.md`](docs/13_PRD_SMART_HOME.md) | **PRD V2** — one-page summary (§0), requirements FR/NFR, acceptance criteria |
-| [`14_MQTT_TLS.md`](docs/14_MQTT_TLS.md) | MQTT TLS implementation, verification and runbook |
-| [`15_DE_XUAT_AI_AGENT.md`](docs/15_DE_XUAT_AI_AGENT.md) | AI Agent change proposal (draft, pending approval) |
+| [`SMART_HOME_PRODUCT_ARCHITECTURE.md`](docs/SMART_HOME_PRODUCT_ARCHITECTURE.md) | Product architecture, claim/activation, 2-level RBAC |
+| [`SECURITY_ARCHITECTURE.md`](docs/SECURITY_ARCHITECTURE.md) | Security architecture, threat model, attack scenarios |
+| [`SMART_HOME_PRODUCT_ROADMAP.md`](docs/SMART_HOME_PRODUCT_ROADMAP.md) | Product roadmap Prototype → V2 → V3 → Commercial |
+| [`PRD_SMART_HOME.md`](docs/PRD_SMART_HOME.md) | **PRD V2** — one-page summary (§0), requirements FR/NFR, acceptance criteria |
+| [`API_DESIGN.md`](docs/API_DESIGN.md) | All APIs, current and planned: REST (dashboard/portal/mobile), WebSocket, device HTTP, MQTT, gateway/camera local HTTP, ESP-NOW frames, HMAC strings |
+| [`DESIGN_PATTERNS.md`](docs/DESIGN_PATTERNS.md) | Design patterns per layer (backend, web, mobile, firmware): in use, recommended, avoid; review checklist |
+
+**Layer architecture (`docs/architecture/`)**:
+
+| File | Description |
+|------|-------------|
+| [`BACKEND_REFACTOR_SMARTHOME.md`](docs/architecture/BACKEND_REFACTOR_SMARTHOME.md) | Backend modules, API (§9), MQTT topics (§10), AI-ready design (§18) |
+| [`DATABASE_REFACTOR_SMARTHOME.md`](docs/architecture/DATABASE_REFACTOR_SMARTHOME.md) | Database schema, naming, partition/retention |
+| [`FRONTEND_REFACTOR_SMARTHOME.md`](docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) | Admin/Operator dashboard design |
+| [`MOBILE_APP_ARCHITECTURE.md`](docs/architecture/MOBILE_APP_ARCHITECTURE.md) | Flutter app architecture |
+
+**Firmware (`docs/firmware/`)**:
+
+| File | Description |
+|------|-------------|
+| [`SMART_HOME_WIFI_PROVISIONING.md`](docs/firmware/SMART_HOME_WIFI_PROVISIONING.md) | WiFi provisioning, Gateway ↔ Node pairing, key hierarchy |
+| [`EMBEDDED_ARCHITECTURE_ESP_IDF.md`](docs/firmware/EMBEDDED_ARCHITECTURE_ESP_IDF.md) | Firmware architecture (ESP-IDF target) |
+| [`IOT_NODE_NETWORK.md`](docs/firmware/IOT_NODE_NETWORK.md) | Demo IoT network: Waveshare ESP32-S3-Touch-LCD-4.3B-BOX gateway, ESP32-CAM, living-room node; protocol per hop |
+
+**Guides & current state (`docs/guides/`)**:
+
+| File | Description |
+|------|-------------|
+| [`CHAY_LOCAL.md`](docs/guides/CHAY_LOCAL.md) | Run locally without Docker |
+| [`MQTT_TLS.md`](docs/guides/MQTT_TLS.md) | MQTT TLS implementation, verification and runbook |
+
+**Proposals (`docs/proposals/`)** — not yet requirements:
+
+| File | Description |
+|------|-------------|
+| [`DE_XUAT_AI_AGENT.md`](docs/proposals/DE_XUAT_AI_AGENT.md) | AI Agent change proposal (draft, pending approval) |
+
+**Security test guides (`tests/security/`)** — used for the thesis defence, next to the attack scripts:
+
+| File | Description |
+|------|-------------|
+| [`DEMO_THREAT_MODEL.md`](tests/security/DEMO_THREAT_MODEL.md) | Step-by-step demo of 11 attack scenarios and how the system reacts |
+| [`ATTACK_SIMULATION_GUIDE.md`](tests/security/ATTACK_SIMULATION_GUIDE.md) | Run the attack simulation from scratch (Docker, backend, frontend, scripts) |
+| [`LINUX_ATTACK_GUIDE.md`](tests/security/LINUX_ATTACK_GUIDE.md) | Attack from an Ubuntu VM against the Windows server |
+| [`DEMO-CODEX.md`](tests/security/DEMO-CODEX.md) | Threat model and attack scenarios (short version) |
+
+**Protocol contracts (`contracts/`)** — placeholders; until filled in, [`API_DESIGN.md`](docs/API_DESIGN.md) remains the source of truth.
 
 ---
 

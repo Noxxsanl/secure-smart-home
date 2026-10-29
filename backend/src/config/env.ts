@@ -111,7 +111,7 @@ export interface AppEnv {
   deviceSimulator: boolean;
   /** Chạy seed dữ liệu demo một lần sau migration (mặc định bật khi không phải production). */
   seedDemoData: boolean;
-  /** Hạn mặc định của Activation Code (docs/01: 180 ngày). */
+  /** Hạn mặc định của Activation Code (docs/SMART_HOME_PRODUCT_ARCHITECTURE.md: 180 ngày). */
   activationCodeTtlDays: number;
   /** Thư mục lưu file firmware upload (tương đối theo thư mục chạy backend). */
   firmwareStorageDir: string;

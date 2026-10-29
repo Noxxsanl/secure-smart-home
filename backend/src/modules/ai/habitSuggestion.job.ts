@@ -93,10 +93,10 @@ function findPattern(events: { minute: number; date: string }[]): { minute: numb
 async function loadEvents(home: HomeInfo, since: Date): Promise<BehaviorEvent[]> {
   // Join thiết bị để chỉ xét relay còn tồn tại của ĐÚNG nhà này (NFR-S4: truy vấn theo nhà)
   return queryRows<BehaviorEvent>(
-    `SELECT l.device_id, d.device_name, l.action, l.timestamp
+    `SELECT l.device_id, d.device_name, l.action, l."timestamp"
        FROM user_behavior_logs l
        JOIN devices d ON d.id = l.device_id AND d.home_id = l.smart_home_id AND d.category = 'relay'
-      WHERE l.smart_home_id = ? AND l.timestamp >= ? AND l.source IN ('mobile', 'manual')
+      WHERE l.smart_home_id = ? AND l."timestamp" >= ? AND l.source IN ('mobile', 'manual')
         AND l.action IN ('TURN_ON', 'TURN_OFF')`,
     [home.id, since]
   );
@@ -148,7 +148,7 @@ async function isSuppressed(home: HomeInfo, candidate: Candidate): Promise<boole
 
   const rules = await queryRows<{ schedule_time_of_day: string | null }>(
     `SELECT schedule_time_of_day FROM automation_rules
-      WHERE home_id = ? AND is_enabled = 1 AND trigger_type = 'schedule'
+      WHERE home_id = ? AND is_enabled = TRUE AND trigger_type = 'schedule'
         AND action_device_id = ? AND action_command = ?`,
     [home.id, candidate.deviceId, candidate.action]
   );
@@ -173,7 +173,8 @@ async function createSuggestion(home: HomeInfo, candidate: Candidate): Promise<v
   const result = await runSql(
     `INSERT INTO recommendation_history
        (home_id, device_id, action, time_of_day, days_matched, window_days, suggested_rule_config, status, presented_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+     RETURNING id`,
     [home.id, candidate.deviceId, candidate.action, time, candidate.daysMatched, WINDOW_DAYS, JSON.stringify(config), new Date()]
   );
   await logEvent({

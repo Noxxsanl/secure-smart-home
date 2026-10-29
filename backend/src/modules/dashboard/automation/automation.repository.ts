@@ -7,7 +7,7 @@ interface RuleRow {
   home_id: number;
   home_name: string;
   name: string;
-  is_enabled: number;
+  is_enabled: boolean;
   trigger_type: "sensor_threshold" | "schedule";
   condition_room_id: number | null;
   room_name: string | null;
@@ -110,5 +110,5 @@ export async function getRule(id: number, canEdit: boolean): Promise<AutomationR
 
 /** Bật/tắt rule; reset last_condition_state để engine đánh giá lại cạnh lên từ đầu. */
 export async function setRuleEnabled(id: number, enabled: boolean): Promise<void> {
-  await runSql("UPDATE automation_rules SET is_enabled = ?, last_condition_state = NULL WHERE id = ?", [enabled ? 1 : 0, id]);
+  await runSql("UPDATE automation_rules SET is_enabled = ?, last_condition_state = NULL WHERE id = ?", [enabled, id]);
 }

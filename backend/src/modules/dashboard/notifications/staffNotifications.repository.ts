@@ -15,7 +15,7 @@ export async function listStaffNotificationRows(role: string, limit: number): Pr
 
 export async function countUnreadStaff(role: string): Promise<number> {
   const row = await queryOne<{ total: unknown }>(
-    "SELECT COUNT(*) AS total FROM notifications WHERE user_id IS NULL AND target_role IN (?, 'all') AND is_read = 0",
+    "SELECT COUNT(*) AS total FROM notifications WHERE user_id IS NULL AND target_role IN (?, 'all') AND is_read = FALSE",
     [role]
   );
   return toCount(row?.total);
@@ -30,9 +30,9 @@ export async function staffNotificationExists(id: number, role: string): Promise
 }
 
 export async function markStaffRead(id: number): Promise<void> {
-  await runSql("UPDATE notifications SET is_read = 1 WHERE id = ?", [id]);
+  await runSql("UPDATE notifications SET is_read = TRUE WHERE id = ?", [id]);
 }
 
 export async function markAllStaffRead(role: string): Promise<void> {
-  await runSql("UPDATE notifications SET is_read = 1 WHERE user_id IS NULL AND target_role IN (?, 'all') AND is_read = 0", [role]);
+  await runSql("UPDATE notifications SET is_read = TRUE WHERE user_id IS NULL AND target_role IN (?, 'all') AND is_read = FALSE", [role]);
 }

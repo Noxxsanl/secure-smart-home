@@ -1,7 +1,7 @@
 import bcrypt from "bcrypt";
 import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import pool from "../config/db";
+import { queryOne, runSql } from "../lib/db";
 import { verifyJWT } from "../middleware/verifyJWT";
 import { createNotification } from "../services/notificationService";
 
@@ -18,11 +18,11 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  const [rows] = await pool.execute<any[]>(
-    "SELECT id, username, password_hash, role, status FROM users WHERE username = ?",
+  // LOWER(): PostgreSQL phân biệt hoa/thường (MySQL utf8mb4_unicode_ci thì không); khớp unique index LOWER(username).
+  const user = await queryOne<{ id: number; username: string; password_hash: string; role: string; status: string }>(
+    "SELECT id, username, password_hash, role, status FROM users WHERE LOWER(username) = LOWER(?)",
     [username]
   );
-  const user = rows[0];
 
   // Use a constant-time path to prevent timing-based user enumeration
   const dummyHash = "$2b$12$invalidhashpaddingtomatchbcryptlength000000000000000000";
@@ -41,7 +41,7 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
     return;
   }
 
-  await pool.execute("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
+  await runSql("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
 
   // Notify admin when operator logs in
   if (user.role === "operator") {

@@ -36,7 +36,7 @@ interface RuleRow {
   action_device_id: number | null;
   action_command: "turn_on" | "turn_off";
   origin: "user" | "ai_suggested";
-  last_condition_state: number | null;
+  last_condition_state: boolean | null;
   last_triggered_at: Date | null;
   timezone: string;
   action_device_name: string | null;
@@ -51,7 +51,7 @@ const RULE_SELECT_SQL = `
     FROM automation_rules r
     JOIN smart_homes h ON h.id = r.home_id
     LEFT JOIN devices d ON d.id = r.action_device_id AND d.home_id = r.home_id
-   WHERE r.is_enabled = 1 AND h.status = 'active' AND r.trigger_type = ?`;
+   WHERE r.is_enabled = TRUE AND h.status = 'active' AND r.trigger_type = ?`;
 
 // ── Thực thi ───────────────────────────────────────────────────────────────
 
@@ -92,7 +92,7 @@ async function executeRule(rule: RuleRow, trigger: Record<string, unknown>): Pro
     // Thiết bị đã ở đúng trạng thái → ghi 'skipped', không phát lệnh/thông báo thừa (vd "tắt đèn bếp 23:30"
     // khi đèn đã tắt từ trước)
     const device = await getDeviceRow(rule.action_device_id);
-    const targetPower = rule.action_command === "turn_on" ? 1 : 0;
+    const targetPower = rule.action_command === "turn_on";
     if (device && device.power_state === targetPower) {
       await writeHistory(rule, "skipped", { trigger, reason: "ALREADY_IN_STATE", action: rule.action_command });
       return;
@@ -167,8 +167,8 @@ async function evaluateSensorRule(rule: RuleRow, event: TelemetryEvent): Promise
 
   if (!conditionHolds(value, rule.condition_operator, threshold)) {
     // Điều kiện hết đúng → "nạp lại" cạnh để lần đúng tiếp theo kích hoạt được
-    if (rule.last_condition_state !== 0) {
-      await runSql("UPDATE automation_rules SET last_condition_state = 0 WHERE id = ?", [rule.id]);
+    if (rule.last_condition_state !== false) {
+      await runSql("UPDATE automation_rules SET last_condition_state = FALSE WHERE id = ?", [rule.id]);
     }
     return;
   }
@@ -176,10 +176,10 @@ async function evaluateSensorRule(rule: RuleRow, event: TelemetryEvent): Promise
   // Giành quyền chạy: chỉ khi trước đó chưa đúng (cạnh lên) VÀ đã qua cooldown. Nếu đang cooldown thì
   // KHÔNG đặt state=1, để số đo kế tiếp (vẫn đúng) thử lại sau khi hết cooldown.
   const claimed = await runSql(
-    `UPDATE automation_rules SET last_condition_state = 1, last_triggered_at = NOW()
-      WHERE id = ? AND is_enabled = 1
-        AND (last_condition_state IS NULL OR last_condition_state = 0)
-        AND (last_triggered_at IS NULL OR last_triggered_at <= NOW() - INTERVAL ${COOLDOWN_SECONDS} SECOND)`,
+    `UPDATE automation_rules SET last_condition_state = TRUE, last_triggered_at = NOW()
+      WHERE id = ? AND is_enabled = TRUE
+        AND (last_condition_state IS NULL OR last_condition_state = FALSE)
+        AND (last_triggered_at IS NULL OR last_triggered_at <= NOW() - make_interval(secs => ${COOLDOWN_SECONDS}))`,
     [rule.id]
   );
   if (claimed.affectedRows === 0) return;
@@ -243,7 +243,7 @@ async function runScheduleTick(): Promise<void> {
         // Tối đa 1 lần/phút: chỉ tick nào cập nhật được dòng (last_triggered_at còn trước đầu phút) mới chạy
         const claimed = await runSql(
           `UPDATE automation_rules SET last_triggered_at = NOW()
-            WHERE id = ? AND is_enabled = 1 AND (last_triggered_at IS NULL OR last_triggered_at < ?)`,
+            WHERE id = ? AND is_enabled = TRUE AND (last_triggered_at IS NULL OR last_triggered_at < ?)`,
           [rule.id, minuteStart]
         );
         if (claimed.affectedRows === 0) continue;

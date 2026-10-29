@@ -101,13 +101,14 @@ async function insertCustomerNotification(
   homeName: string | null,
   content: CustomerNotificationContent
 ): Promise<CustomerNotification> {
-  // created_at ghi tường minh, cắt về giây (DATETIME không có phần thập phân) để DTO phát qua
+  // created_at ghi tường minh, cắt về giây (đồng bộ với định dạng cũ) để DTO phát qua
   // WebSocket khớp từng chữ số với dòng sẽ đọc lại bằng REST.
   const createdAt = new Date(Math.floor(Date.now() / 1000) * 1000);
   const title = clip(content.title, 255);
   const result = await runSql(
     `INSERT INTO notifications (title, message, type, severity, target_role, user_id, home_id, related_device_id, created_at)
-     VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?)
+     RETURNING id`,
     [title, content.message, clip(content.type, 64), content.severity, userId, homeId, content.relatedDeviceId ?? null, createdAt]
   );
   const notification: CustomerNotification = {
@@ -184,7 +185,8 @@ export async function notifyStaff(input: NotifyStaffInput): Promise<number | nul
     const result = await runSql(
       `INSERT INTO notifications
          (title, message, type, severity, target_role, home_id, related_device_id, actor_id, actor_username, actor_role)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING id`,
       [
         clip(input.title, 255),
         input.message,

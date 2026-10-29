@@ -5,7 +5,7 @@ import {
 import type { LogCategory } from "@smarthome/console/api/types";
 import type { StaffRole } from "@smarthome/console/auth/usePermissions";
 
-// docs/05 §5.3 — Operator chỉ thấy 5 loại log vận hành; Security/Auth/Activity/
+// docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md §5.3 — Operator chỉ thấy 5 loại log vận hành; Security/Auth/Activity/
 // MQTT/Error thuộc phạm vi điều tra nội bộ, chỉ Admin.
 export const LOG_CATEGORY_CONFIG: { category: LogCategory; label: string; roles: StaffRole[] }[] = [
   { category: "gateway",    label: "Gateway Log",        roles: ["admin", "operator"] },

@@ -1,0 +1,165 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: iot-postgres
+    restart: always
+    environment:
+      # POSTGRES_PASSWORD là mật khẩu superuser `postgres` — chỉ dùng quản trị, backend KHÔNG dùng.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Thiếu POSTGRES_PASSWORD trong .env (xem .env.example)}
+      POSTGRES_DB: ${POSTGRES_DB:-secure_smart_home_iot}
+      # Hai biến dưới do infra/postgres/init/00_init.sh đọc (image postgres bỏ qua): role ứng dụng
+      # không phải superuser, sở hữu database và chạy 001_schema.sql.
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-secure_smart_home_app}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Thiếu POSTGRES_APP_PASSWORD trong .env (xem .env.example)}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      # Script init chỉ chạy khi pg_data còn trống; schema mount riêng (chỉ đọc) để 00_init.sh gọi bằng role app.
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./infra/postgres/migrations:/schema:ro
+    networks:
+      - iot-network
+    healthcheck:
+      # -h 127.0.0.1 (TCP) là bắt buộc: server tạm của giai đoạn init chỉ nghe unix socket, nếu
+      # pg_isready dùng socket thì báo "ready" sớm, backend khởi động trước khi schema được nạp xong.
+      # Đọc biến trong container — không để mật khẩu trong docker inspect (pg_isready không cần mật khẩu).
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_APP_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Broker 1: Sensor Node → Gateway Node (port 1883)
+  mqtt-broker-1:
+    image: eclipse-mosquitto:2
+    container_name: iot-mosquitto-1
+    restart: always
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto/broker1/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto1_data:/mosquitto/data
+      - mosquitto1_logs:/mosquitto/log
+    networks:
+      - iot-network
+
+  # Broker 2: Gateway Node → Backend — chỉ MQTT over TLS (port 8883)
+  # Chạy infra/pki/gen_mqtt_certs.sh <IP/hostname broker> trước lần up đầu tiên.
+  mqtt-broker-2:
+    image: eclipse-mosquitto:2
+    container_name: iot-mosquitto-2
+    restart: always
+    ports:
+      - "8883:8883"
+    volumes:
+      - ./infra/mosquitto/broker2/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      # ca.key không mount vào container nào
+      - ./infra/mosquitto/certs/ca.crt:/mosquitto/certs/ca.crt:ro
+      - ./infra/mosquitto/certs/server.crt:/mosquitto/certs/server.crt:ro
+      - ./infra/mosquitto/certs/server.key:/mosquitto/certs/server.key:ro
+      - mosquitto2_data:/mosquitto/data
+      - mosquitto2_logs:/mosquitto/log
+    networks:
+      - iot-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: iot-backend
+    volumes:
+      - ./infra/mosquitto/certs/ca.crt:/certs/mqtt-ca.crt:ro
+    env_file:
+      - ./backend/.env
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      # Cùng nguồn với service postgres (.env gốc) — không phải khai báo mật khẩu 2 nơi.
+      # Backend dùng role ứng dụng (không phải superuser).
+      - DB_USER=${POSTGRES_APP_USER:-secure_smart_home_app}
+      - DB_PASS=${POSTGRES_APP_PASSWORD:?Thiếu POSTGRES_APP_PASSWORD trong .env (xem .env.example)}
+      - DB_NAME=${POSTGRES_DB:-secure_smart_home_iot}
+      # Backend chỉ kết nối Broker 2 (gateway → backend layer) qua TLS
+      - MQTT_HOST=mqtt-broker-2
+      - MQTT_PORT=8883
+      - MQTT_CA_FILE=/certs/mqtt-ca.crt
+      - FRONTEND_URL=http://localhost
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mqtt-broker-2:
+        condition: service_started
+    networks:
+      - iot-network
+    restart: always
+
+  # Frontend: 3 app Next.js trong frontend/ (npm workspaces), mỗi role một image.
+  frontend-admin:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        APP: admin
+    container_name: iot-frontend-admin
+    environment:
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - iot-network
+    restart: always
+
+  frontend-operator:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        APP: operator
+    container_name: iot-frontend-operator
+    environment:
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - iot-network
+    restart: always
+
+  frontend-user:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        APP: user
+    container_name: iot-frontend-user
+    environment:
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - iot-network
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    container_name: iot-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend-admin
+      - frontend-operator
+      - frontend-user
+    networks:
+      - iot-network
+    restart: always
+
+volumes:
+  pg_data:
+  mosquitto1_data:
+  mosquitto1_logs:
+  mosquitto2_data:
+  mosquitto2_logs:
+
+networks:
+  iot-network:
+    driver: bridge

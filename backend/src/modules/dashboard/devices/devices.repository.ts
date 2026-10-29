@@ -34,7 +34,7 @@ export async function listDevices(filter: DeviceListFilter): Promise<DeviceRow[]
   }
   if (filter.q !== undefined) {
     const pattern = likePattern(filter.q);
-    clauses.push("(d.device_name LIKE ? OR d.device_id LIKE ? OR h.name LIKE ?)");
+    clauses.push("(unaccent(d.device_name) ILIKE unaccent(?) OR unaccent(d.device_id) ILIKE unaccent(?) OR unaccent(h.name) ILIKE unaccent(?))");
     params.push(pattern, pattern, pattern);
   }
   const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";

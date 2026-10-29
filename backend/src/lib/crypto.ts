@@ -23,7 +23,7 @@ export function generateUid(prefix: string): string {
 
 /**
  * HMAC-SHA256 hex thường. Key là CHUỖI secret nguyên văn (không decode hex) — khớp
- * hmacService.ts, firmware và scripts/attack_demo*.sh (invariant 5).
+ * hmacService.ts, firmware và tests/security/attack_demo*.sh (invariant 5).
  */
 export function hmacHex(key: string, message: string): string {
   return crypto.createHmac("sha256", key).update(message).digest("hex");

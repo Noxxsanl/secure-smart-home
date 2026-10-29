@@ -82,9 +82,9 @@ export async function runSimulatedHeartbeat(): Promise<void> {
          FROM devices d
          LEFT JOIN smart_homes h ON h.id = d.home_id
          LEFT JOIN devices gw ON gw.id = d.gateway_device_id
-        WHERE d.is_simulated = 1 AND d.sim_online = 1
+        WHERE d.is_simulated = TRUE AND d.sim_online = TRUE
           AND (h.id IS NULL OR h.status <> 'suspended')
-          AND (d.device_type = 'gateway' OR gw.id IS NULL OR gw.sim_online = 1)`
+          AND (d.device_type = 'gateway' OR gw.id IS NULL OR gw.sim_online = TRUE)`
     );
     const alive = rows
       .filter((row) => !isRestarting(row.device_type === "gateway" ? row.id : row.gateway_device_id))
@@ -92,7 +92,7 @@ export async function runSimulatedHeartbeat(): Promise<void> {
     if (alive.length === 0) return;
     await runSql(
       `UPDATE devices SET last_seen = NOW(), provision_status = 'provisioned'
-        WHERE is_simulated = 1 AND id IN (${placeholders(alive.length)})`,
+        WHERE is_simulated = TRUE AND id IN (${placeholders(alive.length)})`,
       alive
     );
   } catch (err) {
@@ -154,7 +154,7 @@ async function runTelemetryTick(): Promise<void> {
          FROM devices d
          JOIN devices gw ON gw.id = d.gateway_device_id
          LEFT JOIN smart_homes h ON h.id = d.home_id
-        WHERE d.is_simulated = 1 AND d.category = 'sensor' AND d.sim_online = 1 AND gw.sim_online = 1
+        WHERE d.is_simulated = TRUE AND d.category = 'sensor' AND d.sim_online = TRUE AND gw.sim_online = TRUE
           AND (h.id IS NULL OR h.status <> 'suspended')`
     );
     for (const sensor of sensors) {
@@ -238,7 +238,7 @@ async function runOtaTick(): Promise<void> {
          FROM ota_history h
          JOIN ota_jobs j ON j.id = h.ota_job_id AND j.status = 'running'
          JOIN firmware f ON f.id = j.firmware_id
-         JOIN devices d ON d.id = h.device_id AND d.is_simulated = 1 AND d.sim_online = 1
+         JOIN devices d ON d.id = h.device_id AND d.is_simulated = TRUE AND d.sim_online = TRUE
         WHERE h.status IN ('pending', 'downloading')`
     );
     const touchedJobs = new Set<number>();
@@ -252,7 +252,7 @@ async function runOtaTick(): Promise<void> {
               WHERE id = ? AND status IN ('pending', 'downloading')`,
             [row.history_id]
           );
-          await runSql("UPDATE devices SET firmware_version = ? WHERE id = ? AND is_simulated = 1", [row.firmware_version, row.device_id]);
+          await runSql("UPDATE devices SET firmware_version = ? WHERE id = ? AND is_simulated = TRUE", [row.firmware_version, row.device_id]);
         } else {
           await runSql(
             `UPDATE ota_history SET status = 'downloading', progress_percent = ?, started_at = COALESCE(started_at, NOW())

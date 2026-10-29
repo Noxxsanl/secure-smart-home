@@ -1,10 +1,10 @@
 // Đường nhận dữ liệu chính: subscribe Broker 2 (gateway → backend) và
 // thực hiện xác thực HMAC 2 lớp giống hệt đường fallback HTTP (data.routes.ts).
 // Hai đường phải luôn đồng bộ logic xác thực khi có thay đổi.
-import pool from "../config/db";
+import { queryOne, queryRows, runSql } from "../lib/db";
 import { connectBroker } from "../config/mqtt";
 import { onTelemetryIngested } from "../modules/devices/telemetry.service";
-import { verifyGatewayHMAC, verifyDeviceHMAC } from "./hmacService";
+import { isSafeDeviceId, jsonHasNul, verifyGatewayHMAC, verifyDeviceHMAC } from "./hmacService";
 import { log, logDataRecvWithPrune } from "./auditLogger";
 
 // Thiết bị bị tự động khóa sau số lần xác thực thất bại liên tiếp này
@@ -12,11 +12,12 @@ import { log, logDataRecvWithPrune } from "./auditLogger";
 const BLOCK_THRESHOLD = 5;
 
 async function incrementAndMaybeBlock(deviceDbId: number, deviceLabel: string): Promise<void> {
-  await pool.execute(`UPDATE devices SET fail_count = fail_count + 1 WHERE id = ?`, [deviceDbId]);
-  const [rows] = await pool.execute<any[]>(`SELECT fail_count FROM devices WHERE id = ?`, [deviceDbId]);
-  const count: number = rows[0]?.fail_count ?? 0;
+  // LEAST(…, 1000): chống tràn SMALLINT khi thiết bị đã blocked vẫn bị đếm tiếp — khớp validateDevice.ts.
+  await runSql(`UPDATE devices SET fail_count = LEAST(fail_count + 1, 1000) WHERE id = ?`, [deviceDbId]);
+  const row = await queryOne<{ fail_count: number }>(`SELECT fail_count FROM devices WHERE id = ?`, [deviceDbId]);
+  const count: number = row?.fail_count ?? 0;
   if (count >= BLOCK_THRESHOLD) {
-    await pool.execute(`UPDATE devices SET status = 'blocked' WHERE id = ?`, [deviceDbId]);
+    await runSql(`UPDATE devices SET status = 'blocked' WHERE id = ?`, [deviceDbId]);
     await log("DEVICE_BLOCKED", deviceDbId, null, null, { device_id: deviceLabel, fail_count: count, source: "mqtt" });
     console.warn(`[mqttData] blocked ${deviceLabel} (fail_count=${count})`);
   }
@@ -38,7 +39,8 @@ async function handleGatewayData(raw: string): Promise<void> {
   const sensor_ip    = sensor_payload?.sensor_ip;
   const data         = sensor_payload?.data;
 
-  if (!gateway_id || !gw_timestamp || !gw_hmac) {
+  // isSafeDeviceId: id không phải chuỗi hoặc chứa NUL = payload sai (khớp validateDevice.ts; tránh lỗi 22021 của PostgreSQL).
+  if (!isSafeDeviceId(gateway_id) || !gw_timestamp || !gw_hmac) {
     console.warn("[mqttData] missing gateway fields – dropped");
     return;
   }
@@ -57,7 +59,7 @@ async function handleGatewayData(raw: string): Promise<void> {
   }
 
   // Level 2: Sensor HMAC
-  if (!sensor_payload || !sensor_id || !sn_timestamp || !sn_hmac) {
+  if (!sensor_payload || !isSafeDeviceId(sensor_id) || !sn_timestamp || !sn_hmac) {
     console.warn("[mqttData] missing sensor fields – dropped");
     return;
   }
@@ -81,14 +83,20 @@ async function handleGatewayData(raw: string): Promise<void> {
     console.warn("[mqttData] missing or invalid data payload – dropped");
     return;
   }
+  // JSONB không nhận `\u0000` (22P05) → coi như payload sai, khớp routes/data.routes.ts.
+  const dataJson = JSON.stringify(data);
+  if (jsonHasNul(dataJson)) {
+    console.warn("[mqttData] data payload contains NUL – dropped");
+    return;
+  }
 
   // Device type & status check
-  const [rows] = await pool.execute<any[]>(
+  const rows = await queryRows<{ id: number; device_type: string; status: string }>(
     `SELECT id, device_type, status FROM devices WHERE id IN (?, ?)`,
     [gateway.id, sensor.id]
   );
-  const gwRow = (rows as any[]).find((r) => r.id === gateway.id);
-  const snRow = (rows as any[]).find((r) => r.id === sensor.id);
+  const gwRow = rows.find((r) => r.id === gateway.id);
+  const snRow = rows.find((r) => r.id === sensor.id);
 
   if (!gwRow || gwRow.device_type !== "gateway") {
     console.warn(`[mqttData] ${gateway_id} is not a gateway – dropped`);
@@ -108,9 +116,9 @@ async function handleGatewayData(raw: string): Promise<void> {
   }
 
   // Insert sensor data
-  const [insertResult] = await pool.execute<any>(
-    `INSERT INTO sensor_data (device_id, gateway_id, payload) VALUES (?, ?, ?)`,
-    [sensor.id, gateway.id, JSON.stringify(data)]
+  const insertResult = await runSql(
+    `INSERT INTO sensor_data (device_id, gateway_id, payload) VALUES (?, ?, ?) RETURNING id`,
+    [sensor.id, gateway.id, dataJson]
   );
 
   // V2: không còn prune "150 dòng/sensor" ở đây — sensor_data giữ theo THỜI GIAN (job retention
@@ -128,24 +136,24 @@ async function handleGatewayData(raw: string): Promise<void> {
   const resolvedSnIp = typeof sensor_ip  === "string" && sensor_ip  ? sensor_ip  : null;
 
   if (resolvedGwIp) {
-    await pool.execute(
+    await runSql(
       `UPDATE devices SET last_seen = NOW(), fail_count = 0, last_ip = ? WHERE id = ?`,
       [resolvedGwIp, gateway.id]
     );
   } else {
-    await pool.execute(
+    await runSql(
       `UPDATE devices SET last_seen = NOW(), fail_count = 0 WHERE id = ?`,
       [gateway.id]
     );
   }
 
   if (resolvedSnIp) {
-    await pool.execute(
+    await runSql(
       `UPDATE devices SET last_seen = NOW(), fail_count = 0, last_ip = ? WHERE id = ?`,
       [resolvedSnIp, sensor.id]
     );
   } else {
-    await pool.execute(
+    await runSql(
       `UPDATE devices SET last_seen = NOW(), fail_count = 0 WHERE id = ?`,
       [sensor.id]
     );

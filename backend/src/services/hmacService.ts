@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import pool from "../config/db";
+import { queryOne } from "../lib/db";
 
 // Cửa sổ chống replay attack ±300 giây. Đồng hồ cảm biến có thể lệch nhẹ,
 // cửa sổ quá hẹp sẽ gây lỗi TIMESTAMP_EXPIRED giả; 5 phút là tiêu chuẩn ngành
@@ -13,12 +13,28 @@ interface DeviceRow {
   fail_count: number;
 }
 
+// Dùng CHUNG cho HTTP (middleware/validateDevice.ts, routes/data.routes.ts) và MQTT (mqttDataService.ts)
+// để hai đường từ chối cùng một tập đầu vào (invariant 4). PostgreSQL không chứa được ký tự NUL trong
+// TEXT/VARCHAR (lỗi 22021) và JSONB không nhận `\u0000` (22P05) — nếu để lọt xuống DB, thiết bị/kẻ gửi
+// tuỳ ý gây 500 thay vì bị coi là dữ liệu sai.
+
+/** device_id gửi lên phải là chuỗi (không phải số/object/mảng) và không chứa ký tự NUL. */
+export function isSafeDeviceId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && !value.includes("\0");
+}
+
+/** JSON đã stringify có chứa `\u0000` (escape thật, không tính `\\u0000` = backslash + chữ "u0000") hay không. */
+export function jsonHasNul(json: string): boolean {
+  return /(^|[^\\])(\\\\)*\\u0000/.test(json);
+}
+
 async function fetchDevice(device_id: string): Promise<DeviceRow | null> {
-  const [rows] = await pool.execute<any[]>(
+  // device_id so khớp CHÍNH XÁC (PostgreSQL phân biệt hoa/thường): HMAC được tính trên đúng chuỗi
+  // thiết bị gửi, nên id sai hoa/thường phải là NOT_FOUND chứ không được khớp nhầm thiết bị khác.
+  return queryOne<DeviceRow>(
     `SELECT id, secret_key, status, fail_count FROM devices WHERE device_id = ? LIMIT 1`,
     [device_id]
   );
-  return rows.length > 0 ? (rows[0] as DeviceRow) : null;
 }
 
 function isTimestampValid(timestamp: number): boolean {

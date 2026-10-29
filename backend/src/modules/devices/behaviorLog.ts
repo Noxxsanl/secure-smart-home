@@ -38,9 +38,9 @@ export async function logBehavior(input: BehaviorLogInput, db: Queryable = pool)
     const local = homeLocalParts(at, input.timezone);
     await runSql(
       `INSERT INTO user_behavior_logs
-         (event_id, timestamp, user_id, smart_home_id, room_id, device_id, device_type, action,
+         (event_id, "timestamp", user_id, smart_home_id, room_id, device_id, device_type, action,
           previous_state, new_state, weekday, minute_of_day, is_weekend, is_holiday, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, FALSE, ?)`,
       [
         newUuid(),
         at,
@@ -54,7 +54,7 @@ export async function logBehavior(input: BehaviorLogInput, db: Queryable = pool)
         input.newState,
         local.weekday,
         local.minuteOfDay,
-        local.weekday === 0 || local.weekday === 6 ? 1 : 0,
+        local.weekday === 0 || local.weekday === 6,
         input.source,
       ],
       db

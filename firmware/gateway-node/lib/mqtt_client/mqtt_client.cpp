@@ -6,11 +6,11 @@
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 
-// CA của Broker 2 — sinh bằng scripts/gen_mqtt_certs.sh (gitignored, giống config_gw.h)
+// CA của Broker 2 — sinh bằng infra/pki/gen_mqtt_certs.sh (gitignored, giống config_gw.h)
 #if __has_include("mqtt_ca_cert.h")
 #include "mqtt_ca_cert.h"
 #else
-#error "Thieu include/mqtt_ca_cert.h - chay: bash scripts/gen_mqtt_certs.sh <IP may chay broker>"
+#error "Thieu include/mqtt_ca_cert.h - chay: bash infra/pki/gen_mqtt_certs.sh <IP may chay broker>"
 #endif
 
 // TLS handshake RSA-2048 trên ESP32 mất ~1-3s; quá thời gian này coi như broker không phản hồi

@@ -11,9 +11,12 @@ const MAX_BATCHES_PER_RUN = 200; // chặn vòng lặp vô hạn nếu DB bất 
 const REFRESH_TOKEN_GRACE_DAYS = 7;
 const DAY_MS = 24 * 3600 * 1000;
 
-// LIMIT là hằng số nội bộ (không phải input) nên nối thẳng vào SQL — prepared statement không nhận LIMIT dạng số
-const DELETE_TELEMETRY_SQL = `DELETE FROM sensor_data WHERE received_at < ? ORDER BY received_at LIMIT ${BATCH_SIZE}`;
-const DELETE_TOKENS_SQL = `DELETE FROM refresh_tokens WHERE expires_at < ? LIMIT ${BATCH_SIZE}`;
+// PostgreSQL không có DELETE … ORDER BY/LIMIT như MySQL: chọn id của một lô trong truy vấn con rồi xoá theo id.
+// BATCH_SIZE là hằng số nội bộ (không phải input) nên nối thẳng vào SQL.
+const DELETE_TELEMETRY_SQL = `DELETE FROM sensor_data WHERE id IN (
+  SELECT id FROM sensor_data WHERE received_at < ? ORDER BY received_at LIMIT ${BATCH_SIZE})`;
+const DELETE_TOKENS_SQL = `DELETE FROM refresh_tokens WHERE id IN (
+  SELECT id FROM refresh_tokens WHERE expires_at < ? LIMIT ${BATCH_SIZE})`;
 
 async function deleteInBatches(sql: string, cutoff: Date): Promise<number> {
   let total = 0;

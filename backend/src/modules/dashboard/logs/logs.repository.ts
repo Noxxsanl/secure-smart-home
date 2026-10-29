@@ -104,12 +104,12 @@ function buildWhere(filter: LogFilter): { where: string; params: SqlParam[] } {
   }
   if (filter.actor !== undefined) {
     const pattern = likePattern(filter.actor);
-    clauses.push("(u.username LIKE ? OR u.email LIKE ?)");
+    clauses.push("(unaccent(u.username) ILIKE unaccent(?) OR unaccent(u.email) ILIKE unaccent(?))");
     params.push(pattern, pattern);
   }
   if (filter.q !== undefined) {
     const pattern = likePattern(filter.q);
-    clauses.push("(a.message LIKE ? OR a.event_type LIKE ? OR d.device_id LIKE ?)");
+    clauses.push("(unaccent(a.message) ILIKE unaccent(?) OR unaccent(a.event_type) ILIKE unaccent(?) OR unaccent(d.device_id) ILIKE unaccent(?))");
     params.push(pattern, pattern, pattern);
   }
   return { where: `WHERE ${clauses.join(" AND ")}`, params };

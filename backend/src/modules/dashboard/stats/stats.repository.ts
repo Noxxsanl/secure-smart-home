@@ -3,7 +3,7 @@
 import { queryOne, toCount } from "../../../lib/db";
 import { ONLINE_WINDOW_SECONDS } from "../../../lib/time";
 
-const ONLINE_SQL = `last_seen IS NOT NULL AND TIMESTAMPDIFF(SECOND, last_seen, NOW()) < ${ONLINE_WINDOW_SECONDS}`;
+const ONLINE_SQL = `last_seen IS NOT NULL AND last_seen > NOW() - make_interval(secs => ${ONLINE_WINDOW_SECONDS})`;
 
 async function count(sql: string): Promise<number> {
   const row = await queryOne<{ total: unknown }>(sql);
@@ -14,9 +14,9 @@ export const countUnclaimedHomes = () => count("SELECT COUNT(*) AS total FROM sm
 
 export async function homeStatusCounts(): Promise<{ unclaimed: number; active: number; suspended: number; total: number }> {
   const row = await queryOne<{ unclaimed: unknown; active: unknown; suspended: unknown; total: unknown }>(
-    `SELECT COALESCE(SUM(status = 'unclaimed'), 0) AS unclaimed,
-            COALESCE(SUM(status = 'active'), 0) AS active,
-            COALESCE(SUM(status = 'suspended'), 0) AS suspended,
+    `SELECT COUNT(*) FILTER (WHERE status = 'unclaimed') AS unclaimed,
+            COUNT(*) FILTER (WHERE status = 'active') AS active,
+            COUNT(*) FILTER (WHERE status = 'suspended') AS suspended,
             COUNT(*) AS total
        FROM smart_homes`
   );
@@ -32,7 +32,7 @@ export const countCustomers = () => count("SELECT COUNT(*) AS total FROM custome
 
 export async function gatewayCounts(): Promise<{ online: number; total: number }> {
   const row = await queryOne<{ online: unknown; total: unknown }>(
-    `SELECT COALESCE(SUM(${ONLINE_SQL}), 0) AS online, COUNT(*) AS total
+    `SELECT COUNT(*) FILTER (WHERE ${ONLINE_SQL}) AS online, COUNT(*) AS total
        FROM devices WHERE device_type = 'gateway' AND provision_status = 'provisioned'`
   );
   return { online: toCount(row?.online), total: toCount(row?.total) };
@@ -40,7 +40,7 @@ export async function gatewayCounts(): Promise<{ online: number; total: number }
 
 export async function deviceCounts(): Promise<{ online: number; total: number }> {
   const row = await queryOne<{ online: unknown; total: unknown }>(
-    `SELECT COALESCE(SUM(${ONLINE_SQL}), 0) AS online, COUNT(*) AS total
+    `SELECT COUNT(*) FILTER (WHERE ${ONLINE_SQL}) AS online, COUNT(*) AS total
        FROM devices WHERE device_type <> 'gateway' AND provision_status = 'provisioned'`
   );
   return { online: toCount(row?.online), total: toCount(row?.total) };

@@ -16,7 +16,7 @@
 // 3. MQTT — Broker 1 (sensor → gateway, plaintext), Broker 2 (gateway → backend, TLS)
 #define MQTT_BROKER1_HOST "192.168.1.100"
 #define MQTT_BROKER1_PORT 1883
-#define MQTT_BROKER2_HOST "192.168.1.100"  // phải nằm trong SAN cert (scripts/gen_mqtt_certs.sh)
+#define MQTT_BROKER2_HOST "192.168.1.100"  // phải nằm trong SAN cert (infra/pki/gen_mqtt_certs.sh)
 #define MQTT_BROKER2_PORT 8883
 #define MQTT_BUFFER_SIZE 1024
 #define MQTT_RECONNECT_INTERVAL_MS 5000

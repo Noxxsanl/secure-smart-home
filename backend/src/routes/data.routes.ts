@@ -3,10 +3,11 @@
 // không kết nối được tới MQTT broker (ví dụ: khác network segment) vẫn có thể
 // gửi dữ liệu qua HTTP thông thường. Cả hai đường đều xác thực HMAC 2 lớp.
 import { Router, Request, Response } from "express";
-import pool from "../config/db";
+import { queryOne, queryRows, runSql } from "../lib/db";
 import { validateDevice } from "../middleware/validateDevice";
 import { onTelemetryIngested } from "../modules/devices/telemetry.service";
 import { log, logDataRecvWithPrune } from "../services/auditLogger";
+import { jsonHasNul } from "../services/hmacService";
 
 const router = Router();
 
@@ -28,15 +29,21 @@ router.post("/", validateDevice, async (req: Request, res: Response): Promise<vo
     res.status(400).json({ error: "MISSING_PAYLOAD_DATA", detail: "Request body must include a 'data' object" });
     return;
   }
+  // JSONB không nhận `\u0000` (22P05) → coi như payload sai, khớp mqttDataService.ts.
+  const dataJson = JSON.stringify(data);
+  if (jsonHasNul(dataJson)) {
+    res.status(400).json({ error: "MISSING_PAYLOAD_DATA", detail: "'data' must not contain NUL characters" });
+    return;
+  }
 
   // Fetch device_type and current status from DB (single round-trip for both devices)
-  const [rows] = await pool.execute<any[]>(
+  const rows = await queryRows<{ id: number; device_type: string; status: string }>(
     `SELECT id, device_type, status FROM devices WHERE id IN (?, ?)`,
     [gateway.id, sensor.id]
   );
 
-  const gwRow = (rows as any[]).find((r) => r.id === gateway.id);
-  const snRow = (rows as any[]).find((r) => r.id === sensor.id);
+  const gwRow = rows.find((r) => r.id === gateway.id);
+  const snRow = rows.find((r) => r.id === sensor.id);
 
   // RBAC: device_type check
   if (!gwRow || gwRow.device_type !== "gateway") {
@@ -77,17 +84,17 @@ router.post("/", validateDevice, async (req: Request, res: Response): Promise<vo
   }
 
   // Insert sensor data
-  const [insertResult] = await pool.execute<any>(
-    `INSERT INTO sensor_data (device_id, gateway_id, payload) VALUES (?, ?, ?)`,
-    [sensor.id, gateway.id, JSON.stringify(data)]
+  const insertResult = await runSql(
+    `INSERT INTO sensor_data (device_id, gateway_id, payload) VALUES (?, ?, ?) RETURNING id`,
+    [sensor.id, gateway.id, dataJson]
   );
 
   // Fetch received_at from the newly inserted row
-  const [sdRows] = await pool.execute<any[]>(
+  const sdRow = await queryOne<{ received_at: Date }>(
     `SELECT received_at FROM sensor_data WHERE id = ?`,
     [insertResult.insertId]
   );
-  const receivedAt: Date = sdRows[0]?.received_at ?? new Date();
+  const receivedAt: Date = sdRow?.received_at ?? new Date();
 
   // V2: không còn prune "150 dòng/sensor" ở đây — sensor_data giữ theo THỜI GIAN (job retention
   // hằng giờ, TELEMETRY_RETENTION_DAYS) để biểu đồ 7 ngày có đủ dữ liệu.
@@ -105,17 +112,17 @@ router.post("/", validateDevice, async (req: Request, res: Response): Promise<vo
   const resolvedGwIp  = (typeof gateway_ip === "string" && gateway_ip) ? gateway_ip : ip;
   const resolvedSnIp  = (typeof sensor_ip  === "string" && sensor_ip)  ? sensor_ip  : null;
 
-  await pool.execute(
+  await runSql(
     `UPDATE devices SET last_seen = NOW(), fail_count = 0, last_ip = ? WHERE id = ?`,
     [resolvedGwIp, gateway.id]
   );
   if (resolvedSnIp) {
-    await pool.execute(
+    await runSql(
       `UPDATE devices SET last_seen = NOW(), fail_count = 0, last_ip = ? WHERE id = ?`,
       [resolvedSnIp, sensor.id]
     );
   } else {
-    await pool.execute(
+    await runSql(
       `UPDATE devices SET last_seen = NOW(), fail_count = 0 WHERE id = ?`,
       [sensor.id]
     );

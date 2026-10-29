@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Bottom navigation tabs (docs/07 §4.2): Trang chủ / Phòng / Tự động /
+/// Bottom navigation tabs (docs/architecture/MOBILE_APP_ARCHITECTURE.md §4.2): Trang chủ / Phòng / Tự động /
 /// Thông báo / Hồ sơ.
 enum ShellTab { home, rooms, automation, notifications, profile }
 

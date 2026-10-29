@@ -57,7 +57,7 @@ export async function createKitHome(conn: Queryable, input: CreateKitHomeInput):
         roomId,
         gatewayDeviceId: gatewayId,
         nodeUid,
-        powerState: device.category === "relay" ? 0 : null,
+        powerState: device.category === "relay" ? false : null,
         firmwareVersion: KIT_FIRMWARE.node,
         location: room.roomName,
         simulated: input.simulated,

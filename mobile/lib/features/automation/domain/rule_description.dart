@@ -42,7 +42,7 @@ String describeRule(AutomationRule rule) {
   }
 }
 
-/// Plain-language explanation of an AI suggestion card (docs/07 §14: natural
+/// Plain-language explanation of an AI suggestion card (docs/architecture/MOBILE_APP_ARCHITECTURE.md §14: natural
 /// behaviour wording, no technical terms).
 String describeSuggestion({
   required RuleAction action,

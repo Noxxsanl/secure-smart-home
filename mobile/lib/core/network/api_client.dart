@@ -7,7 +7,7 @@ import '../storage/session_storage.dart';
 import '../utils/json.dart';
 import 'api_exception.dart';
 
-/// HTTP client for `/api/mobile/**` (docs/07 §10).
+/// HTTP client for `/api/mobile/**` (docs/architecture/MOBILE_APP_ARCHITECTURE.md §10).
 ///
 /// - JSON in/out, `Authorization: Bearer <access token>`.
 /// - On a 401 token rejection (`NO_TOKEN`, `INVALID_TOKEN`, `TOKEN_EXPIRED`)

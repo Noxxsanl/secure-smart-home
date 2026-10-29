@@ -1,9 +1,11 @@
 import { Router, Request, Response } from "express";
-import pool from "../config/db";
+import { placeholders, queryRows, runSql, type SqlParam } from "../lib/db";
 import { verifyJWT } from "../middleware/verifyJWT";
 import { requireRole } from "../middleware/rbac";
 
 const router = Router();
+
+const MAX_BULK_IDS = 500;
 
 const VALID_EVENT_TYPES = [
   "GATEWAY_AUTH_FAIL",
@@ -31,10 +33,7 @@ router.delete("/by-type", verifyJWT, requireRole("admin"), async (req: Request, 
     res.status(400).json({ error: "INVALID_EVENT_TYPE" });
     return;
   }
-  const [result] = await (pool as any).execute(
-    "DELETE FROM audit_log WHERE event_type = ?",
-    [event_type]
-  );
+  const result = await runSql("DELETE FROM audit_log WHERE event_type = ?", [event_type]);
   res.json({ success: true, deleted: result.affectedRows });
 });
 
@@ -45,24 +44,24 @@ router.delete("/bulk", verifyJWT, requireRole("admin"), async (req: Request, res
     res.status(400).json({ error: "INVALID_IDS" });
     return;
   }
-  const numIds = (ids as unknown[]).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  // PostgreSQL giới hạn 65535 tham số/câu lệnh; chặn sớm (trước khi map/dựng IN (...)) thay vì để lỗi → 500.
+  if (ids.length > MAX_BULK_IDS) {
+    res.status(400).json({ error: "INVALID_IDS", detail: `Tối đa ${MAX_BULK_IDS} id mỗi lần xoá` });
+    return;
+  }
+  // isSafeInteger: PostgreSQL báo lỗi (thay vì bỏ qua như MySQL) khi id không phải số nguyên hợp lệ / vượt miền BIGINT.
+  const numIds = (ids as unknown[]).map(Number).filter((n) => Number.isSafeInteger(n) && n > 0);
   if (numIds.length === 0) {
     res.status(400).json({ error: "INVALID_IDS" });
     return;
   }
-  const placeholders = numIds.map(() => "?").join(",");
-  const [result] = await (pool as any).execute(
-    `DELETE FROM audit_log WHERE id IN (${placeholders})`,
-    numIds
-  );
-  res.json({ success: true, deleted: (result as any).affectedRows });
+  const result = await runSql(`DELETE FROM audit_log WHERE id IN (${placeholders(numIds.length)})`, numIds);
+  res.json({ success: true, deleted: result.affectedRows });
 });
 
 // DELETE /api/audit-log/data-recv – giữ lại để tương thích ngược
 router.delete("/data-recv", verifyJWT, requireRole("admin"), async (_req: Request, res: Response): Promise<void> => {
-  const [result] = await (pool as any).execute(
-    "DELETE FROM audit_log WHERE event_type = 'DATA_RECV'"
-  );
+  const result = await runSql("DELETE FROM audit_log WHERE event_type = 'DATA_RECV'");
   res.json({ success: true, deleted: result.affectedRows });
 });
 
@@ -73,7 +72,7 @@ router.get("/", verifyJWT, async (req: Request, res: Response): Promise<void> =>
   const allowedTypes = ALLOWED_EVENT_TYPES_BY_ROLE[user?.role] ?? [];
 
   const conditions: string[] = [];
-  const params: (string | number | Date)[] = [];
+  const params: SqlParam[] = [];
 
   if (event_type && typeof event_type === "string") {
     if (!allowedTypes.includes(event_type)) {
@@ -88,7 +87,8 @@ router.get("/", verifyJWT, async (req: Request, res: Response): Promise<void> =>
   }
   if (device_id) {
     const id = Number(device_id);
-    if (!Number.isFinite(id) || id <= 0) {
+    // ≤ 2^31-1: cột device_id là INT, PostgreSQL báo lỗi nếu vượt miền (MySQL thì trả rỗng).
+    if (!Number.isSafeInteger(id) || id <= 0 || id > 2147483647) {
       res.status(400).json({ error: "INVALID_DEVICE_ID" });
       return;
     }
@@ -135,7 +135,7 @@ router.get("/", verifyJWT, async (req: Request, res: Response): Promise<void> =>
     LIMIT 500
   `;
 
-  const [rows] = await (pool as any).query(sql, params);
+  const rows = await queryRows<Record<string, unknown>>(sql, params);
 
   res.json({ audit_log: rows });
 });

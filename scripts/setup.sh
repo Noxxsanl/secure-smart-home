@@ -39,21 +39,27 @@ else
 fi
 ok "Docker Compose sẵn sàng ($COMPOSE_CMD)."
 
-# .env gốc cho docker compose — mật khẩu MySQL ngẫu nhiên, không commit
-if ! grep -q '^MYSQL_PASSWORD=.' .env 2>/dev/null; then
+# .env gốc cho docker compose — mật khẩu PostgreSQL ngẫu nhiên, không commit
+if ! grep -q '^POSTGRES_APP_PASSWORD=.' .env 2>/dev/null; then
     gen_pw() { openssl rand -hex 16 2>/dev/null || tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; }
+    # Nối thêm (>>) thay vì ghi đè: .env cũ (bản MySQL) có thể còn biến khác; dòng trống đầu tiên
+    # đóng dòng cuối nếu file cũ không kết thúc bằng xuống dòng.
     {
-        echo "MYSQL_ROOT_PASSWORD=$(gen_pw)"
-        echo "MYSQL_DATABASE=secure_smart_home_iot"
-        echo "MYSQL_USER=secure_smart_home_app"
-        echo "MYSQL_PASSWORD=$(gen_pw)"
-    } > .env
-    ok "Đã tạo .env (mật khẩu MySQL ngẫu nhiên)."
+        echo ""
+        echo "POSTGRES_PASSWORD=$(gen_pw)"
+        echo "POSTGRES_DB=secure_smart_home_iot"
+        echo "POSTGRES_APP_USER=secure_smart_home_app"
+        echo "POSTGRES_APP_PASSWORD=$(gen_pw)"
+    } >> .env
+    ok "Đã tạo biến PostgreSQL trong .env (mật khẩu ngẫu nhiên)."
+    if docker volume ls -q | grep -q '_pg_data$'; then
+        warn "Volume pg_data đã tồn tại với mật khẩu cũ (POSTGRES_* chỉ áp dụng lần khởi tạo đầu) — đổi bằng 'docker exec -it iot-postgres psql -U postgres -c \"ALTER ROLE <POSTGRES_APP_USER> PASSWORD '...'\"' hoặc 'docker compose down -v' (mất dữ liệu)."
+    fi
     if docker volume ls -q | grep -q '_mysql_data$'; then
-        warn "Volume mysql_data đã tồn tại với mật khẩu cũ — đổi bằng ALTER USER hoặc 'docker compose down -v' (mất dữ liệu)."
+        info "Volume mysql_data (MySQL cũ) không còn được dùng — xoá khi không cần dữ liệu cũ: docker volume rm <tên volume>."
     fi
 else
-    ok ".env (MySQL) đã tồn tại."
+    ok ".env (PostgreSQL) đã tồn tại."
 fi
 
 # Setup backend .env
@@ -69,11 +75,11 @@ else
 fi
 
 # Chứng chỉ TLS cho MQTT Broker 2 — tham số của setup.sh (IP LAN) được chuyển tiếp
-if [ ! -f "mosquitto/certs/server.crt" ]; then
+if [ ! -f "infra/mosquitto/certs/server.crt" ]; then
     info "Chưa có chứng chỉ MQTT TLS — đang sinh..."
-    bash scripts/gen_mqtt_certs.sh "$@"
+    bash infra/pki/gen_mqtt_certs.sh "$@"
 else
-    ok "Chứng chỉ MQTT TLS đã có (sinh lại: bash scripts/gen_mqtt_certs.sh <IP LAN>)."
+    ok "Chứng chỉ MQTT TLS đã có (sinh lại: bash infra/pki/gen_mqtt_certs.sh <IP LAN>)."
 fi
 
 # Build and start
@@ -88,10 +94,12 @@ echo " ==================================="
 echo "  Khởi động thành công!"
 echo " ==================================="
 echo ""
-echo "  Frontend : http://localhost:3000"
+echo "  Admin    : http://localhost:3001"
+echo "  Operator : http://localhost:3002"
+echo "  Khách hàng: http://localhost:3003"
 echo "  Backend  : http://localhost:5000/api/health"
 echo ""
-echo "  Đăng nhập: admin / 123456"
+echo "  Đăng nhập Admin: tài khoản seed 'admin' — mật khẩu xem docs/guides/CHAY_LOCAL.md, đổi khi dùng thật"
 echo ""
 echo "  Xem log  : $COMPOSE_CMD logs -f"
 echo "  Dừng     : $COMPOSE_CMD down"

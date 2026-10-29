@@ -66,10 +66,11 @@ export async function listCustomers(q: string | undefined, contactSearch = true)
   if (q !== undefined) {
     const pattern = likePattern(q);
     if (contactSearch) {
-      where = "WHERE (c.full_name LIKE ? OR c.user_tag LIKE ? OR u.email LIKE ? OR c.phone LIKE ?)";
+      where = `WHERE (unaccent(c.full_name) ILIKE unaccent(?) OR unaccent(c.user_tag) ILIKE unaccent(?)
+                  OR unaccent(u.email) ILIKE unaccent(?) OR unaccent(c.phone) ILIKE unaccent(?))`;
       params.push(pattern, pattern, pattern, pattern);
     } else {
-      where = "WHERE (c.full_name LIKE ? OR c.user_tag LIKE ?)";
+      where = "WHERE (unaccent(c.full_name) ILIKE unaccent(?) OR unaccent(c.user_tag) ILIKE unaccent(?))";
       params.push(pattern, pattern);
     }
   }
@@ -87,9 +88,9 @@ export async function getCustomerByUserId(userId: number, db: Queryable = pool):
   return row ? toCustomer(row) : null;
 }
 
-/** user_tag so khớp không phân biệt hoa/thường (collation utf8mb4_unicode_ci); chỉ tài khoản đang active. */
+/** user_tag so khớp không phân biệt hoa/thường (LOWER vì PostgreSQL phân biệt hoa/thường); chỉ tài khoản đang active. */
 export async function findCustomerByTag(userTag: string): Promise<Customer | null> {
-  const row = await queryOne<CustomerRow>(`${CUSTOMER_SELECT_SQL} WHERE c.user_tag = ? AND u.status = 'active'`, [userTag]);
+  const row = await queryOne<CustomerRow>(`${CUSTOMER_SELECT_SQL} WHERE LOWER(c.user_tag) = LOWER(?) AND u.status = 'active'`, [userTag]);
   return row ? toCustomer(row) : null;
 }
 

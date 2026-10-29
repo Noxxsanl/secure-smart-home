@@ -76,7 +76,7 @@ export async function listHomeDeviceRows(
   const gatewayFilter = opts.includeGateway === false ? "AND d.device_type <> 'gateway'" : "";
   return queryRows<DeviceRow>(
     `${DEVICE_SELECT_SQL} WHERE d.home_id = ? ${gatewayFilter}
-      ORDER BY (d.device_type = 'gateway') DESC, r.sort_order, d.room_id, d.id`,
+      ORDER BY (d.device_type = 'gateway') DESC, r.sort_order NULLS FIRST, d.room_id NULLS FIRST, d.id`,
     [homeId],
     db
   );
@@ -100,7 +100,7 @@ function asBoolean(value: unknown): boolean | null {
   return null;
 }
 
-/** Cột JSON của mysql2 thường đã là object, nhưng vẫn chịu được chuỗi/Buffer. */
+/** Cột JSONB do pg trả sẵn là object, nhưng vẫn chịu được chuỗi/Buffer. */
 function parsePayload(value: unknown): Record<string, unknown> | null {
   let parsed: unknown = value;
   if (Buffer.isBuffer(parsed)) parsed = parsed.toString("utf8");
@@ -153,28 +153,31 @@ const BUCKET_SECONDS: Record<TelemetryRange, number> = { "24h": 300, "7d": 3600 
 const RANGE_MS: Record<TelemetryRange, number> = { "24h": 24 * 3600 * 1000, "7d": 7 * 24 * 3600 * 1000 };
 
 // Chỉ nhận số thật trong JSON: `{"temperature": null}` hay chuỗi không được tính là 0 vào AVG.
+// `key` chỉ nhận đúng hai literal của kiểu union (không phải input người dùng) nên nối thẳng vào SQL an toàn.
+// Làm tròn 2 chữ số bằng ROUND thay vì ép NUMERIC(8,2): số lớn bất thường trong payload không làm cả truy vấn
+// lỗi "numeric field overflow".
 function jsonNumberSql(key: "temperature" | "humidity"): string {
-  const path = `JSON_EXTRACT(payload, '$.${key}')`;
-  return `IF(JSON_TYPE(${path}) IN ('INTEGER','UNSIGNED INTEGER','DOUBLE','DECIMAL'), CAST(${path} AS DECIMAL(8,2)), NULL)`;
+  const path = `payload->'${key}'`;
+  return `CASE WHEN jsonb_typeof(${path}) = 'number' THEN ROUND((payload->>'${key}')::numeric, 2) ELSE NULL END`;
 }
 
 /**
  * Chuỗi thời gian nhiệt độ/độ ẩm: AVG theo bucket 300 s (24h) hoặc 3600 s (7d), cũ → mới.
  * Bucket không có số đo nào bị bỏ; thiết bị không phải cảm biến khí hậu → `points` rỗng.
- * Hằng số bucket được nối thẳng vào SQL (không phải input người dùng) để MySQL gom nhóm được.
+ * Hằng số bucket được nối thẳng vào SQL (không phải input người dùng) để GROUP BY gom đúng một biểu thức.
  */
 export async function getTelemetrySeries(deviceId: number, range: TelemetryRange, db: Queryable = pool): Promise<TelemetrySeries> {
   const bucket = BUCKET_SECONDS[range];
   const since = new Date(Date.now() - RANGE_MS[range]);
   const rows = await queryRows<{ bucket_ts: string | number; temperature: string | number | null; humidity: string | number | null }>(
-    `SELECT FLOOR(UNIX_TIMESTAMP(received_at) / ${bucket}) * ${bucket} AS bucket_ts,
+    `SELECT (FLOOR(EXTRACT(EPOCH FROM received_at) / ${bucket}) * ${bucket})::bigint AS bucket_ts,
             AVG(${jsonNumberSql("temperature")}) AS temperature,
             AVG(${jsonNumberSql("humidity")}) AS humidity
        FROM sensor_data
       WHERE device_id = ? AND received_at >= ?
-      GROUP BY bucket_ts
-     HAVING temperature IS NOT NULL OR humidity IS NOT NULL
-      ORDER BY bucket_ts ASC`,
+      GROUP BY 1
+     HAVING AVG(${jsonNumberSql("temperature")}) IS NOT NULL OR AVG(${jsonNumberSql("humidity")}) IS NOT NULL
+      ORDER BY 1 ASC`,
     [deviceId, since],
     db
   );

@@ -87,7 +87,8 @@ export async function insertPendingAttempt(input: {
 }): Promise<number> {
   const result = await runSql(
     `INSERT INTO activation_logs (user_id, code_hash, method, result, reason, ip_address, user_agent)
-     VALUES (?, ?, ?, 'failed', 'PENDING', ?, ?)`,
+     VALUES (?, ?, ?, 'failed', 'PENDING', ?, ?)
+     RETURNING id`,
     [input.userId, input.codeHash, input.method, input.ip, input.userAgent]
   );
   return result.insertId;

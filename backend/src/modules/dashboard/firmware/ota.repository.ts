@@ -94,7 +94,7 @@ export async function getJobRow(id: number, db: Queryable = pool): Promise<JobRo
 export interface OtaTarget {
   id: number;
   gateway_device_id: number | null;
-  is_simulated: number;
+  is_simulated: boolean;
 }
 
 /** Gateway (type gateway) hoặc thiết bị không phải gateway (type node) đã gán nhà; homeId = giới hạn một nhà. */
@@ -118,7 +118,7 @@ export async function insertJob(
   input: { firmwareId: number; scopeType: "system" | "home"; scopeId: number | null; createdBy: number }
 ): Promise<number> {
   const result = await runSql(
-    "INSERT INTO ota_jobs (firmware_id, scope_type, scope_id, status, created_by) VALUES (?, ?, ?, 'running', ?)",
+    "INSERT INTO ota_jobs (firmware_id, scope_type, scope_id, status, created_by) VALUES (?, ?, ?, 'running', ?) RETURNING id",
     [input.firmwareId, input.scopeType, input.scopeId, input.createdBy],
     db
   );
@@ -154,7 +154,7 @@ export async function markHistory(
       `UPDATE ota_history
           SET status = ?, error_message = ?,
               started_at = COALESCE(started_at, NOW()),
-              finished_at = IF(? = 'failed', NOW(), NULL)
+              finished_at = CASE WHEN ?::text = 'failed' THEN NOW() ELSE NULL END
         WHERE ota_job_id = ? AND status = 'pending' AND device_id IN (${placeholders(part.length)})`,
       [status, errorMessage, status, jobId, ...part]
     );

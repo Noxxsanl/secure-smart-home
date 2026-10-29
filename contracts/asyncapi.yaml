@@ -1,0 +1,30 @@
+# TẠM — nguồn định nghĩa topic MQTT hai chặng (sensor → gateway → backend).
+# Mới ghi 2 topic đang chạy; payload, QoS và topic đích home/{home_id}/gateway/{gw}/…
+# vẫn lấy theo docs/API_DESIGN.md cho tới khi file này được viết đầy đủ.
+asyncapi: 3.0.0
+info:
+  title: Secure Smart Home IoT — MQTT
+  version: 0.1.0
+  description: Bản nháp, chưa có code nào đọc file này.
+servers:
+  broker1:
+    host: localhost:1883
+    protocol: mqtt
+    description: Sensor ↔ Gateway (LAN, plaintext)
+  broker2:
+    host: localhost:8883
+    protocol: secure-mqtt
+    description: Gateway → Backend (TLS)
+channels:
+  sensorData:
+    address: local/sensors/{sensor_id}/data
+    parameters:
+      sensor_id: {}
+    servers:
+      - $ref: '#/servers/broker1'
+  gatewayData:
+    address: gateway/{gateway_id}/data
+    parameters:
+      gateway_id: {}
+    servers:
+      - $ref: '#/servers/broker2'

@@ -1,0 +1,10 @@
+# TẠM — mô hình datapoint (DP) dùng chung cho firmware, backend, web và mobile.
+# Chưa có code nào đọc file này. Các DP dưới đây lấy từ sensor_payload.data đang chạy.
+version: 0
+datapoints:
+  - id: temperature
+    type: number
+    unit: "°C"
+  - id: humidity
+    type: number
+    unit: "%"

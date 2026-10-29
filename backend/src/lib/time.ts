@@ -1,6 +1,6 @@
 // Giờ địa phương của từng nhà (smart_homes.timezone) cho lịch automation, phân tích
 // thói quen và user_behavior_logs. Dùng Intl.DateTimeFormat để không phụ thuộc
-// múi giờ của server/MySQL (server chạy UTC, nhà ở Asia/Ho_Chi_Minh).
+// múi giờ của server/PostgreSQL (server chạy UTC, nhà ở Asia/Ho_Chi_Minh).
 
 export const DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh";
 

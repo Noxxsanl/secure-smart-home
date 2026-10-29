@@ -7,7 +7,7 @@
 // (có thể là mật khẩu gõ nhầm ô).
 import { HttpError } from "./http";
 
-const MAX_DB_ID = 4294967295; // INT UNSIGNED
+const MAX_DB_ID = 2147483647; // INT (PostgreSQL không có UNSIGNED; id vượt miền sẽ gây lỗi 22003 nên chặn sớm → 404/400)
 
 function invalid(field: string, why: string): HttpError {
   return new HttpError(400, "INVALID_INPUT", `${field} ${why}`);

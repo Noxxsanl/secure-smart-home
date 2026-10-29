@@ -1,4 +1,4 @@
-/// Role inside one Smart Home (docs/01 §7, contract §4.1). The backend is the
+/// Role inside one Smart Home (docs/SMART_HOME_PRODUCT_ARCHITECTURE.md §7, contract §4.1). The backend is the
 /// source of truth; the UI mirrors the matrix to hide/disable actions.
 enum HomeRole {
   owner('OWNER', 'Chủ nhà'),

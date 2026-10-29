@@ -13,7 +13,7 @@ import type { MqttClient } from "mqtt";
 import { connectBroker } from "../../config/mqtt";
 import type { RequestMeta } from "../../lib/clientIp";
 import { hmacHex, newUuid, safeEqualHex } from "../../lib/crypto";
-import { queryOne, runSql } from "../../lib/db";
+import { queryOne, runSql, toBool } from "../../lib/db";
 import { eventBus } from "../../lib/eventBus";
 import { HttpError, notFound } from "../../lib/http";
 import { isOnline } from "../../lib/time";
@@ -233,7 +233,8 @@ async function insertCommandRow(
 ): Promise<number> {
   const result = await runSql(
     `INSERT INTO device_commands (device_id, home_id, issued_by, source, channel, command, status, issued_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+     RETURNING id`,
     [device.id, device.home_id, issuedBy, source, channel, command, issuedAt]
   );
   return result.insertId;
@@ -371,10 +372,10 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
   // Ack ok: ghi trạng thái mới
   const ackedAt = new Date();
   const newPower = outcome.power ?? (input.action === "turn_on");
-  await runSql("UPDATE devices SET power_state = ? WHERE id = ?", [newPower ? 1 : 0, device.id]);
+  await runSql("UPDATE devices SET power_state = ? WHERE id = ?", [newPower, device.id]);
   await runSql("UPDATE device_commands SET status = 'acked', error_code = NULL, acked_at = ? WHERE id = ?", [ackedAt, rowId]);
 
-  const updated = (await getDeviceRow(device.id)) ?? { ...device, power_state: newPower ? 1 : 0 };
+  const updated = (await getDeviceRow(device.id)) ?? { ...device, power_state: newPower };
   const stateEvent = toDeviceStateEvent(updated);
   if (stateEvent) eventBus.emit("device_state", stateEvent);
 
@@ -386,7 +387,7 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
     deviceId: device.id,
     deviceCategory: device.category,
     action: input.action === "turn_on" ? "TURN_ON" : "TURN_OFF",
-    previousState: powerLabel(device.power_state === null ? null : device.power_state === 1),
+    previousState: powerLabel(device.power_state === null ? null : toBool(device.power_state)),
     newState: powerLabel(newPower),
     source: input.behaviorSource ?? defaultBehaviorSource(input.source, input.channel),
     at: ackedAt,

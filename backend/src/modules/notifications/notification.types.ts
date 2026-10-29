@@ -50,6 +50,6 @@ export interface NotificationRow {
   actor_id: number | null;
   actor_username: string | null;
   actor_role: string | null;
-  is_read: number;
+  is_read: boolean;
   created_at: Date;
 }

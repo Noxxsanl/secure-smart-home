@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { Router, Request, Response } from "express";
-import pool from "../config/db";
+import { isDuplicateKeyError, queryOne, queryRows, runSql } from "../lib/db";
 import { verifyJWT } from "../middleware/verifyJWT";
 import { requireRole } from "../middleware/rbac";
 
@@ -8,7 +8,7 @@ const router = Router();
 
 // GET /api/users  – admin only
 router.get("/", verifyJWT, requireRole("admin"), async (_req: Request, res: Response): Promise<void> => {
-  const [rows] = await pool.execute<any[]>(
+  const rows = await queryRows<Record<string, unknown>>(
     "SELECT id, username, role, created_at, last_login FROM users ORDER BY created_at DESC"
   );
   res.json({ users: rows });
@@ -35,20 +35,28 @@ router.post("/", verifyJWT, requireRole("admin"), async (req: Request, res: Resp
     return;
   }
 
-  const [existing] = await pool.execute<any[]>(
-    "SELECT id FROM users WHERE username = ?",
-    [username]
-  );
-  if ((existing as any[]).length > 0) {
+  // LOWER(): username duy nhất không phân biệt hoa/thường (unique index LOWER(username)).
+  const existing = await queryOne<{ id: number }>("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", [username]);
+  if (existing) {
     res.status(409).json({ error: "USERNAME_TAKEN" });
     return;
   }
 
   const hash = await bcrypt.hash(password, 12);
-  const [result] = await pool.execute<any>(
-    "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-    [username, hash, role]
-  );
+  let result;
+  try {
+    result = await runSql(
+      "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?) RETURNING id",
+      [username, hash, role]
+    );
+  } catch (err) {
+    // Hai request cùng username chạy song song: lọt qua bước kiểm trên, unique index chặn ở đây.
+    if (isDuplicateKeyError(err)) {
+      res.status(409).json({ error: "USERNAME_TAKEN" });
+      return;
+    }
+    throw err;
+  }
 
   res.status(201).json({
     user: { id: result.insertId, username, role },
@@ -58,7 +66,7 @@ router.post("/", verifyJWT, requireRole("admin"), async (req: Request, res: Resp
 // PATCH /api/users/:id/password  – admin only
 router.patch("/:id/password", verifyJWT, requireRole("admin"), async (req: Request, res: Response): Promise<void> => {
   const id = Number(req.params.id);
-  if (!Number.isFinite(id) || id <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0 || id > 2147483647) { // INT: vượt miền thì PostgreSQL báo lỗi thay vì trả rỗng
     res.status(400).json({ error: "INVALID_ID" });
     return;
   }
@@ -68,15 +76,14 @@ router.patch("/:id/password", verifyJWT, requireRole("admin"), async (req: Reque
     return;
   }
 
-  const [rows] = await pool.execute<any[]>("SELECT id, role FROM users WHERE id = ?", [id]);
-  const user = (rows as any[])[0];
+  const user = await queryOne<{ id: number; role: string }>("SELECT id, role FROM users WHERE id = ?", [id]);
   if (!user) {
     res.status(404).json({ error: "NOT_FOUND" });
     return;
   }
 
   const hash = await bcrypt.hash(password, 12);
-  await pool.execute("UPDATE users SET password_hash = ? WHERE id = ?", [hash, id]);
+  await runSql("UPDATE users SET password_hash = ? WHERE id = ?", [hash, id]);
   res.json({ success: true });
 });
 
@@ -85,7 +92,7 @@ router.delete("/:id", verifyJWT, requireRole("admin"), async (req: Request, res:
   const id = Number(req.params.id);
   const self = (req as any).user?.id;
 
-  if (!Number.isFinite(id) || id <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0 || id > 2147483647) { // INT: vượt miền thì PostgreSQL báo lỗi thay vì trả rỗng
     res.status(400).json({ error: "INVALID_ID" });
     return;
   }
@@ -94,8 +101,7 @@ router.delete("/:id", verifyJWT, requireRole("admin"), async (req: Request, res:
     return;
   }
 
-  const [rows] = await pool.execute<any[]>("SELECT id, role FROM users WHERE id = ?", [id]);
-  const user = (rows as any[])[0];
+  const user = await queryOne<{ id: number; role: string }>("SELECT id, role FROM users WHERE id = ?", [id]);
   if (!user) {
     res.status(404).json({ error: "NOT_FOUND" });
     return;
@@ -105,7 +111,7 @@ router.delete("/:id", verifyJWT, requireRole("admin"), async (req: Request, res:
     return;
   }
 
-  await pool.execute("DELETE FROM users WHERE id = ?", [id]);
+  await runSql("DELETE FROM users WHERE id = ?", [id]);
   res.json({ success: true });
 });
 

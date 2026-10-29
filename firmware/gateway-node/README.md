@@ -52,7 +52,7 @@ gateway-node/
 ├── include/
 │   ├── config_gw.example.h  # Mẫu cấu hình (commit được, CI build bằng file này)
 │   ├── config_gw.h          # Cấu hình tập trung (WiFi, MQTT, secrets, sensor whitelist) — gitignored
-│   └── mqtt_ca_cert.h       # CA của Broker 2, sinh bằng scripts/gen_mqtt_certs.sh — gitignored
+│   └── mqtt_ca_cert.h       # CA của Broker 2, sinh bằng infra/pki/gen_mqtt_certs.sh — gitignored
 ├── lib/
 │   ├── hmac_util/            # HMAC-SHA256 dùng mbedTLS tích hợp của ESP-IDF
 │   ├── wifi_manager/         # Kết nối và auto-reconnect WiFi
@@ -106,7 +106,7 @@ static const SensorCredential KNOWN_SENSORS[] = {
 Gateway chỉ kết nối Broker 2 qua TLS và kiểm chứng chứng chỉ broker bằng CA nội bộ (không có chế độ bỏ qua kiểm tra). Từ thư mục gốc repo:
 
 ```bash
-bash scripts/gen_mqtt_certs.sh 192.168.1.100   # đúng giá trị MQTT_BROKER2_HOST
+bash infra/pki/gen_mqtt_certs.sh 192.168.1.100   # đúng giá trị MQTT_BROKER2_HOST
 ```
 
 Script sinh `include/mqtt_ca_cert.h`. Thiếu file này thì build báo lỗi. IP/hostname truyền vào phải trùng `MQTT_BROKER2_HOST`, nếu không gateway sẽ từ chối kết nối (`X509 - Certificate verification failed`). Đổi IP thì chạy lại script: CA giữ nguyên nên không phải nạp lại firmware.

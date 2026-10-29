@@ -43,7 +43,7 @@ abstract class SessionStorage {
 }
 
 /// Keychain (iOS) / Keystore (Android) backed storage via
-/// `flutter_secure_storage` (docs/07 §17).
+/// `flutter_secure_storage` (docs/architecture/MOBILE_APP_ARCHITECTURE.md §17).
 class SecureSessionStorage implements SessionStorage {
   SecureSessionStorage({FlutterSecureStorage? storage})
     : _storage = storage ?? const FlutterSecureStorage();

@@ -11,7 +11,7 @@
 // băm bcrypt cost 12; secret thiết bị do createKitHome sinh ngẫu nhiên, không bao giờ in ra; mã kích hoạt
 // cố định chỉ lưu SHA-256. Log chỉ in số lượng "[seed] created …".
 import bcrypt from "bcrypt";
-import type { PoolConnection } from "mysql2/promise";
+import type { PoolClient } from "pg";
 import { env } from "../../config/env";
 import { generateActivationCode, hashActivationCode, normalizeActivationCode } from "../../lib/activationCode";
 import { newUuid, sha256Hex } from "../../lib/crypto";
@@ -59,7 +59,7 @@ function localMidnightUtc(daysAgo: number): number {
   return Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate() - daysAgo) - VN_OFFSET_MS;
 }
 
-async function insertChunks(conn: PoolConnection, head: string, columns: number, rows: SqlParam[][]): Promise<void> {
+async function insertChunks(conn: PoolClient, head: string, columns: number, rows: SqlParam[][]): Promise<void> {
   for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
     const chunk = rows.slice(i, i + INSERT_CHUNK);
     const tuple = `(${new Array(columns).fill("?").join(", ")})`;
@@ -81,10 +81,10 @@ function hashPassword(password: string): Promise<string> {
 }
 
 async function ensureStaff(username: string, role: "admin" | "operator", fullName: string, password: string): Promise<number> {
-  const existing = await queryOne<{ id: number }>("SELECT id FROM users WHERE username = ?", [username]);
+  const existing = await queryOne<{ id: number }>("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", [username]);
   if (existing) return existing.id;
   const result = await runSql(
-    "INSERT INTO users (username, password_hash, role, full_name, status) VALUES (?, ?, ?, ?, 'active')",
+    "INSERT INTO users (username, password_hash, role, full_name, status) VALUES (?, ?, ?, ?, 'active') RETURNING id",
     [username, await hashPassword(password), role, fullName]
   );
   counts.users += 1;
@@ -100,13 +100,13 @@ interface CustomerSpec {
 }
 
 async function ensureCustomer(spec: CustomerSpec): Promise<number> {
-  const existing = await queryOne<{ id: number }>("SELECT id FROM users WHERE email = ?", [spec.email]);
+  const existing = await queryOne<{ id: number }>("SELECT id FROM users WHERE LOWER(email) = LOWER(?)", [spec.email]);
   if (existing) return existing.id;
   const hash = await hashPassword("user123");
   // users + customers: ghi 2 bảng → 1 transaction (invariant 9)
   const userId = await withTransaction(async (conn) => {
     const user = await runSql(
-      "INSERT INTO users (username, email, full_name, password_hash, role, status, last_login) VALUES (NULL, ?, ?, ?, 'user', 'active', ?)",
+      "INSERT INTO users (username, email, full_name, password_hash, role, status, last_login) VALUES (NULL, ?, ?, ?, 'user', 'active', ?) RETURNING id",
       [spec.email, spec.fullName, hash, ago(randInt(1, 12) * HOUR)],
       conn
     );
@@ -133,7 +133,7 @@ interface AuditSeed {
   details?: Record<string, unknown>;
 }
 
-async function insertAudit(conn: PoolConnection, rows: AuditSeed[]): Promise<void> {
+async function insertAudit(conn: PoolClient, rows: AuditSeed[]): Promise<void> {
   if (rows.length === 0) return;
   const params = rows.map((row): SqlParam[] => {
     const meta = resolveEventMeta(row.eventType);
@@ -170,7 +170,7 @@ interface CustomerNotificationSeed {
   relatedDeviceId?: number | null;
 }
 
-async function insertCustomerNotifications(conn: PoolConnection, rows: CustomerNotificationSeed[]): Promise<void> {
+async function insertCustomerNotifications(conn: PoolClient, rows: CustomerNotificationSeed[]): Promise<void> {
   if (rows.length === 0) return;
   const params = rows.map((row): SqlParam[] => [
     row.title,
@@ -181,7 +181,7 @@ async function insertCustomerNotifications(conn: PoolConnection, rows: CustomerN
     row.userId,
     row.homeId,
     row.relatedDeviceId ?? null,
-    row.isRead ? 1 : 0,
+    row.isRead,
     ago(row.minutesAgo * MINUTE),
   ]);
   await insertChunks(
@@ -204,12 +204,12 @@ interface StaffNotificationSeed {
   minutesAgo: number;
 }
 
-async function insertStaffNotifications(conn: PoolConnection, rows: StaffNotificationSeed[]): Promise<void> {
+async function insertStaffNotifications(conn: PoolClient, rows: StaffNotificationSeed[]): Promise<void> {
   for (const row of rows) {
     await runSql(
       `INSERT INTO notifications (title, message, type, severity, target_role, home_id, is_read, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [row.title, row.message, row.type, row.severity, row.targetRole, row.homeId, row.isRead ? 1 : 0, ago(row.minutesAgo * MINUTE)],
+      [row.title, row.message, row.type, row.severity, row.targetRole, row.homeId, row.isRead, ago(row.minutesAgo * MINUTE)],
       conn
     );
   }
@@ -240,7 +240,7 @@ async function homeExists(name: string): Promise<boolean> {
   return (await queryOne<{ id: number }>("SELECT id FROM smart_homes WHERE name = ?", [name])) !== null;
 }
 
-async function buildKit(conn: PoolConnection, spec: HomeSpec, actors: Actors): Promise<KitHomeResult> {
+async function buildKit(conn: PoolClient, spec: HomeSpec, actors: Actors): Promise<KitHomeResult> {
   const kit = await createKitHome(conn, {
     name: spec.name,
     packageCode: spec.packageCode,
@@ -262,7 +262,7 @@ function code12(display: string): string {
 }
 
 async function insertToken(
-  conn: PoolConnection,
+  conn: PoolClient,
   homeId: number,
   code: string,
   expiresAt: Date,
@@ -271,7 +271,7 @@ async function insertToken(
 ): Promise<{ id: number; hash: string }> {
   const hash = hashActivationCode(code);
   const result = await runSql(
-    "INSERT INTO activation_tokens (home_id, code_hash, expires_at, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO activation_tokens (home_id, code_hash, expires_at, created_by, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
     [homeId, hash, expiresAt, createdBy, createdAt],
     conn
   );
@@ -280,7 +280,7 @@ async function insertToken(
 
 /** Claim thật qua assignOwner (cùng đường với API), rồi lùi mốc thời gian cho giống dữ liệu đã chạy lâu. */
 async function claimHome(
-  conn: PoolConnection,
+  conn: PoolClient,
   kit: KitHomeResult,
   ownerId: number,
   code: string,
@@ -314,7 +314,7 @@ function roomByType(kit: KitHomeResult, type: string): KitHomeResult["rooms"][nu
 }
 
 // Số đo 7 ngày, mỗi 10 phút: nhiệt độ/độ ẩm theo chu kỳ ngày + nhiễu; vài lần mở/đóng cửa
-async function seedTelemetry(conn: PoolConnection, kit: KitHomeResult): Promise<void> {
+async function seedTelemetry(conn: PoolClient, kit: KitHomeResult): Promise<void> {
   const base: Record<string, { temp: number; hum: number }> = {
     bedroom: { temp: 29, hum: 66 },
     living_room: { temp: 27, hum: 62 },
@@ -359,7 +359,7 @@ interface BehaviorSeed {
   at: Date;
 }
 
-async function seedBehavior(conn: PoolConnection, homeId: number, rows: BehaviorSeed[]): Promise<void> {
+async function seedBehavior(conn: PoolClient, homeId: number, rows: BehaviorSeed[]): Promise<void> {
   const params = rows.map((row): SqlParam[] => {
     const local = homeLocalParts(row.at, TIMEZONE);
     const on = row.action === "TURN_ON";
@@ -376,15 +376,15 @@ async function seedBehavior(conn: PoolConnection, homeId: number, rows: Behavior
       on ? "ON" : "OFF",
       local.weekday,
       local.minuteOfDay,
-      local.weekday === 0 || local.weekday === 6 ? 1 : 0,
+      local.weekday === 0 || local.weekday === 6,
       "mobile",
     ];
   });
-  // is_holiday luôn 0 → để nguyên mặc định cột
+  // is_holiday luôn FALSE → để nguyên mặc định cột
   await insertChunks(
     conn,
     `INSERT INTO user_behavior_logs
-       (event_id, timestamp, user_id, smart_home_id, room_id, device_id, device_type, action, previous_state, new_state,
+       (event_id, "timestamp", user_id, smart_home_id, room_id, device_id, device_type, action, previous_state, new_state,
         weekday, minute_of_day, is_weekend, source)`,
     14,
     params
@@ -444,7 +444,8 @@ async function seedHome1(actors: Actors): Promise<void> {
     const minh = await runSql(
       `INSERT INTO smart_home_members
          (home_id, user_id, member_role, display_name, invite_email, invite_expires_at, invited_by, expires_at, created_at)
-       VALUES (?, NULL, 'GUEST', 'Minh', 'minh@smarthome.local', ?, ?, ?, ?)`,
+       VALUES (?, NULL, 'GUEST', 'Minh', 'minh@smarthome.local', ?, ?, ?, ?)
+       RETURNING id`,
       [homeId, fromNow(6 * DAY), actors.dat, fromNow(3 * DAY), ago(1 * DAY)],
       conn
     );
@@ -457,7 +458,8 @@ async function seedHome1(actors: Actors): Promise<void> {
          (home_id, name, trigger_type, is_enabled, condition_room_id, condition_sensor_type, condition_operator,
           condition_threshold_value, action_device_id, action_command, origin, last_condition_state, last_triggered_at,
           created_by, created_at)
-       VALUES (?, 'Phòng ngủ nóng → bật quạt', 'sensor_threshold', 1, ?, 'TEMPERATURE', '>', 30, ?, 'turn_on', 'user', 0, ?, ?, ?)`,
+       VALUES (?, 'Phòng ngủ nóng → bật quạt', 'sensor_threshold', TRUE, ?, 'TEMPERATURE', '>', 30, ?, 'turn_on', 'user', FALSE, ?, ?, ?)
+       RETURNING id`,
       [homeId, bedroom.id, fan.id, ago(26 * HOUR), actors.dat, ago(15 * DAY)],
       conn
     );
@@ -465,7 +467,8 @@ async function seedHome1(actors: Actors): Promise<void> {
       `INSERT INTO automation_rules
          (home_id, name, trigger_type, is_enabled, schedule_time_of_day, schedule_days_of_week, action_device_id,
           action_command, origin, last_triggered_at, created_by, created_at)
-       VALUES (?, 'Tắt đèn bếp lúc 23:30', 'schedule', 1, '23:30', '1,2,3,4,5,6,7', ?, 'turn_off', 'user', ?, ?, ?)`,
+       VALUES (?, 'Tắt đèn bếp lúc 23:30', 'schedule', TRUE, '23:30', '1,2,3,4,5,6,7', ?, 'turn_off', 'user', ?, ?, ?)
+       RETURNING id`,
       [homeId, kitchenLight.id, new Date(localMidnightUtc(1) + (23 * 60 + 30) * MINUTE), actors.dat, ago(14 * DAY)],
       conn
     );
@@ -661,16 +664,17 @@ async function seedShared(actors: Actors): Promise<void> {
 
     // Firmware (chỉ metadata; file thật không cần tồn tại cho demo)
     const firmwareSeeds = [
-      { type: "gateway", version: "2.3.1", stable: 1, notes: "Bản ổn định: sửa lỗi mất kết nối MQTT khi đổi WiFi.", daysAgo: 40 },
-      { type: "node", version: "1.4.0", stable: 1, notes: "Bản ổn định: tiết kiệm pin, cải thiện độ chính xác cảm biến.", daysAgo: 35 },
-      { type: "gateway", version: "2.4.0-beta.1", stable: 0, notes: "Bản thử nghiệm: hỗ trợ OTA theo nhà.", daysAgo: 3 },
+      { type: "gateway", version: "2.3.1", stable: true, notes: "Bản ổn định: sửa lỗi mất kết nối MQTT khi đổi WiFi.", daysAgo: 40 },
+      { type: "node", version: "1.4.0", stable: true, notes: "Bản ổn định: tiết kiệm pin, cải thiện độ chính xác cảm biến.", daysAgo: 35 },
+      { type: "gateway", version: "2.4.0-beta.1", stable: false, notes: "Bản thử nghiệm: hỗ trợ OTA theo nhà.", daysAgo: 3 },
     ] as const;
     for (const fw of firmwareSeeds) {
       const checksum = sha256Hex(`seed-firmware-${fw.type}-${fw.version}`);
       const result = await runSql(
-        `INSERT IGNORE INTO firmware
+        `INSERT INTO firmware
            (target_type, version, file_name, size_bytes, checksum_sha256, storage_path, release_notes, is_stable, uploaded_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT DO NOTHING`,
         [
           fw.type,
           fw.version,
@@ -700,7 +704,8 @@ async function seedShared(actors: Actors): Promise<void> {
       const startedAt = ago(10 * DAY);
       const job = await runSql(
         `INSERT INTO ota_jobs (firmware_id, scope_type, scope_id, status, created_by, created_at, finished_at)
-         VALUES (?, 'home', ?, 'completed', ?, ?, ?)`,
+         VALUES (?, 'home', ?, 'completed', ?, ?, ?)
+         RETURNING id`,
         [nodeFw.id, home1.id, actors.adminId, startedAt, new Date(startedAt.getTime() + 20 * MINUTE)],
         conn
       );
@@ -745,7 +750,7 @@ async function seedShared(actors: Actors): Promise<void> {
     ]);
 
     // Đánh dấu hoàn tất — cùng transaction nên chỉ tồn tại khi mọi thứ trên đã ghi xong
-    await runSql("INSERT IGNORE INTO _migrations (name) VALUES (?)", [MARKER], conn);
+    await runSql("INSERT INTO _migrations (name) VALUES (?) ON CONFLICT DO NOTHING", [MARKER], conn);
   });
 }
 

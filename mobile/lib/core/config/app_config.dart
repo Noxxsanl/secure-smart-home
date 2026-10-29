@@ -27,7 +27,7 @@ class AppConfig {
   /// True when the app runs on mock repositories only.
   final bool useMock;
 
-  /// Prefix of every REST call made by the app (docs/07 §10).
+  /// Prefix of every REST call made by the app (docs/architecture/MOBILE_APP_ARCHITECTURE.md §10).
   String get mobileApiBaseUrl => '$apiBaseUrl/api/mobile';
 
   /// Realtime endpoint (contract §4.3).

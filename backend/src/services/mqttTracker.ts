@@ -1,4 +1,4 @@
-import pool from "../config/db";
+import { runSql } from "../lib/db";
 import { connectBroker } from "../config/mqtt";
 
 // Mosquitto Notice log: "New client connected from 192.168.100.54:40434 as gw-ESP32-GW-xxx (...)"
@@ -7,10 +7,7 @@ const CONNECT_RE = /New client connected from ([\d.a-fA-F:]+?)(?::\d+)? as (\S+?
 
 async function updateDeviceIp(clientId: string, ip: string): Promise<void> {
   try {
-    await pool.execute(
-      "UPDATE devices SET last_ip = ? WHERE device_id = ?",
-      [ip, clientId]
-    );
+    await runSql("UPDATE devices SET last_ip = ? WHERE device_id = ?", [ip, clientId]);
   } catch {
     // never crash the main process
   }

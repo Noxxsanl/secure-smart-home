@@ -28,7 +28,7 @@ export async function countUnread(userId: number, homeId: number | undefined): P
     params.push(homeId);
   }
   const row = await queryOne<{ total: unknown }>(
-    `SELECT COUNT(*) AS total FROM notifications WHERE user_id = ? AND target_role = 'user' AND is_read = 0 ${homeFilter}`,
+    `SELECT COUNT(*) AS total FROM notifications WHERE user_id = ? AND target_role = 'user' AND is_read = FALSE ${homeFilter}`,
     params
   );
   return toCount(row?.total);
@@ -37,7 +37,7 @@ export async function countUnread(userId: number, homeId: number | undefined): P
 export async function markRead(userId: number, id: number): Promise<boolean> {
   const own = await queryOne<{ id: number }>("SELECT id FROM notifications WHERE id = ? AND user_id = ? AND target_role = 'user'", [id, userId]);
   if (!own) return false;
-  await runSql("UPDATE notifications SET is_read = 1 WHERE id = ?", [id]);
+  await runSql("UPDATE notifications SET is_read = TRUE WHERE id = ?", [id]);
   return true;
 }
 
@@ -49,7 +49,7 @@ export async function markAllRead(userId: number, homeId: number | undefined): P
     params.push(homeId);
   }
   await runSql(
-    `UPDATE notifications SET is_read = 1 WHERE user_id = ? AND target_role = 'user' AND is_read = 0 ${homeFilter}`,
+    `UPDATE notifications SET is_read = TRUE WHERE user_id = ? AND target_role = 'user' AND is_read = FALSE ${homeFilter}`,
     params
   );
 }

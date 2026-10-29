@@ -18,7 +18,7 @@ const router = Router();
 
 // Bản đồ route (tất cả mount dưới /api). API tách theo KÊNH; mỗi kênh có cách xác thực riêng.
 //
-// Chung / legacy (giữ nguyên — scripts/attack_demo*.sh còn dùng; cookie `token`):
+// Chung / legacy (giữ nguyên — tests/security/attack_demo*.sh còn dùng; cookie `token`):
 //   /health               – kiểm tra liveness (không cần auth)
 //   /auth                 – đăng nhập, đăng xuất, /me (legacy)
 //   /devices              – CRUD + quản lý trạng thái (legacy, JWT)

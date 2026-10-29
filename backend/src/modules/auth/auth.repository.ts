@@ -1,7 +1,7 @@
 // SQL của xác thực: nạp người dùng, tạo tài khoản khách (users + customers), refresh token.
 // password_hash chỉ xuất hiện trong LoginUserRow và không bao giờ ra khỏi module auth.
 import pool from "../../config/db";
-import { isDuplicateKeyError, queryOne, runSql, type Queryable, type SqlParam } from "../../lib/db";
+import { queryOne, runSql, type Queryable, type SqlParam } from "../../lib/db";
 import type { AuthUserRow, LoginUserRow } from "./auth.types";
 import { buildUserTag } from "./userTag";
 
@@ -21,7 +21,11 @@ export async function findAuthUserById(id: number, db: Queryable = pool): Promis
  * thay vì INVALID_CREDENTIALS.
  */
 export async function findLoginUser(identifier: string, allowUserTag: boolean): Promise<LoginUserRow | null> {
-  const where = allowUserTag ? "u.username = ? OR u.email = ? OR c.user_tag = ?" : "u.username = ? OR u.email = ?";
+  // LOWER(): PostgreSQL phân biệt hoa/thường; khớp unique index LOWER(username)/LOWER(email). user_tag sinh ra
+  // toàn chữ thường nhưng người dùng có thể gõ "Dat#4821" nên cũng so không phân biệt hoa/thường.
+  const where = allowUserTag
+    ? "LOWER(u.username) = LOWER(?) OR LOWER(u.email) = LOWER(?) OR LOWER(c.user_tag) = LOWER(?)"
+    : "LOWER(u.username) = LOWER(?) OR LOWER(u.email) = LOWER(?)";
   const params: SqlParam[] = allowUserTag ? [identifier, identifier, identifier] : [identifier, identifier];
   return queryOne<LoginUserRow>(
     `SELECT ${USER_COLUMNS}, u.password_hash ${USER_FROM} WHERE ${where} LIMIT 1`,
@@ -59,13 +63,13 @@ const USER_TAG_ATTEMPTS_TOTAL = 16;
 /**
  * Tạo users (role 'user', username NULL) + customers (user_tag duy nhất). GỌI TRONG TRANSACTION
  * (withTransaction) — hai bảng phải cùng thành công hoặc cùng huỷ (invariant 9). Email trùng ném lỗi
- * ER_DUP_ENTRY của uq_users_email (người gọi đổi thành 409 EMAIL_TAKEN). user_tag trùng thì sinh lại:
+ * lỗi trùng khoá (23505) của uq_users_email (người gọi đổi thành 409 EMAIL_TAKEN). user_tag trùng thì sinh lại:
  * 8 lần với 4 chữ số, sau đó 6 chữ số khi họ tên phổ biến làm cạn không gian 4 chữ số.
  */
 export async function createUserWithCustomer(conn: Queryable, input: NewCustomerInput): Promise<CreatedCustomer> {
   const userResult = await runSql(
     `INSERT INTO users (username, email, full_name, password_hash, role, status)
-     VALUES (NULL, ?, ?, ?, 'user', 'active')`,
+     VALUES (NULL, ?, ?, ?, 'user', 'active') RETURNING id`,
     [input.email, input.fullName, input.passwordHash],
     conn
   );
@@ -73,17 +77,17 @@ export async function createUserWithCustomer(conn: Queryable, input: NewCustomer
 
   for (let attempt = 0; attempt < USER_TAG_ATTEMPTS_TOTAL; attempt++) {
     const userTag = buildUserTag(input.fullName, attempt < USER_TAG_ATTEMPTS_4_DIGITS ? 4 : 6);
-    try {
-      const customerResult = await runSql(
-        "INSERT INTO customers (user_id, full_name, phone, user_tag) VALUES (?, ?, ?, ?)",
-        [userId, input.fullName, input.phone, userTag],
-        conn
-      );
-      return { userId, customerId: customerResult.insertId, userTag };
-    } catch (err) {
-      // Statement lỗi trùng khoá không làm hỏng transaction MySQL → thử tag khác
-      if (!isDuplicateKeyError(err, "uq_customers_user_tag")) throw err;
-    }
+    // ON CONFLICT DO NOTHING thay vì bắt lỗi 23505: trong PostgreSQL một câu lệnh lỗi làm HỎNG cả transaction
+    // (các lệnh sau báo "current transaction is aborted"), nên không thể thử tag khác sau khi trùng khoá.
+    // user_id vừa tạo ở trên nên xung đột chỉ có thể do user_tag — chỉ định đích (uq_customers_user_tag)
+    // để lỗi khác (vd trùng user_id) vẫn nổi lên thay vì bị nuốt.
+    const customerResult = await runSql(
+      `INSERT INTO customers (user_id, full_name, phone, user_tag) VALUES (?, ?, ?, ?)
+       ON CONFLICT (user_tag) DO NOTHING RETURNING id`,
+      [userId, input.fullName, input.phone, userTag],
+      conn
+    );
+    if (customerResult.affectedRows > 0) return { userId, customerId: customerResult.insertId, userTag };
   }
   throw new Error("createUserWithCustomer: could not generate a unique user_tag");
 }
@@ -94,9 +98,9 @@ export interface RefreshTokenRow {
   id: number;
   user_id: number;
   family_id: string;
-  /** 1 nếu đã hết hạn (so bằng NOW() của MySQL để cùng đồng hồ với ghi expires_at). */
-  is_expired: number;
-  is_revoked: number;
+  /** true nếu đã hết hạn (so bằng NOW() của PostgreSQL để cùng đồng hồ với ghi expires_at). */
+  is_expired: boolean;
+  is_revoked: boolean;
 }
 
 export async function insertRefreshToken(
@@ -105,7 +109,7 @@ export async function insertRefreshToken(
 ): Promise<number> {
   const result = await runSql(
     `INSERT INTO refresh_tokens (user_id, token_hash, family_id, expires_at, user_agent, ip_address)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
     [input.userId, input.tokenHash, input.familyId, input.expiresAt, input.userAgent, input.ip],
     db
   );

@@ -10,7 +10,7 @@ export async function listGatewayRows(): Promise<DeviceRow[]> {
 /** Thiết bị (node) thuộc gateway, theo phòng. */
 export async function listNodeRows(gatewayId: number): Promise<DeviceRow[]> {
   return queryRows<DeviceRow>(
-    `${DEVICE_SELECT_SQL} WHERE d.gateway_device_id = ? ORDER BY r.sort_order, d.room_id, d.id`,
+    `${DEVICE_SELECT_SQL} WHERE d.gateway_device_id = ? ORDER BY r.sort_order NULLS FIRST, d.room_id NULLS FIRST, d.id`,
     [gatewayId]
   );
 }

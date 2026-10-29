@@ -1,5 +1,4 @@
-import type { PoolConnection } from "mysql2/promise";
-import pool from "../config/db";
+import { runSql, withTransaction } from "../lib/db";
 import { logEvent } from "../modules/logs/logEvent";
 
 // Chữ ký `log()` giữ nguyên cho code cũ (validateDevice, mqttDataService, routes/*.ts).
@@ -30,46 +29,34 @@ export async function logDataRecvWithPrune(
   user_agent: string | null,
   details: Record<string, unknown> | null
 ): Promise<void> {
-  let conn: PoolConnection;
   try {
-    conn = await pool.getConnection();
-  } catch {
-    return; // DB không sẵn sàng — audit logging must never crash the main flow
-  }
-  try {
-    await conn.beginTransaction();
+    await withTransaction(async (conn) => {
+      // category/severity ghi tường minh: cột category mặc định là 'security' nên bỏ trống sẽ
+      // làm mọi DATA_RECV bị xếp nhầm vào Security Log.
+      await runSql(
+        `INSERT INTO audit_log (event_type, category, severity, device_id, home_id, ip_address, user_agent, details)
+         VALUES ('DATA_RECV', 'mqtt', 'info', ?, (SELECT home_id FROM devices WHERE id = ?), ?, ?, ?)`,
+        [device_id, device_id, ip ?? null, user_agent ?? null, details ? JSON.stringify(details) : null],
+        conn
+      );
 
-    // category/severity ghi tường minh: cột category mặc định là 'security' nên bỏ trống sẽ
-    // làm mọi DATA_RECV bị xếp nhầm vào Security Log.
-    await conn.execute(
-      `INSERT INTO audit_log (event_type, category, severity, device_id, home_id, ip_address, user_agent, details)
-       VALUES ('DATA_RECV', 'mqtt', 'info', ?, (SELECT home_id FROM devices WHERE id = ?), ?, ?, ?)`,
-      [device_id, device_id, ip ?? null, user_agent ?? null, details ? JSON.stringify(details) : null]
-    );
-
-    // Delete DATA_RECV logs for this device beyond the 150 newest.
-    // Double-subquery pattern required because MySQL forbids DELETE referencing
-    // the target table directly in a subquery.
-    await conn.execute(
-      `DELETE FROM audit_log
-       WHERE event_type = 'DATA_RECV'
-         AND device_id = ?
-         AND id NOT IN (
-           SELECT id FROM (
+      // Delete DATA_RECV logs for this device beyond the 150 newest.
+      // PostgreSQL cho phép subquery tham chiếu chính bảng đang DELETE nên không cần bọc 2 lớp như MySQL.
+      await runSql(
+        `DELETE FROM audit_log
+         WHERE event_type = 'DATA_RECV'
+           AND device_id = ?
+           AND id NOT IN (
              SELECT id FROM audit_log
              WHERE event_type = 'DATA_RECV' AND device_id = ?
              ORDER BY id DESC
              LIMIT 150
-           ) t
-         )`,
-      [device_id, device_id]
-    );
-
-    await conn.commit();
+           )`,
+        [device_id, device_id],
+        conn
+      );
+    });
   } catch {
-    try { await conn.rollback(); } catch { /* ignore */ }
-    // audit logging must never crash the main flow
-  } finally {
-    conn.release();
+    // DB không sẵn sàng / lỗi ghi — audit logging must never crash the main flow
   }
 }

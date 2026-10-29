@@ -33,7 +33,7 @@ final sessionExpiryProvider = Provider<SessionExpiryBus>((ref) {
   return bus;
 });
 
-/// The one [ApiClient] for `/api/mobile/**` (docs/07 §10: the app never calls
+/// The one [ApiClient] for `/api/mobile/**` (docs/architecture/MOBILE_APP_ARCHITECTURE.md §10: the app never calls
 /// `/api/dashboard/**` or `/api/device/**`).
 final apiClientProvider = Provider<ApiClient>((ref) {
   final config = ref.watch(appConfigProvider);

@@ -7,7 +7,7 @@ export interface RuleRow {
   home_name: string;
   name: string;
   trigger_type: "sensor_threshold" | "schedule";
-  is_enabled: number;
+  is_enabled: boolean;
   condition_room_id: number | null;
   condition_room_name: string | null;
   condition_sensor_type: "TEMPERATURE" | "HUMIDITY" | null;
@@ -89,12 +89,13 @@ export async function insertRule(
        (home_id, name, trigger_type, is_enabled, condition_room_id, condition_sensor_type, condition_operator,
         condition_threshold_value, schedule_time_of_day, schedule_days_of_week, action_device_id, action_command,
         origin, source_recommendation_id, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     RETURNING id`,
     [
       input.homeId,
       input.name,
       input.triggerType,
-      input.enabled ? 1 : 0,
+      input.enabled,
       input.roomId,
       input.sensorType,
       input.operator,
@@ -123,7 +124,7 @@ export async function updateRule(ruleId: number, input: RuleWrite): Promise<void
     [
       input.name,
       input.triggerType,
-      input.enabled ? 1 : 0,
+      input.enabled,
       input.roomId,
       input.sensorType,
       input.operator,

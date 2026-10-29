@@ -1,4 +1,4 @@
-import pool from "../config/db";
+import { queryRows } from "../lib/db";
 import { ONLINE_WINDOW_SECONDS, isOnline as isOnlineAt } from "../lib/time";
 
 // Cache in-memory: cập nhật mỗi 30 giây bởi heartbeat monitor.
@@ -33,9 +33,9 @@ export function setOnlineDeviceIds(ids: Iterable<number>): void {
 
 async function tick(): Promise<void> {
   try {
-    const [rows] = await pool.execute<any[]>(
+    const rows = await queryRows<{ id: number }>(
       `SELECT id FROM devices
-       WHERE last_seen IS NOT NULL AND TIMESTAMPDIFF(SECOND, last_seen, NOW()) < ${ONLINE_WINDOW_SECONDS}`
+       WHERE last_seen IS NOT NULL AND last_seen > NOW() - make_interval(secs => ${ONLINE_WINDOW_SECONDS})`
     );
     onlineDeviceIds = new Set(rows.map((r) => r.id));
   } catch {

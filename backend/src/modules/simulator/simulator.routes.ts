@@ -33,7 +33,7 @@ export function createSimulatorRouter(): Router {
     const device = await loadSimulatedDevice(req.params.id);
     const online = requireBool((req.body as { online?: unknown } | undefined)?.online, "online");
 
-    await runSql("UPDATE devices SET sim_online = ? WHERE id = ? AND is_simulated = 1", [online ? 1 : 0, device.id]);
+    await runSql("UPDATE devices SET sim_online = ? WHERE id = ? AND is_simulated = TRUE", [online, device.id]);
     if (online) await runSimulatedHeartbeat();
 
     const meta = requestMeta(req);

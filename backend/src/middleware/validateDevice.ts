@@ -3,30 +3,23 @@
 // Nếu một trong hai lớp thất bại, fail_count của thiết bị đó sẽ tăng lên và
 // tự động bị khóa khi đạt ngưỡng.
 import { NextFunction, Request, Response } from "express";
-import pool from "../config/db";
+import { queryOne, runSql } from "../lib/db";
 import { log } from "../services/auditLogger";
-import { verifyDeviceHMAC, verifyGatewayHMAC } from "../services/hmacService";
+import { isSafeDeviceId, verifyDeviceHMAC, verifyGatewayHMAC } from "../services/hmacService";
 
 // Phải khớp với BLOCK_THRESHOLD trong mqttDataService.ts – cả hai đường đều dùng cùng giá trị.
 const BLOCK_THRESHOLD = 5;
 
 async function incrementFailCount(deviceDbId: number): Promise<number> {
-  await pool.execute(
-    `UPDATE devices SET fail_count = fail_count + 1 WHERE id = ?`,
-    [deviceDbId]
-  );
-  const [rows] = await pool.execute<any[]>(
-    `SELECT fail_count FROM devices WHERE id = ?`,
-    [deviceDbId]
-  );
-  return rows[0]?.fail_count ?? 0;
+  // LEAST(…, 1000): fail_count là SMALLINT; thiết bị đã blocked vẫn bị đếm tiếp nên không chặn trần sẽ tràn
+  // 32767 → lỗi 22003 → 500. Phải khớp incrementAndMaybeBlock trong mqttDataService.ts.
+  await runSql(`UPDATE devices SET fail_count = LEAST(fail_count + 1, 1000) WHERE id = ?`, [deviceDbId]);
+  const row = await queryOne<{ fail_count: number }>(`SELECT fail_count FROM devices WHERE id = ?`, [deviceDbId]);
+  return row?.fail_count ?? 0;
 }
 
 async function blockDevice(deviceDbId: number): Promise<void> {
-  await pool.execute(
-    `UPDATE devices SET status = 'blocked' WHERE id = ?`,
-    [deviceDbId]
-  );
+  await runSql(`UPDATE devices SET status = 'blocked' WHERE id = ?`, [deviceDbId]);
 }
 
 function getClientIp(req: Request): string {
@@ -49,7 +42,8 @@ export async function validateDevice(req: Request, res: Response, next: NextFunc
   const sn_hmac      = sensor_payload?.sn_hmac;
 
   // ── Level 1: Gateway HMAC ──────────────────────────────────────────────────
-  if (!gateway_id || !gw_timestamp || !gw_hmac) {
+  // isSafeDeviceId: id không phải chuỗi hoặc chứa NUL = payload sai (PostgreSQL sẽ lỗi 22021 → 500 nếu để xuống DB).
+  if (!isSafeDeviceId(gateway_id) || !gw_timestamp || !gw_hmac) {
     res.status(400).json({ error: "MISSING_GATEWAY_FIELDS" });
     return;
   }
@@ -79,7 +73,7 @@ export async function validateDevice(req: Request, res: Response, next: NextFunc
   }
 
   // ── Level 2: Sensor HMAC ───────────────────────────────────────────────────
-  if (!sensor_payload || !sensor_id || !sn_timestamp || !sn_hmac) {
+  if (!sensor_payload || !isSafeDeviceId(sensor_id) || !sn_timestamp || !sn_hmac) {
     res.status(400).json({ error: "MISSING_SENSOR_FIELDS" });
     return;
   }
