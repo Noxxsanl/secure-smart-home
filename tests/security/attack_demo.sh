@@ -201,7 +201,7 @@ print_note "Gateway $GW_ID hiện status='blocked' — chạy attack_demo_extend
 # ══════════════════════════════════════════════════════════════════════════════
 print_header "SCENARIO 4: Privilege Escalation – Sensor giả làm Gateway (kỳ vọng: 403 PRIVILEGE_ESCALATION)"
 print_note "Sensor có secret_key hợp lệ → HMAC đúng kỹ thuật, nhưng device_type='sensor' ≠ 'gateway'"
-print_note "Bảo vệ: RBAC device_type check trong data.routes.ts sau khi cả 2 HMAC đã pass"
+print_note "Bảo vệ: RBAC device_type check trong telemetry/features/ingest-http/ingest-http.handler.ts sau khi cả 2 HMAC đã pass"
 PRIV_TS=$(now_ts)
 SN_HMAC_AS_GW=$(hmac_sha256 "$SN_SECRET" "${SN_ID}:${PRIV_TS}")
 PRIV_PAYLOAD=$(cat <<EOF

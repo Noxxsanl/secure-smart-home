@@ -245,7 +245,7 @@ print_ok "Device lookup failed → secret_key không tìm được → 401 GATEW
 # ══════════════════════════════════════════════════════════════════════════════
 print_header "SCENARIO 9: Inactive Device – deactivate qua API rồi thử gửi data (kỳ vọng: 403 DEVICE_NOT_ACTIVE)"
 print_note "Admin deactivate một device hợp lệ, rồi device đó thử gửi data — HMAC đúng nhưng bị từ chối"
-print_note "Bảo vệ: status check sau HMAC — DEVICE_NOT_ACTIVE check trước DEVICE_BLOCKED trong data.routes.ts"
+print_note "Bảo vệ: status check sau HMAC — DEVICE_NOT_ACTIVE check trước DEVICE_BLOCKED trong telemetry/features/ingest-http/ingest-http.handler.ts"
 
 echo -e "${BLUE}  Bước 1: Login admin...${NC}"
 ADMIN_JAR=$(login_user "$ADMIN_USER" "$ADMIN_PASS")

@@ -4,7 +4,7 @@
 #   1. Tạo role ứng dụng (LOGIN, không superuser/createdb/createrole) với mật khẩu từ biến môi trường.
 #   2. Giao quyền sở hữu database cho role đó và thu quyền kết nối của PUBLIC.
 #   3. Chạy 001_schema.sql BẰNG role ứng dụng để mọi bảng thuộc về nó — nhờ vậy migration runtime
-#      (backend/src/config/migrate.ts) có quyền DDL mà không cần superuser.
+#      (backend/src/infrastructure/database/migrate.ts) có quyền DDL mà không cần superuser.
 # Mật khẩu chỉ đi qua biến môi trường (\getenv), không nằm trên dòng lệnh và không được in ra log.
 # Trong giai đoạn init, server tạm chỉ nghe unix socket với `trust` nên không cần mật khẩu khi kết nối.
 # KHÔNG dùng `set -u`: file này bị entrypoint postgres `source` (không phải chạy) khi thiếu bit thực thi

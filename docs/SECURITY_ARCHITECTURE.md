@@ -41,7 +41,7 @@ Hệ thống hiện tại đã có **3 nền tảng bảo mật đúng hướng*
 
 Tuy nhiên, khi nhìn xuyên suốt toàn hệ thống (không chỉ 1 thành phần), lộ ra **4 lỗ hổng cấu trúc nghiêm trọng nhất**, đủ để loại bỏ khả năng thương mại hoá nếu không vá trước khi có khách hàng thứ hai:
 
-1. **Rò rỉ secret toàn hệ thống**: `GET /api/device/sensors` trả `secret_key` **plaintext của mọi sensor `active` trong toàn bộ hệ thống** cho bất kỳ gateway nào xác thực HMAC hợp lệ — không phân biệt khách hàng nào sở hữu gateway nào (`sensors.routes.ts:24-26`).
+1. **Rò rỉ secret toàn hệ thống**: `GET /api/device/sensors` trả `secret_key` **plaintext của mọi sensor `active` trong toàn bộ hệ thống** cho bất kỳ gateway nào xác thực HMAC hợp lệ — không phân biệt khách hàng nào sở hữu gateway nào (Prototype: `sensors.routes.ts:24-26`; nay `modules/devices/features/list-gateway-sensors/`, đã lọc theo gateway sở hữu node, secret vẫn trả bản rõ). **Quyết định 2026-10-31: giữ làm ngoại lệ có chủ đích của bất biến 1** — firmware gateway-node dùng các secret này để kiểm HMAC sensor, bỏ đi thì gateway ngừng nhận dữ liệu; chỉ gỡ khi có luồng ghép nối node cấp secret lúc pairing ([API Design](API_DESIGN.md) Q1).
 2. **Secret lưu plaintext ở cả 3 tầng**: Database (`devices.secret_key VARCHAR(64)` không mã hoá), Firmware (`config_gw.h`/`config_1.h` hard-code compile vào binary — file đã `.gitignore` nên không commit, nhưng secret vẫn plaintext trong binary), và UI (`RegisterModal.tsx` hiển thị secret dạng chữ để copy trên Dashboard).
 3. **Không có TLS ở bất kỳ đâu trong toàn bộ luồng thiết bị**: MQTT không TLS (`allow_anonymous true`), HTTP không TLS (`http://` cho `BACKEND_SENSORS_URL`), Backend↔Frontend chưa xác nhận bắt buộc HTTPS ở tầng ứng dụng.
 4. **RBAC không có khái niệm phạm vi tài nguyên**: Operator có quyền ngang Admin trên **mọi thiết bị của mọi khách hàng** — không có ràng buộc theo `home_id`, vi phạm nguyên tắc least-privilege bắt buộc cho SOC2/ISO 27001 nếu sản phẩm mở rộng sang thị trường yêu cầu tuân thủ.
@@ -64,7 +64,7 @@ Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transpo
 
 ### 1.2. Authorization
 
-`middleware/rbac.ts` — `requireRole(...roles)` chỉ so khớp `user.role` tĩnh, **không kiểm tra phạm vi tài nguyên**: `requireRole("admin", "operator")` cho Operator quyền thao tác trên `PATCH /api/devices/:id/status` và `DELETE` **không giới hạn theo chủ sở hữu thiết bị** (`devices.ts:196-199, 271-274`) — đây là lỗ hổng leo thang đặc quyền theo chiều ngang (horizontal privilege escalation) tiềm ẩn ngay khi có nhiều khách hàng: Operator được giao xử lý ticket của khách hàng A hoàn toàn có thể (về mặt kỹ thuật) thao tác trên thiết bị của khách hàng B mà không có bất kỳ rào cản nào.
+`middleware/rbac.ts` (Prototype; nay `modules/legacy/middleware/require-role.ts`, chỉ còn cho route cũ) — `requireRole(...roles)` chỉ so khớp `user.role` tĩnh, **không kiểm tra phạm vi tài nguyên**: `requireRole("admin", "operator")` cho Operator quyền thao tác trên `PATCH /api/devices/:id/status` và `DELETE` **không giới hạn theo chủ sở hữu thiết bị** (`devices.ts:196-199, 271-274`) — đây là lỗ hổng leo thang đặc quyền theo chiều ngang (horizontal privilege escalation) tiềm ẩn ngay khi có nhiều khách hàng: Operator được giao xử lý ticket của khách hàng A hoàn toàn có thể (về mặt kỹ thuật) thao tác trên thiết bị của khách hàng B mà không có bất kỳ rào cản nào.
 
 ### 1.3. MQTT
 
@@ -126,14 +126,14 @@ Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transpo
 
 | # | Lỗ hổng | Mức độ | Vị trí | Loại (theo Threat Model Phần 15) |
 |---|---|---|---|---|
-| 1 | Rò rỉ secret_key toàn hệ thống qua `/api/device/sensors` | **Critical** | `sensors.routes.ts:24-26` | Information Disclosure |
+| 1 | Rò rỉ secret_key toàn hệ thống qua `/api/device/sensors` | **Critical** | Prototype `sensors.routes.ts:24-26` (nay `devices/features/list-gateway-sensors/`) | Information Disclosure |
 | 2 | Secret lưu plaintext (DB + Firmware + hiển thị UI) | **Critical** | `001_schema.sql`, `config_gw.h`, `RegisterModal.tsx` | Information Disclosure |
 | 3 | Không TLS toàn bộ luồng thiết bị (MQTT + HTTP) | **Critical** | mosquitto conf, `mqtt_client.cpp`, `sensor_registry.cpp` | Tampering, Information Disclosure |
-| 4 | RBAC không giới hạn phạm vi tài nguyên (Operator = Admin trên mọi dữ liệu) | **Critical** | `rbac.ts`, mọi route dùng `requireRole` | Elevation of Privilege |
+| 4 | RBAC không giới hạn phạm vi tài nguyên (Operator = Admin trên mọi dữ liệu) | **Critical** | Prototype `rbac.ts` (nay `legacy/middleware/require-role.ts`), mọi route dùng `requireRole` | Elevation of Privilege |
 | 5 | WiFi credential hard-code compile vào binary | **Critical** | `config_gw.h`, `config_1.h` | Information Disclosure, Tampering |
 | 6 | Không Refresh Token, không revoke JWT phía server | High | `auth.ts` | Spoofing (kéo dài cửa sổ tấn công nếu token bị đánh cắp) |
 | 7 | MQTT broker `allow_anonymous true`, không ACL | High | mosquitto conf | Spoofing, Tampering |
-| 8 | Rate limiter/cache in-memory không scale ngang | Medium | `app.ts`, `deviceStatus.ts` | Denial of Service (gián tiếp) |
+| 8 | Rate limiter/cache in-memory không scale ngang | Medium | `app.ts`, `core/http/rate-limit.ts`; Prototype `deviceStatus.ts` (nay `devices/domain/online-cache.ts`) | Denial of Service (gián tiếp) |
 | 9 | Không Soft Delete — mất dữ liệu điều tra vĩnh viễn | Medium | `devices.ts:291-293` | Repudiation |
 | 10 | 1 bảng log gộp mọi loại sự kiện, không tách Security/Attack Log | Medium | `001_schema.sql:79-90` | Repudiation (khó điều tra) |
 | 11 | Không Secure Boot/Flash Encryption | Medium (Reserved) | Firmware | Tampering |
@@ -494,7 +494,7 @@ flowchart TD
 ### 16.3. Replay Attack
 
 **Kịch bản:** Kẻ tấn công bắt được 1 gói tin HMAC hợp lệ, gửi lại nhiều lần để giả mạo dữ liệu hoặc gây nhiễu.
-**Mức độ khả thi hiện tại:** Thấp — cửa sổ timestamp ±300s + kiểm tra `TIMESTAMP_EXPIRED` đã có ở cả Backend (`hmacService.ts`) và Firmware (`forwarder.cpp:73-80`) — **điểm mạnh hiện tại, giữ nguyên**.
+**Mức độ khả thi hiện tại:** Thấp — cửa sổ timestamp ±300s + kiểm tra `TIMESTAMP_EXPIRED` đã có ở cả Backend (`modules/devices/domain/hmac.service.ts`) và Firmware (`forwarder.cpp:73-80`) — **điểm mạnh hiện tại, giữ nguyên**.
 **Cải thiện thêm:** cân nhắc bổ sung **nonce** (giá trị dùng 1 lần, lưu cache ngắn hạn ở Backend) cho các lệnh điều khiển quan trọng (mở khoá cửa) — dù timestamp window đã giảm rủi ro, nonce loại bỏ hoàn toàn khả năng replay trong cùng cửa sổ 300s.
 
 ### 16.4. MITM (Man-in-the-Middle)

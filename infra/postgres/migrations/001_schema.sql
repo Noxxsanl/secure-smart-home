@@ -9,7 +9,7 @@
 -- File idempotent (IF NOT EXISTS, ON CONFLICT DO NOTHING) nên chạy lại không hỏng dữ liệu.
 --
 -- Thay đổi schema SAU baseline này KHÔNG sửa vào đây mà thêm vào cuối mảng "migrations" trong
--- backend/src/config/migrate.ts (chạy mỗi lần backend khởi động, theo dõi bằng bảng _migrations).
+-- backend/src/infrastructure/database/migrate.ts (chạy mỗi lần backend khởi động, theo dõi bằng bảng _migrations).
 -- Khi đó cập nhật file này song song để DB tạo mới cũng có schema cuối cùng — migration runtime
 -- gặp đối tượng đã tồn tại sẽ được ghi nhận là đã áp dụng, nên hai nguồn phải luôn khớp nhau.
 -- Tên bảng/cột theo docs/architecture/DATABASE_REFACTOR_SMARTHOME.md §6–7 và CONTRACT_V2 §1.

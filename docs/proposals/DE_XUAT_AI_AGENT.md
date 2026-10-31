@@ -70,10 +70,10 @@
 
 | Hạng mục | Hiện trạng | Bằng chứng |
 |---|---|---|
-| API điều khiển thiết bị (lệnh relay) | **Chưa có.** Backend chỉ ingest telemetry, không có route gửi lệnh | `backend/src/routes/` (không có route command/relay) |
+| API điều khiển thiết bị (lệnh relay) | **Đã có ở backend** (2026-10): `POST /api/{mobile,portal}/devices/:deviceId/commands` gửi lệnh MQTT có HMAC tới gateway và chờ ack ≤ 5 s; thiết bị `is_simulated` do simulator trả lời. Firmware chưa nhận lệnh (dòng dưới) | `backend/src/modules/control/features/send-device-command/`, `command-ack/` |
 | Firmware relay | **Chưa có.** Node chỉ đọc DHT22, `digitalWrite` chỉ dùng cho LED báo gửi | `firmware/sensor-node/src/main.cpp`, `firmware/gateway-node/src/main.cpp` |
-| WebSocket realtime | Chưa dùng (gói `ws` đã có) | `backend/package.json` |
-| Bảng Automation, Scene, Behavior log | Chỉ có trong thiết kế | [Database](../architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8, §7.12 |
+| WebSocket realtime | **Đã có**: `/api/mobile/ws` đẩy `telemetry`, `device_state`, `notification`, `home_changed` cho Mobile | `backend/src/modules/realtime/features/mobile-ws/` |
+| Bảng Automation, Scene, Behavior log | `automation_rules`, `automation_history`, `user_behavior_logs`, `recommendation_history` **đã có** (luật IF/THEN + gợi ý thói quen); Scene vẫn chỉ trong thiết kế | `infra/postgres/migrations/001_schema.sql`, `backend/src/modules/{automation,recommendations}/`; [Database](../architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8, §7.12 |
 | Mobile | 100% UI mockup, chưa có màn hình AI | `mobile/lib/features/` |
 
 **Hệ quả:** module AI kiểu nào cũng phụ thuộc pipeline điều khiển thiết bị (FR-5.3, FR-5.9). Đề xuất này **không thêm phụ thuộc phần cứng mới**. Agent chỉ gọi vào Device Command Service mà mốc M3 phải làm.

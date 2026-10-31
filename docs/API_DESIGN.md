@@ -91,7 +91,7 @@ Mobile **không** nói chuyện MQTT (bất biến 7); node **không** gọi Ser
 
 | Tiền tố | Ai dùng | Xác thực | Ghi chú |
 |---|---|---|---|
-| `/api/dashboard/**` | ADMIN, OPERATOR | Cookie `sh_admin` / `sh_operator` | `requireDashboard("admin","operator")` gắn ở `routes/index.ts` |
+| `/api/dashboard/**` | ADMIN, OPERATOR | Cookie `sh_admin` / `sh_operator` | `requireDashboard("admin","operator")` gắn ở `app.module.ts` |
 | `/api/portal/**` | USER (web khách) | Cookie `sh_user` | Ngoài phạm vi PRD V2 (FR-1.4), xem `frontend/README.md` |
 | `/api/mobile/**` | USER (Mobile) | `Authorization: Bearer <access>` + refresh token | Cùng router với Portal: `createCustomerRouter(channel)` |
 | `/api/device/**` | Gateway | HMAC | Không có phiên người dùng |
@@ -104,7 +104,7 @@ Role hệ thống quyết định **kênh**; role trong nhà (OWNER / CONTROLLER
 
 - JSON UTF-8, body tối đa **10 KB** (`app.ts`). Ngoại lệ: upload firmware `application/octet-stream` ≤ 4 MB.
 - Thời gian trả về dạng ISO 8601 UTC; trong payload thiết bị dùng `unix_ts` (giây).
-- Phân trang: query `limit`, `page` (`lib/validate`: `parseLimit`, `parsePage`).
+- Phân trang: query `limit`, `page` (`shared/validation/validate`: `parseLimit`, `parsePage`).
 - Id trong URL sai định dạng → **404**, không phải 400 (`parseIdParam`).
 - Văn bản cho người dùng (thông báo, nhãn) bằng tiếng Việt; trường `detail` của lỗi bằng tiếng Anh. Client tự dịch mã lỗi thành hướng dẫn (bất biến 10).
 
@@ -136,7 +136,7 @@ Role hệ thống quyết định **kênh**; role trong nhà (OWNER / CONTROLLER
 
 ## 3. CHỮ KÝ HMAC
 
-Mọi chữ ký: `HMAC-SHA256(secret, message)` xuất **hex thường**, so sánh hằng thời gian, cửa sổ chống replay **±300 giây** (`hmacService.ts`, `TS_WINDOW_SECONDS` trong `deviceCommand.service.ts`).
+Mọi chữ ký: `HMAC-SHA256(secret, message)` xuất **hex thường**, so sánh hằng thời gian, cửa sổ chống replay **±300 giây** (`modules/devices/domain/hmac.service.ts`, `TS_WINDOW_SECONDS` trong `modules/control/features/command-ack/command-ack.handler.ts`).
 
 | Dùng cho | Ai ký | Secret | Chuỗi được ký | Trạng thái |
 |---|---|---|---|---|
@@ -154,7 +154,7 @@ Hai dòng đầu là bất biến 5 — backend, gateway và node phải khớp 
 
 ## 4. SOFTWARE — AUTH
 
-`modules/auth/auth.routes.ts`. Mỗi kênh một bộ route, cookie/token không dùng chéo kênh.
+`modules/identity/` (router `/auth` của từng kênh, mount trước guard của kênh ở `app.module.ts`). Mỗi kênh một bộ route, cookie/token không dùng chéo kênh.
 
 | Method | `/api/dashboard/auth/…` | `/api/portal/auth/…` | `/api/mobile/auth/…` | Mô tả |
 |---|---|---|---|---|
@@ -174,8 +174,8 @@ Trạng thái: **Đã có**.
 
 ## 5. SOFTWARE — API KHÁCH HÀNG (MOBILE, PORTAL)
 
-Cùng một router cho `/api/mobile` và `/api/portal` (`modules/customer/**`). Bảng dưới ghi đường dẫn tương đối; ví dụ `GET /homes` = `GET /api/mobile/homes`.
-Cột **Quyền** là permission trong nhà (`access/permissions.ts`): nhà không thuộc quyền → 404, thiếu quyền → 403.
+Cùng một router cho `/api/mobile` và `/api/portal` (feature của từng module, gắn qua móc `customer` trong `<m>.module.ts`). Bảng dưới ghi đường dẫn tương đối; ví dụ `GET /homes` = `GET /api/mobile/homes`.
+Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.ts`): nhà không thuộc quyền → 404, thiếu quyền → 403.
 
 ### 5.1. Đã có
 
@@ -231,7 +231,7 @@ Cột **Quyền** là permission trong nhà (`access/permissions.ts`): nhà khô
 
 ## 6. SOFTWARE — WEBSOCKET REALTIME
 
-`GET /api/mobile/ws` (`modules/realtime/wsHub.ts`). **Đã có.**
+`GET /api/mobile/ws` (`modules/realtime/features/mobile-ws/mobile-ws.gateway.ts`). **Đã có.**
 
 1. Client mở kết nối; khung **đầu tiên trong 10 giây** phải là `{ "type": "auth", "token": "<access_token>" }`. Token không bao giờ nằm trong URL.
 2. Hợp lệ → `{ "type": "auth_ok", "user_id", "home_ids" }`. Token hết hạn → đóng mã `4401`, client refresh rồi mở lại.
@@ -252,7 +252,7 @@ Khung tối đa 4 KB. Server ping định kỳ; client không phản hồi pong 
 
 ## 7. SOFTWARE — API DASHBOARD (ADMIN, OPERATOR)
 
-Tiền tố `/api/dashboard` (`modules/dashboard/**`), sau `requireDashboard("admin","operator")`. Operator chỉ xem/thao tác nhà được cấp quyền (`operator_home_access`); thiếu → 403 `ACCESS_GRANT_REQUIRED`.
+Tiền tố `/api/dashboard` (feature của từng module, gắn qua móc `dashboard` trong `<m>.module.ts`), sau `requireDashboard("admin","operator")`. Operator chỉ xem/thao tác nhà được cấp quyền (`operator_home_access`); thiếu → 403 `ACCESS_GRANT_REQUIRED`.
 
 ### 7.1. Đã có
 
@@ -303,7 +303,7 @@ A = ADMIN, O = OPERATOR. Phân quyền chi tiết từng route nằm trong contr
 
 ### 7.3. Route cũ (Prototype)
 
-`/api/auth/{login,logout,me}`, `/api/devices` (`GET /`, `/:id`, `/:id/data`), `/api/users`, `/api/audit-log`, `/api/notifications` (`routes/*.ts`). **Cũ** — giữ cho kịch bản tấn công khi bảo vệ (`tests/security/attack_demo*.sh`). Không thêm tính năng mới vào đây.
+`/api/auth/{login,logout,me}`, `/api/devices` (`GET /`, `/:id`, `/:id/data`), `/api/users`, `/api/audit-log`, `/api/notifications` (`modules/legacy/routes/*.routes.ts`). **Cũ** — giữ cho kịch bản tấn công khi bảo vệ (`tests/security/attack_demo*.sh`). Không thêm tính năng mới vào đây.
 
 ---
 
@@ -313,12 +313,12 @@ Tiền tố `/api/device`. Gateway gọi qua HTTPS, kiểm chứng chứng chỉ
 
 | Method | Path | Xác thực | Body / Query | Trạng thái |
 |---|---|---|---|---|
-| POST | `/device/data` | HMAC 2 lớp trong body | `{gateway_id, gw_timestamp, gw_hmac, sensor_payload: {sensor_id, sn_timestamp, sn_hmac, data}}` — **cùng payload với MQTT** `gateway/+/data`, dùng làm đường dự phòng khi MQTT lỗi | Đã có (`routes/data.routes.ts`, `middleware/validateDevice.ts`) |
+| POST | `/device/data` | HMAC 2 lớp trong body | `{gateway_id, gw_timestamp, gw_hmac, sensor_payload: {sensor_id, sn_timestamp, sn_hmac, data}}` — **cùng payload với MQTT** `gateway/+/data`, dùng làm đường dự phòng khi MQTT lỗi | Đã có (`modules/telemetry/features/ingest-http/`) |
 | GET | `/device/sensors` | HMAC gateway trên query `gateway_id, gw_timestamp, gw_hmac` | Trả danh sách sensor **kèm secret** để gateway kiểm HMAC lớp 1 | Đã có — **lỗ hổng đã biết** ([Bảo mật](SECURITY_ARCHITECTURE.md) §2). Thay bằng cấp secret lúc ghép nối (mục 14, Q1) |
 | POST | `/device/camera/snapshot` | Header `X-Gateway-Id`, `X-Timestamp`, `X-Signature` (HMAC gateway) | Body `image/jpeg` ≤ 200 KB; header `X-Device-Id` (camera), `X-Trigger: motion\|request`, `X-Command-Id?`. Trả `201 {snapshot_id}` | Dự kiến |
 | WS | `/device/camera/live` | HMAC gateway khi mở kết nối | Tin nhị phân = 1 khung JPEG; tin văn bản `{type:"end"}` khi dừng | Dự kiến, tuỳ chọn |
 
-`middleware/validateDevice.ts` (HTTP) và `services/mqttDataService.ts` (MQTT) phải giữ **cùng logic xác thực** (bất biến 4).
+`modules/telemetry/features/ingest-http/` (HTTP) và `modules/telemetry/features/ingest-mqtt/` (MQTT) phải giữ **cùng logic xác thực** (bất biến 4): cả hai gọi chung hàm HMAC của `modules/devices` và `telemetry/domain/ingest-common.ts`.
 
 ---
 
@@ -330,8 +330,8 @@ Broker 2 (`mosquitto`, cổng 8883 TLS; 1883 chỉ cho môi trường dev). Gate
 
 | Topic | Chiều | QoS | Payload | Code |
 |---|---|---|---|---|
-| `gateway/<gateway_id>/data` | GW → Server | 1 | `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload: {sensor_id, sn_timestamp, sn_hmac, data}}` | `services/mqttDataService.ts` |
-| `home/<home_id>/gateway/<gw>/device/<dev>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {turn_on, turn_off}` | `modules/devices/deviceCommand.service.ts` |
+| `gateway/<gateway_id>/data` | GW → Server | 1 | `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload: {sensor_id, sn_timestamp, sn_hmac, data}}` | `modules/telemetry/features/ingest-mqtt/` |
+| `home/<home_id>/gateway/<gw>/device/<dev>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {turn_on, turn_off}` | `modules/control/` (`features/send-gateway-command`, `command-ack`) |
 | `home/<home_id>/gateway/<gw>/device/<dev>/command/ack` | GW → Server | 1 | `{command_id, status: "ok"\|"error", power?, ts, hmac}`; Server chờ 5 giây | như trên |
 | `home/<home_id>/gateway/<gw>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {restart, factory_reset}` | như trên |
 | `home/<home_id>/gateway/<gw>/ota/command` | Server → GW | 1 | `{job_id, version, target_type, checksum_sha256, ts, hmac}` | như trên |

@@ -92,7 +92,7 @@ Backend bat buoc co:
 
 ### 1.3 Cong thuc HMAC
 
-Code backend tinh HMAC trong `backend/src/services/hmacService.ts`:
+Code backend tinh HMAC trong `backend/src/modules/devices/domain/hmac.service.ts`:
 
 ```text
 message = device_id + ":" + unix_timestamp
@@ -115,15 +115,15 @@ timing attack khi ke tan cong do thoi gian phan hoi de doan token.
 | Lop | Co che | Noi xu ly |
 |---|---|---|
 | HTTP hardening | Helmet, CORS, JSON body limit 10 KB | `backend/src/app.ts` |
-| Rate limit login | 10 request / 15 phut / IP | `/api/auth/login` |
-| Rate limit device data | 60 request / phut / IP | `/api/device/data` |
-| Device identity | HMAC-SHA256 theo secret rieng tung device | `hmacService.ts` |
-| Replay protection | timestamp window +-300 giay | `hmacService.ts`, firmware gateway |
-| Auto block | sai 5 lan thi `status = blocked` | `validateDevice.ts` |
-| Device RBAC | `gateway_id` phai la `gateway`, `sensor_id` phai la `sensor` | `data.routes.ts` |
-| Admin RBAC | JWT cookie + role `admin/operator/viewer` | `verifyJWT.ts`, `rbac.ts` |
-| SQL injection defense | prepared statements voi `pool.execute(..., [params])` | routes/services |
-| Audit trail | ghi `audit_log` cho event quan trong | `auditLogger.ts` |
+| Rate limit login | 10 request / 15 phut / IP | `/api/auth/login` (`core/http/rate-limit.ts`) |
+| Rate limit device data | 60 request / phut / IP | `/api/device/data` (`core/http/rate-limit.ts`) |
+| Device identity | HMAC-SHA256 theo secret rieng tung device | `hmac.service.ts` |
+| Replay protection | timestamp window +-300 giay | `hmac.service.ts`, firmware gateway |
+| Auto block | sai 5 lan thi `status = blocked` | `devices/domain/auth-failure.ts` (`registerAuthFailure`), `ingest-http/validate-device.middleware.ts` |
+| Device RBAC | `gateway_id` phai la `gateway`, `sensor_id` phai la `sensor` | `ingest-http/ingest-http.handler.ts` |
+| Admin RBAC | JWT cookie + role `admin/operator/viewer` | `modules/legacy/middleware/{verify-jwt,require-role}.ts` |
+| SQL injection defense | prepared statements voi `pool.execute(..., [params])` | repository (`infrastructure/database/db.ts` đổi `?` thành `$n`) |
+| Audit trail | ghi `audit_log` cho event quan trong | `modules/audit` (`logEvent`, `legacy-audit-logger.ts`) |
 
 ---
 
@@ -249,7 +249,7 @@ Hoac vao Dashboard → Devices → chon Gateway → doi status ve `active`.
 
 ## 3. Thu tu validate cua backend
 
-`POST /api/device/data` di qua `validateDevice` truoc khi handler luu data.
+`POST /api/device/data` di qua `validateDevice` (`telemetry/features/ingest-http/validate-device.middleware.ts`) truoc khi handler luu data.
 
 ```text
 1. Thieu gateway_id/gw_timestamp/gw_hmac
@@ -526,7 +526,7 @@ Payload y tuong:
 
 ### Vi sao bi chan
 
-Sau khi HMAC pass, `data.routes.ts` lay `device_type` tu DB:
+Sau khi HMAC pass, `ingest-http.handler.ts` lay `device_type` tu DB:
 
 ```text
 gateway_id must be a gateway device
@@ -640,10 +640,10 @@ SELECT COUNT(*) FROM devices;
 | 3 | Replay timestamp cu -12 phut | Tampering | Timestamp window ±300s | `401` | `REPLAY_ATTACK` |
 | 4 | Replay timestamp tuong lai | Tampering | Timestamp window ±300s | `401` | `REPLAY_ATTACK` |
 | 5 | Brute Force x6 → auto-block | DoS | `fail_count >= 5` → `blocked` | `401→403` | `GATEWAY_AUTH_FAIL`×5 + `DEVICE_BLOCKED` |
-| 6 | Blocked device HMAC dung | Tampering | `data.routes` status check | `403` | — |
+| 6 | Blocked device HMAC dung | Tampering | `ingest-http.handler` status check | `403` | — |
 | 7 | Unregistered device | Spoofing | `fetchDevice()` → null | `401` | `GATEWAY_AUTH_FAIL` |
 | 8 | Privilege Escalation (type) | Elevation | `device_type` RBAC | `403` | `PRIVILEGE_ESCALATION` |
-| 9 | Inactive device HMAC dung | Tampering | `data.routes` status check | `403` | — |
+| 9 | Inactive device HMAC dung | Tampering | `ingest-http.handler` status check | `403` | — |
 | 10 | RBAC Violation REST API | Elevation | `requireRole()` JWT check | `403` | — |
 | — | SQL Injection (bonus) | Tampering | Prepared statements | `401` | `GATEWAY_AUTH_FAIL` |
 

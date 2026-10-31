@@ -1,13 +1,14 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "main": "dist/server.js",
+  "main": "dist/main.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn src/server.ts",
+    "dev": "ts-node-dev --respawn src/main.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "node dist/main.js",
     "seed": "node dist/scripts/seed.js",
-    "seed:dev": "tsc && node dist/scripts/seed.js"
+    "seed:dev": "tsc && node dist/scripts/seed.js",
+    "check:arch": "node tools/check-architecture.mjs"
   },
   "keywords": [],
   "author": "",

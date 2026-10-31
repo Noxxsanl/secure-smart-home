@@ -12,7 +12,7 @@ certs: ## Sinh CA + cert Broker 2 (IP LAN máy chạy broker)
 	bash infra/pki/gen_mqtt_certs.sh $(IP)
 
 migrate: ## Chưa có lệnh riêng
-	@echo "Backend tự chạy migration khi khởi động (backend/src/config/migrate.ts) — chưa có service migrate riêng."
+	@echo "Backend tự chạy migration khi khởi động (backend/src/infrastructure/database/migrate.ts) — chưa có service migrate riêng."
 
 test-security: ## Kịch bản tấn công demo (backend phải đang chạy)
 	bash tests/security/attack_demo.sh $(ARGS)

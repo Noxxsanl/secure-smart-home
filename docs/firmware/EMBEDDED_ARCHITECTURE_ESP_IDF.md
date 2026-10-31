@@ -81,7 +81,7 @@ Chỉ có 2 driver đơn giản: DHT22 (qua thư viện Adafruit, `sensor_reader
 | MQTT | `PubSubClient` (thư viện Arduino phổ biến nhưng **không hỗ trợ TLS có kiểm chứng chứng chỉ đầy đủ** dễ dàng như `esp-mqtt` của ESP-IDF) — kết nối không TLS (`WiFiClient` thuần, không `WiFiClientSecure`), khớp với cấu hình Mosquitto `allow_anonymous true` không TLS đã nêu ở các tài liệu trước. |
 | ESP-NOW | **Không tồn tại trong code hiện tại** — dù đã được `SMART_HOME_WIFI_PROVISIONING.md` chọn làm giao thức chính Gateway↔Node (Phần 3.1), firmware thực tế chưa triển khai; mọi Sensor Node hiện tại kết nối **thẳng vào WiFi thật** (`WiFi.begin` trong `sensor-node`), vi phạm trực tiếp nguyên tắc "chỉ Gateway giữ WiFi thật" đã chốt ở tài liệu đó — **đây là khoảng cách lớn nhất giữa thiết kế đã có và code hiện tại**, không phải lỗi thiết kế mà là phần **chưa triển khai**. |
 | BLE | Không tồn tại (`about_page.dart` phía Mobile có nhắc "Kết nối Bluetooth" nhưng đó chỉ là placeholder UI, chưa có gì tương ứng ở firmware). |
-| HTTP | Dùng cho `fetchSensorList()` (`sensor_registry.cpp`) — gọi `BACKEND_SENSORS_URL` không TLS (`http://`), đúng với lỗ hổng "rò rỉ secret_key toàn hệ thống" đã nêu ở `sensors.routes.ts` (backend trả plaintext secret cho endpoint này). |
+| HTTP | Dùng cho `fetchSensorList()` (`sensor_registry.cpp`) — gọi `BACKEND_SENSORS_URL` không TLS (`http://`), đúng với lỗ hổng "rò rỉ secret_key toàn hệ thống" đã nêu ở `GET /api/device/sensors` (Prototype: `sensors.routes.ts`; nay `backend/src/modules/devices/features/list-gateway-sensors/`; backend trả plaintext secret cho endpoint này). |
 
 ### 1.6. MQTT chi tiết
 
@@ -102,7 +102,7 @@ Gateway giữ **2 kết nối `PubSubClient` song song** (`mqttSubClient` cho Br
 | Điểm tốt (đáng giữ lại) | Điểm cần cải thiện |
 |---|---|
 | Comment tiếng Việt rõ ràng, giải thích đúng lý do kỹ thuật (VD lý do dùng `StaticJsonDocument`, lý do offset NTP) | Cấu hình nhạy cảm (WiFi, Secret Key) nằm trong file `.h` **compile vào binary** (file đã được `.gitignore` loại khỏi git, nhưng giá trị vẫn nằm plaintext trong source tree và binary) — không tách biệt build-time config khỏi provisioning-time credential |
-| `safeEq64()` trong `forwarder.cpp:13-17` — so sánh hằng thời gian (constant-time) tự viết tay đúng nguyên tắc chống timing attack, nhất quán với triết lý bảo mật ở Backend (`hmacService.ts` dùng `timingSafeEqual`) | 2 bản `hmac_util` khác API cho cùng 1 thuật toán (mục 1.2) |
+| `safeEq64()` trong `forwarder.cpp:13-17` — so sánh hằng thời gian (constant-time) tự viết tay đúng nguyên tắc chống timing attack, nhất quán với triết lý bảo mật ở Backend (`modules/devices/domain/hmac.service.ts` dùng `timingSafeEqual`) | 2 bản `hmac_util` khác API cho cùng 1 thuật toán (mục 1.2) |
 | `registryFindSecret()` có fallback 2 tầng (danh sách động từ backend → danh sách cứng `KNOWN_SENSORS`) — thiết kế resilient hợp lý cho giai đoạn demo | `KNOWN_SENSORS[]` hard-code secret key plaintext ngay trong file cấu hình (`config_gw.h:74-79`) — trùng lặp đúng vấn đề "rò rỉ secret" đã nêu ở Backend, giờ xác nhận **firmware cũng lưu bản sao plaintext ở phía thiết bị** |
 | Module hoá theo `lib/<name>` rõ ràng, mỗi module 1 trách nhiệm (WiFi/MQTT/HMAC/NTP/Registry/Forwarder) — **đúng tinh thần Component-based** dù chưa dùng ESP-IDF component thật | Không có test nào (`test/` không tồn tại trong cả 2 project) — không thể unit test do phụ thuộc cứng vào `Arduino.h`/`WiFi.h` toàn cục, không có interface trừu tượng cho driver |
 

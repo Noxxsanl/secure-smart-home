@@ -6,8 +6,8 @@
 
 | Tầng | Thư mục | Stack | Trạng thái |
 |---|---|---|---|
-| Backend | `backend/src/` | Express 5, TypeScript strict, pg (SQL tay, không ORM), mqtt, JWT cookie, bcrypt | Chạy thật; cấu trúc `src/modules/<domain>` (xem `backend/src/modules/README.md`) với 3 kênh: `/api/dashboard` (cookie, ADMIN/OPERATOR), `/api/portal` (cookie `sh_user`, khách hàng web), `/api/mobile` (Bearer + refresh token). WebSocket `/api/mobile/ws`. Simulator thiết bị cho `is_simulated=1`, automation engine, gợi ý thói quen. Route cũ (`/api/auth`, `/api/devices`, …) giữ lại cho `tests/security/attack_demo*.sh` |
-| Database | `infra/postgres/migrations/001_schema.sql`, `backend/src/config/migrate.ts` | PostgreSQL 16, UTC (chuyển từ MySQL 8 ngày 2026-10-27; `001_schema.sql` là baseline, `migrate.ts` append-only từ mảng rỗng) | Bảng gốc (`users`, `devices`, `sensor_data`, `device_tokens`, `audit_log`, `notifications`) + V2: `customers`, `smart_homes`, `rooms`, `smart_home_members`, `member_device_access`, `activation_tokens`, `activation_logs`, `refresh_tokens`, `device_commands`, `user_behavior_logs`, `automation_rules`, `automation_history`, `recommendation_history`, `user_feedback`, `operator_home_access`, `firmware`, `ota_jobs`, `ota_history` |
+| Backend | `backend/src/` | Express 5, TypeScript strict, pg (SQL tay, không ORM), mqtt, JWT cookie, bcrypt | Chạy thật; bố cục `src/{core,shared,infrastructure,modules}` + `app.module.ts` (bản đồ route), mỗi `modules/<domain>/{domain,infrastructure,features}` là vertical slice, quy tắc phụ thuộc kiểm bằng `npm run check:arch` (xem `backend/src/modules/README.md`); 3 kênh: `/api/dashboard` (cookie, ADMIN/OPERATOR), `/api/portal` (cookie `sh_user`, khách hàng web), `/api/mobile` (Bearer + refresh token). WebSocket `/api/mobile/ws`. Simulator thiết bị cho `is_simulated=1`, automation engine, gợi ý thói quen. Route cũ (`/api/auth`, `/api/devices`, …) giữ lại cho `tests/security/attack_demo*.sh` |
+| Database | `infra/postgres/migrations/001_schema.sql`, `backend/src/infrastructure/database/migrate.ts` | PostgreSQL 16, UTC (chuyển từ MySQL 8 ngày 2026-10-27; `001_schema.sql` là baseline, `migrate.ts` append-only từ mảng rỗng) | Bảng gốc (`users`, `devices`, `sensor_data`, `device_tokens`, `audit_log`, `notifications`) + V2: `customers`, `smart_homes`, `rooms`, `smart_home_members`, `member_device_access`, `activation_tokens`, `activation_logs`, `refresh_tokens`, `device_commands`, `user_behavior_logs`, `automation_rules`, `automation_history`, `recommendation_history`, `user_feedback`, `operator_home_access`, `firmware`, `ota_jobs`, `ota_history` |
 | Web (3 app) | `frontend/{admin,operator,user}/`, dùng chung `frontend/packages/{shared,console}` | Next.js **16.2.5**, React 19, Tailwind v4, SWR, npm workspaces | **Nối API thật** (client chung `packages/shared/api/http.ts`, rewrites `/api/*` → `BACKEND_URL`), trừ AI Dashboard và Admin Settings vẫn mock (`packages/shared/mock/`). Mỗi role hệ thống một app (:3001/:3002/:3003). App `user` là cổng web khách hàng — ngoài phạm vi PRD V2 (§2.2, FR-1.4), xem `frontend/README.md` |
 | Mobile | `mobile/lib/` | Flutter, Riverpod, `http`, `flutter_secure_storage`, `web_socket_channel`, `mobile_scanner` | Cho khách hàng (USER); repository remote + mock (`--dart-define=USE_MOCK=true`, `API_BASE_URL`); 47 test |
 | Firmware | `firmware/{gateway-node,sensor-node}` | PlatformIO + Arduino, `esp32doit-devkit-v1` | Chạy thật |
@@ -16,7 +16,7 @@
 
 Bố cục gốc (từ 2026-10-27): `infra/{postgres,mosquitto,nginx,pki,media}`, `tests/{security,performance,kws,e2e}`, `contracts/`, `compose.yaml` + `compose.override.yaml` (dev, tự nạp) + `compose.prod.yaml`, `Makefile` (`make dev|prod|certs|migrate|test-security`); `scripts/` chỉ còn `setup.sh`/`setup.bat`. **Bản tạm, chưa code nào đọc**: `contracts/{asyncapi.yaml,datapoints.yaml,openapi.json}` (hợp đồng thật vẫn ở `docs/API_DESIGN.md`), `compose.override.yaml` (`services: {}` — cấu hình dev vẫn nằm trong `compose.yaml`). **Thư mục rỗng**: `infra/media/`, `tests/{performance,kws,e2e}/`, `agent/`.
 
-Luồng dữ liệu: Sensor —`local/sensors/+/data` (Broker 1)→ Gateway verify HMAC sensor, ký HMAC gateway —`gateway/<GW_ID>/data` (Broker 2, TLS)→ `backend/src/services/mqttDataService.ts` verify 2 lớp → `sensor_data`. Fallback HTTP `POST /api/device/data`.
+Luồng dữ liệu: Sensor —`local/sensors/+/data` (Broker 1)→ Gateway verify HMAC sensor, ký HMAC gateway —`gateway/<GW_ID>/data` (Broker 2, TLS)→ `backend/src/modules/telemetry/features/ingest-mqtt/` verify 2 lớp → `sensor_data`. Fallback HTTP `POST /api/device/data` (`telemetry/features/ingest-http/`).
 
 ## Tài liệu (`docs/`)
 
@@ -37,7 +37,7 @@ Domain đích: `Customer → SmartHome → Room → Device(Gateway|Node) → Sen
 1. Secret thiết bị/gateway chỉ trả **1 lần** khi tạo; không hiển thị trên Dashboard.
 2. Không log password, token, secret, WiFi password ở bất kỳ tầng nào.
 3. Không đọc/in/commit `firmware/**/config_1.h|config_2.h|config_gw.h`, `backend/.env`, `frontend/.env.local`, `infra/mosquitto/certs/*.key`. Không tắt kiểm chứng TLS (`rejectUnauthorized: false`, `setInsecure()`).
-4. `middleware/validateDevice.ts` (HTTP) và `services/mqttDataService.ts` (MQTT) phải giữ cùng logic xác thực.
+4. `modules/telemetry/features/ingest-http/` (HTTP) và `modules/telemetry/features/ingest-mqtt/` (MQTT) phải giữ cùng logic xác thực: cả hai dùng chung hàm HMAC của `modules/devices` và `telemetry/domain/ingest-common.ts` — đổi logic ở đó, không chép lại vào từng đường.
 5. HMAC `HMAC-SHA256(secret, "<device_id>:<unix_ts>")` hex thường phải khớp backend ↔ gateway ↔ sensor.
 6. Dữ liệu theo nhà: nhà không thuộc quyền → **404**, sai role trong nhà → **403**.
 7. Mobile không kết nối MQTT trực tiếp — qua WebSocket backend.
@@ -59,10 +59,10 @@ Prompt giao cho agent phải tự đủ (agent không thấy hội thoại): m�
 
 ## Lệnh kiểm tra
 
-- Backend: `cd backend && npx tsc --noEmit`
+- Backend: `cd backend && npx tsc --noEmit && npm run check:arch`
 - Frontend: `cd frontend && npm run typecheck && npm run lint` (`npm run build` khi đổi route/config)
 - Mobile: `cd mobile && flutter analyze && flutter test` (47 test; chạy máy ảo: `--dart-define=API_BASE_URL=…` hoặc `USE_MOCK=true`, xem `docs/guides/CHAY_LOCAL.md`)
 - Firmware: `pio run -d firmware/<node>`
-- CI: `.github/workflows/ci.yml` chạy các lệnh trên (chỉ tầng có file đổi) + job "Bảo mật repo" chặn commit file bí mật và tắt TLS. Firmware build bằng `include/config_*.example.h` — thêm macro mới thì thêm vào file mẫu, không thì CI đỏ
+- CI: `.github/workflows/ci.yml` chạy các lệnh trên (chỉ tầng có file đổi; backend gồm cả `check:arch`) + job "Bảo mật repo" chặn commit file bí mật và tắt TLS. Firmware build bằng `include/config_*.example.h` — thêm macro mới thì thêm vào file mẫu, không thì CI đỏ
 
 Chưa có test tự động cho backend/frontend (mobile có 47 test) — không nói "tests pass" khi không có test nào chạy.

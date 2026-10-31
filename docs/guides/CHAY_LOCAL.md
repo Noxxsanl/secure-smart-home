@@ -140,7 +140,7 @@ Kết quả mong đợi (V2 có thêm nhiều bảng: `customers`, `smart_homes`
 audit_log, device_tokens, devices, sensor_data, users, notifications, + các bảng V2
 ```
 
-> `001_schema.sql` là baseline PostgreSQL đầy đủ (đã gộp toàn bộ migration MySQL cũ). Mảng `migrations` trong `backend/src/config/migrate.ts` hiện **rỗng**; backend vẫn chạy nó mỗi lần khởi động (theo dõi qua bảng `_migrations`) để áp các thay đổi schema thêm sau này. Dữ liệu demo (admin, operator, nhà mẫu…) do bước seed của backend tạo khi `SEED_DEMO_DATA` bật — xem phần "Dữ liệu demo" bên dưới.
+> `001_schema.sql` là baseline PostgreSQL đầy đủ (đã gộp toàn bộ migration MySQL cũ). Mảng `migrations` trong `backend/src/infrastructure/database/migrate.ts` hiện **rỗng**; backend vẫn chạy nó mỗi lần khởi động (theo dõi qua bảng `_migrations`) để áp các thay đổi schema thêm sau này. Dữ liệu demo (admin, operator, nhà mẫu…) do bước seed của backend tạo khi `SEED_DEMO_DATA` bật — xem phần "Dữ liệu demo" bên dưới.
 
 ---
 

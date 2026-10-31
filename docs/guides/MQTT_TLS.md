@@ -79,7 +79,7 @@ flowchart LR
         subgraph NET["Docker network iot-network"]
             B1["mqtt-broker-1<br/>cổng 1883<br/>plaintext"]
             B2["mqtt-broker-2<br/>cổng 8883<br/>chỉ TLS ≥ 1.2"]
-            BE["backend<br/>mqtt.js<br/>config/mqtt.ts"]
+            BE["backend<br/>mqtt.js<br/>infrastructure/mqtt/broker.ts"]
             DB[("PostgreSQL<br/>sensor_data")]
         end
         CERTS[/"infra/mosquitto/certs/<br/>ca.crt · server.crt · server.key<br/>🔑 ca.key không mount"/]
@@ -243,8 +243,8 @@ flowchart LR
 | `infra/mosquitto/broker2/mosquitto.conf` | Chỉ còn `listener 8883` với `cafile`/`certfile`/`keyfile`, `tls_version tlsv1.2`, `require_certificate false` |
 | `infra/pki/README.md` (mới) | Mô tả từng file chứng chỉ và ai được dùng file nào |
 | `compose.yaml`, `compose.prod.yaml` | Broker 2 mở cổng `8883:8883`, mount từng file cert ở chế độ `:ro`. Backend mount `ca.crt` vào `/certs/mqtt-ca.crt`, đặt `MQTT_PORT=8883`, `MQTT_CA_FILE` |
-| `backend/src/config/mqtt.ts` (mới) | Hàm `connectBroker()` dùng chung: `mqtts://`, `ca`, `rejectUnauthorized: true`. Đọc CA khi khởi động, thiếu CA thì dừng |
-| `backend/src/services/mqttDataService.ts`, `mqttTracker.ts` | Chuyển sang dùng `connectBroker()` |
+| `backend/src/infrastructure/mqtt/broker.ts` (mới) | Hàm `connectBroker()` dùng chung: `mqtts://`, `ca`, `rejectUnauthorized: true`. Đọc CA khi khởi động, thiếu CA thì dừng |
+| `backend/src/modules/telemetry/features/ingest-mqtt/`, `devices/features/track-device-ip/`, `control/features/command-ack/` (consumer) | Chuyển sang dùng `connectBroker()` |
 | `firmware/gateway-node/lib/mqtt_client/mqtt_client.cpp` | Kết nối Broker 2 dùng `WiFiClientSecure` + `setCACert()` + `setHandshakeTimeout(10)`. Khi kết nối lỗi, log in cả nguyên nhân TLS |
 | `.gitignore` | Bỏ qua `infra/mosquitto/certs/*` (trừ README) và `firmware/gateway-node/include/mqtt_ca_cert.h` |
 | `scripts/setup.sh`, `scripts/setup.bat` | Tự sinh chứng chỉ nếu chưa có, trước bước `compose up` |

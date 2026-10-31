@@ -249,15 +249,15 @@ Content-Type: image/jpeg
 <JPEG>
 ```
 
-- Gateway kiểm tra HMAC và cửa sổ thời gian ±300 giây giống backend (`hmacService.ts`), từ chối ảnh > 200 KB.
+- Gateway kiểm tra HMAC và cửa sổ thời gian ±300 giây giống backend (`modules/devices/domain/hmac.service.ts`), từ chối ảnh > 200 KB.
 - Kênh này không có TLS. Nội dung ảnh được bảo vệ bằng WPA2 của Local AP; HMAC hiện tại chỉ ký `device_id:ts`, không ký nội dung — cùng giới hạn với telemetry hiện nay (xem [Bảo mật](../SECURITY_ARCHITECTURE.md)).
 
 ### 5.3. Gateway → Server
 
 | Dữ liệu | Kênh | Topic / endpoint | Trạng thái |
 |---|---|---|---|
-| Telemetry | MQTT TLS Broker 2 | `gateway/<GW_ID>/data`, payload `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload}` | **Đã có** — `backend/src/services/mqttDataService.ts` |
-| Lệnh xuống thiết bị | MQTT, Server → Gateway | `home/{home}/gateway/{gw}/device/{dev}/command`, HMAC `command_id:device_id:action:ts` bằng secret gateway | **Đã có** ở backend (`deviceCommand.service.ts`); firmware chưa xử lý |
+| Telemetry | MQTT TLS Broker 2 | `gateway/<GW_ID>/data`, payload `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload}` | **Đã có** — `backend/src/modules/telemetry/features/ingest-mqtt/` |
+| Lệnh xuống thiết bị | MQTT, Server → Gateway | `home/{home}/gateway/{gw}/device/{dev}/command`, HMAC `command_id:device_id:action:ts` bằng secret gateway | **Đã có** ở backend (`backend/src/modules/control/`); firmware chưa xử lý |
 | Ack lệnh | MQTT, Gateway → Server | `.../device/{dev}/command/ack`, HMAC `command_id:status:ts` | **Đã có** ở backend |
 | Heartbeat gateway | MQTT | `home/{home}/gateway/{gw}/heartbeat` | Thiết kế ở [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §10.2, chưa có |
 | Sự kiện camera | MQTT | `home/{home}/gateway/{gw}/device/{dev}/camera/event` `{type:"motion", ts, snapshot_id?}` | Thiết kế ở [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §10.2, chưa có |
@@ -353,7 +353,7 @@ sequenceDiagram
     G->>G: Lớp 1: tìm secret node, kiểm HMAC + cửa sổ ±300 s
     G->>G: Lớp 2: ký HMAC gateway, cập nhật màn hình
     G->>B: gateway/<GW_ID>/data
-    B->>S: mqttDataService kiểm 2 lớp
+    B->>S: ingest-mqtt kiểm 2 lớp
     S->>S: Ghi sensor_data, phát sự kiện
     S-->>M: WebSocket: giá trị mới
 ```

@@ -39,7 +39,7 @@ jobs:
               - '.github/workflows/ci.yml'
             database:
               - 'infra/postgres/**'
-              - 'backend/src/config/migrate.ts'
+              - 'backend/src/infrastructure/database/migrate.ts'
               - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
@@ -90,7 +90,7 @@ jobs:
           fi
 
   backend:
-    name: Backend (tsc)
+    name: Backend (tsc + kiến trúc)
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -106,6 +106,8 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # Quy tắc module → feature + chủ sở hữu bảng (backend/tools/check-architecture.mjs, giải thích ở src/modules/README.md)
+      - run: npm run check:arch
 
   # Bắt lỗi cú pháp/thứ tự FK của schema PostgreSQL sớm (backend chỉ chạy tsc, không chạm DB).
   # PostgreSQL ở đây là service container dùng-một-lần; mật khẩu chỉ có tác dụng trong job này.

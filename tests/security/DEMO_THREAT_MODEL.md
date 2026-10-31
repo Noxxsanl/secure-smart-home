@@ -83,7 +83,7 @@ Nhận request POST /api/iot/data
 └─ 6. Lưu DB + 200 OK
 ```
 
-### Công thức HMAC (từ `hmacService.ts`)
+### Công thức HMAC (từ `modules/devices/domain/hmac.service.ts`)
 
 ```
 message = device_id + ":" + unix_timestamp
@@ -457,7 +457,7 @@ Terminal in:
   SCENARIO 4: Privilege Escalation – Sensor giả làm Gateway (kỳ vọng: 403 PRIVILEGE_ESCALATION)
 ══════════════════════════════════════════════════
   ℹ Sensor có secret_key hợp lệ → HMAC đúng kỹ thuật, nhưng device_type='sensor' ≠ 'gateway'
-  ℹ Bảo vệ: RBAC device_type check trong data.routes.ts sau khi cả 2 HMAC đã pass
+  ℹ Bảo vệ: RBAC device_type check trong ingest-http.handler.ts sau khi cả 2 HMAC đã pass
 Payload (gateway_id = SN_ID = ESP32-SN-... | gw_hmac tính từ SN_SECRET — đúng kỹ thuật):
 { "gateway_id": "ESP32-SN-...", "gw_hmac": "<hmac đúng>" }
 
@@ -737,11 +737,11 @@ Chứng minh hệ thống hoạt động bình thường với request đầy đ
 ```
 POST /api/iot/data
   │
-  ├─ validateDevice middleware (validateDevice.ts)
+  ├─ validateDevice middleware (validate-device.middleware.ts)
   │     ├─ verifyGatewayHMAC() → ok: true
   │     └─ verifyDeviceHMAC()  → ok: true
   │
-  └─ data.routes.ts handler
+  └─ ingest-http.handler.ts handler
         ├─ RBAC: gwRow.device_type == 'gateway' ✓
         ├─ RBAC: snRow.device_type == 'sensor'  ✓
         ├─ Status: gwRow.status == 'active'      ✓
@@ -819,7 +819,7 @@ Kẻ tấn công làm:  gw_hmac = "deadbeef...64 chars"   ← bịa đặt
 
 ### Tại sao tấn công thất bại — giải thích từng dòng code
 
-**Bước 1 — Server tính lại HMAC để so sánh** (`hmacService.ts:56`):
+**Bước 1 — Server tính lại HMAC để so sánh** (`modules/devices/domain/hmac.service.ts:74`):
 ```typescript
 // Server lấy secret_key từ DB (kẻ tấn công không có key này)
 const expected = computeHMAC(device.secret_key, `${gateway_id}:${gw_timestamp}`)
@@ -827,7 +827,7 @@ const expected = computeHMAC(device.secret_key, `${gateway_id}:${gw_timestamp}`)
 // expected = "7f3a9b2c..." (64 hex chars — hoàn toàn khác với giá trị giả)
 ```
 
-**Bước 2 — So sánh timing-safe** (`hmacService.ts:29-38`):
+**Bước 2 — So sánh timing-safe** (`hmac.service.ts:37-46`):
 ```typescript
 function safeCompare(a: string, b: string): boolean {
     const bufA = Buffer.from(a, "hex");  // expected (tính từ DB)
@@ -841,14 +841,14 @@ function safeCompare(a: string, b: string): boolean {
 > **Tại sao dùng `timingSafeEqual` thay vì `===`?**
 > So sánh `===` dừng lại ngay ký tự đầu tiên khác nhau — kẻ tấn công có thể đo thời gian phản hồi để đoán ra bao nhiêu ký tự đầu đúng (timing attack). `timingSafeEqual` luôn tốn đúng cùng một thời gian dù kết quả đúng hay sai.
 
-**Bước 3 — Ghi audit và tăng fail_count** (`validateDevice.ts:56-70`):
+**Bước 3 — Ghi audit và tăng fail_count** (`telemetry/features/ingest-http/validate-device.middleware.ts:38-49`; `registerAuthFailure` ở `devices/domain/auth-failure.ts`):
 ```typescript
 await log("GATEWAY_AUTH_FAIL", deviceDbId, ip, userAgent, {
     gateway_id, reason: "HMAC_MISMATCH"
 });
-const newCount = await incrementFailCount(deviceDbId);
-if (newCount >= 5) {
-    await blockDevice(deviceDbId);  // → status = 'blocked'
+const failure = await registerAuthFailure(deviceDbId);  // tăng fail_count
+if (failure.blocked) {                                  // fail_count >= 5
+    await log("DEVICE_BLOCKED", deviceDbId, ip, userAgent, { gateway_id, fail_count: failure.failCount });  // status = 'blocked'
 }
 res.status(401).json({ error: "GATEWAY_AUTH_FAIL", reason: "HMAC_MISMATCH" });
 ```
@@ -978,7 +978,7 @@ Kẻ tấn công gửi lại lúc 10:12 (12 phút sau):
 
 ### Tại sao tấn công thất bại — cơ chế timestamp window
 
-**Kiểm tra trong `hmacService.ts:21-23`:**
+**Kiểm tra trong `hmac.service.ts:9, 26-28`:**
 ```typescript
 const TIMESTAMP_WINDOW_SECONDS = 300;  // ±5 phút
 
@@ -1118,7 +1118,7 @@ Kẻ tấn công không cần biết HMAC — hắn dùng script gửi liên ti�
 
 ### Cơ chế phòng thủ — Auto Block sau 5 lần
 
-**Từ `validateDevice.ts:11-21`:**
+**Từ `modules/devices/domain/auth-failure.ts:7` (`BLOCK_THRESHOLD`, `registerAuthFailure`) và `devices/infrastructure/device.repository.ts` (`incrementFailCount`, `blockDevice`):**
 ```typescript
 const BLOCK_THRESHOLD = 5;
 
@@ -1226,12 +1226,12 @@ Sau khi bị auto-block ở Scenario 5, kẻ tấn công có được `secret_ke
 
 ### Tại sao tấn công thất bại
 ```
-validateDevice (hmacService — KHÔNG check status):
+validateDevice (hmac.service — KHÔNG check status):
   Layer 1: verifyGatewayHMAC() → ok: true  ✓ (HMAC đúng)
   Layer 2: verifyDeviceHMAC()  → ok: true  ✓ (HMAC đúng)
   → next()
 
-data.routes.ts handler:
+ingest-http.handler.ts handler:
   gwRow = { id: X, device_type: 'gateway', status: 'blocked' }
   if (gwRow.status === 'blocked')
     → res.status(403).json({ error: "DEVICE_BLOCKED" })  ← BỊ CHẶN TẠI ĐÂY
@@ -1278,12 +1278,12 @@ Kẻ tấn công làm: Tự đặt device_id = "ESP32-GW-HACKER01"
 
 ### Tại sao tấn công thất bại
 
-**Bước đầu tiên trong `hmacService.ts:16-23`:**
+**Bước đầu tiên trong `devices/infrastructure/device-secret.repository.ts:18-24` (`hmac.service.ts` gọi qua `fetchDeviceForAuth`):**
 ```typescript
-async function fetchDevice(device_id: string): Promise<DeviceRow | null> {
+async function fetchDeviceForAuth(device_id: string): Promise<DeviceRow | null> {
   return queryOne<DeviceRow>(
     `SELECT id, secret_key, status, fail_count FROM devices WHERE device_id = ? LIMIT 1`,
-    [device_id]   // ← Tham số tách khỏi câu SQL (lib/db đổi ? thành $1), không thể inject SQL
+    [device_id]   // ← Tham số tách khỏi câu SQL (infrastructure/database/db đổi ? thành $1), không thể inject SQL
   );
   // → trả về null nếu device_id không tồn tại
 }
@@ -1359,7 +1359,7 @@ Sensor muốn gửi trực tiếp (bypass Gateway):
 
 **HMAC Level 1 và Level 2 đều PASS** — vì `SN_SECRET` là key thật, HMAC tính đúng.
 
-**Nhưng RBAC check trong `data.routes.ts:36-43` thất bại:**
+**Nhưng RBAC check trong `telemetry/features/ingest-http/ingest-http.handler.ts:31-46` thất bại:**
 ```typescript
 // Fetch device_type từ DB
 const gwRow = rows.find(r => r.id === gateway.id);
@@ -1381,14 +1381,14 @@ if (!gwRow || gwRow.device_type !== "gateway") {
 ```
 validateDevice middleware:
   Level 1: verifyGatewayHMAC("ESP32-SN-001", ts, hmac)
-    → fetchDevice("ESP32-SN-001") → tìm thấy (sensor tồn tại)
+    → fetchDeviceForAuth("ESP32-SN-001") → tìm thấy (sensor tồn tại)
     → isTimestampValid() → OK
     → safeCompare(expected, hmac) → TRUE (HMAC đúng!)
     → { ok: true, device: {...} }
   Level 2: verifyDeviceHMAC("ESP32-SN-001", ts, hmac) → TRUE (cũng pass)
   → next()
 
-data.routes handler:
+ingest-http.handler handler:
   gwRow = {id: X, device_type: 'sensor', status: 'active'}
   gwRow.device_type ('sensor') !== 'gateway' → TRUE
   → 403 INVALID_DEVICE_TYPE  ← BỊ CHẶN TẠI ĐÂY
@@ -1453,7 +1453,7 @@ Thiết bị mới đăng ký:
 ### Luồng code
 ```
 validateDevice → PASS (HMAC đúng)
-data.routes.ts:
+ingest-http.handler.ts:
   gwRow.status = 'inactive'
   gwRow.status !== 'active' → TRUE
   → res.status(403).json({ error: "DEVICE_NOT_ACTIVE" })
@@ -1592,7 +1592,7 @@ UNION SELECT secret_key, '' FROM devices--'
 
 ### Tại sao tấn công thất bại — Prepared Statements
 
-**Code thực tế trong `hmacService.ts:19-22`:**
+**Code thực tế trong `device-secret.repository.ts:19-23`:**
 ```typescript
 return queryOne<DeviceRow>(
   `SELECT id, secret_key, status, fail_count FROM devices WHERE device_id = ? LIMIT 1`,
@@ -1602,7 +1602,7 @@ return queryOne<DeviceRow>(
 
 **Cơ chế hoạt động của Prepared Statements:**
 ```
-1. Server gửi template SQL đến PostgreSQL trước (backend viết `?`, lớp `lib/db` đổi thành `$1`):
+1. Server gửi template SQL đến PostgreSQL trước (backend viết `?`, lớp `infrastructure/database/db` đổi thành `$1`):
    "SELECT ... WHERE device_id = $1"
    PostgreSQL parse và lập kế hoạch cho câu query này một lần.
 
@@ -1767,10 +1767,10 @@ Log backend sẽ in ra từng request, HTTP status, và lỗi chi tiết.
 | 3 | Replay – timestamp cũ | **T**ampering | `isTimestampValid()` → false | `401` | `REPLAY_ATTACK` reason: `TIMESTAMP_EXPIRED` |
 | 4 | Replay – timestamp tương lai | **T**ampering | `isTimestampValid()` → false | `401` | `REPLAY_ATTACK` reason: `TIMESTAMP_EXPIRED` |
 | 5 | Brute Force → Auto Block | **D**oS | `fail_count ≥ 5` → `blockDevice()` | `401×5` | `GATEWAY_AUTH_FAIL` ×5 + `DEVICE_BLOCKED` |
-| 6 | Blocked device HMAC đúng | **T**ampering | `data.routes: status='blocked'` | `403` | — |
+| 6 | Blocked device HMAC đúng | **T**ampering | `ingest-http.handler: status='blocked'` | `403` | — |
 | 7 | Unregistered Device | **S**poofing | `fetchDevice()` → null | `401` | `GATEWAY_AUTH_FAIL` reason: `NOT_FOUND` |
 | 8 | Privilege Escalation (type) | **E**levation | `device_type !== 'gateway'` | `403` | `PRIVILEGE_ESCALATION` |
-| 9 | Inactive Device | **T**ampering | `data.routes: status='inactive'` | `403` | — |
+| 9 | Inactive Device | **T**ampering | `ingest-http.handler: status='inactive'` | `403` | — |
 | 10 | RBAC Violation (REST API) | **E**levation | `requireRole()` → role mismatch | `403` | — |
 | — | SQL Injection (bonus) | **T**ampering | Prepared statements escape | `401` | `GATEWAY_AUTH_FAIL` reason: `NOT_FOUND` |
 
@@ -1778,10 +1778,10 @@ Log backend sẽ in ra từng request, HTTP status, và lỗi chi tiết.
 
 ```
 Lớp 1 – Input Validation
-  └─ Kiểm tra đủ field, format hợp lệ (validateDevice.ts:45-48)
+  └─ Kiểm tra đủ field, format hợp lệ (validate-device.middleware.ts:27-30, 56-59)
 
 Lớp 2 – Identity Verification (Level 1: Gateway)
-  ├─ DB lookup (fetchDevice) — Prepared Statements chống SQL Injection
+  ├─ DB lookup (fetchDeviceForAuth) — Prepared Statements chống SQL Injection
   ├─ Timestamp Window ±300s — chống Replay Attack
   └─ HMAC timingSafeEqual   — chống Spoofing & Timing Attack
 

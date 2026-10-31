@@ -33,7 +33,7 @@
 | Tầng | Đang dùng (giữ) | Nên áp dụng (ưu tiên cao → thấp) |
 |---|---|---|
 | **Xuyên tầng** | Signed Envelope (HMAC), Correlation ID + Request–Reply, Mapper/DTO | Idempotency key + chống trùng, Retry có backoff + jitter, Contract-first |
-| **Backend** | Modular Monolith, Controller → Service → Repository, Read Model, Middleware chain, Policy (RBAC), Unit of Work (`withTransaction`), Observer (`eventBus`), Strategy (simulator), Pending-request registry | **Ingest Pipeline dùng chung cho HTTP + MQTT**, Strategy registry cho trigger/action automation, Port–Adapter cho lưu ảnh, Fan-out hub cho live camera |
+| **Backend** | Modular Monolith + Vertical slice (module → feature, `check:arch`), Controller → Handler → Repository, Read Model, Middleware chain, Policy (RBAC), Unit of Work (`withTransaction`), Observer (`eventBus`), Strategy (simulator), Pending-request registry | **Ingest Pipeline dùng chung cho HTTP + MQTT**, Strategy registry cho trigger/action automation, Port–Adapter cho lưu ảnh, Fan-out hub cho live camera |
 | **Frontend Web** | Monorepo + package dùng chung, Feature folders, Custom hook bọc SWR, Query-key factory, API client duy nhất, Error-code → thông điệp | State machine cho lệnh điều khiển, Adapter mock ↔ API cho phần còn mock |
 | **Mobile** | Clean Architecture theo feature, Repository interface + remote/mock, Riverpod làm DI + state, Mapper, Realtime có fallback polling | Một nguồn sự thật cho sự kiện realtime, State machine cho provisioning/ghép nối, phiên live camera gắn vòng đời màn hình |
 | **Firmware** | Module hoá theo `lib/<module>` | **Layered + HAL/Driver**, **Active Object (task + queue)**, **State machine** tường minh, Observer (`esp_event`), Command + dispatcher table, Store-and-forward, Double buffering, Shared protocol component, Cấp phát tĩnh, Supervisor/Watchdog |
@@ -46,8 +46,8 @@ Các pattern này xuất hiện ở **nhiều tầng cùng lúc**; phải hiện
 
 | Pattern | Vấn đề | Áp ở đâu | Trạng thái |
 |---|---|---|---|
-| **Signed Envelope** | Ai cũng có thể publish MQTT / gọi `/api/device` giả danh thiết bị | Payload mang `ts` + `hmac`; bên nhận kiểm trước khi đọc nội dung. Chuỗi ký ở [API Design](API_DESIGN.md) §3 | Đang dùng (`hmacService.ts`, `deviceCommand.service.ts`, `firmware/*/lib/hmac_util`) |
-| **Correlation ID + Request–Reply qua kênh bất đồng bộ** | MQTT không có "response"; backend cần biết lệnh nào đã được thực hiện | `command_id` (UUID) đi trong lệnh, quay lại trong ack. Backend giữ bảng chờ có timeout 5 s | Đang dùng ở backend (`pendingAcks`); firmware **phải** giữ nguyên `command_id` qua ESP-NOW xuống node và ngược lại |
+| **Signed Envelope** | Ai cũng có thể publish MQTT / gọi `/api/device` giả danh thiết bị | Payload mang `ts` + `hmac`; bên nhận kiểm trước khi đọc nội dung. Chuỗi ký ở [API Design](API_DESIGN.md) §3 | Đang dùng (`modules/devices/domain/hmac.service.ts`, `modules/control/`, `firmware/*/lib/hmac_util`) |
+| **Correlation ID + Request–Reply qua kênh bất đồng bộ** | MQTT không có "response"; backend cần biết lệnh nào đã được thực hiện | `command_id` (UUID) đi trong lệnh, quay lại trong ack. Backend giữ bảng chờ có timeout 5 s | Đang dùng ở backend (`modules/control/domain/pending-acks.ts`); firmware **phải** giữ nguyên `command_id` qua ESP-NOW xuống node và ngược lại |
 | **Mapper / DTO** | Dữ liệu DB, dữ liệu API và model UI khác nhau; lộ cột nhạy cảm nếu trả thẳng row | Backend: `toCustomerDevice`, `toConsoleDevice`. Mobile: `device_mapper.dart`. Web: `console/api/types` | Đang dùng |
 | **Idempotency key + chống trùng** | QoS 1 của MQTT và retry HTTP có thể giao **trùng**; ESP-NOW có thể gửi lại | Lệnh: bỏ qua `command_id` đã xử lý (node nhớ 8 id gần nhất). Telemetry ESP-NOW: `seq` theo node. Ảnh: `X-Command-Id` | Nên áp dụng (firmware + endpoint ảnh) |
 | **Retry có backoff + jitter** | Mất mạng thì cả đàn thiết bị reconnect cùng lúc, dồn tải lên broker | Delay 1, 2, 4, 8… tới trần 30–60 s, cộng ngẫu nhiên ±20%. Mobile WS đã có backoff (`realtime_source.dart`) | Nên áp dụng cho gateway (MQTT, HTTPS, kéo luồng camera) và thêm jitter cho Mobile |
@@ -61,28 +61,31 @@ Các pattern này xuất hiện ở **nhiều tầng cùng lúc**; phải hiện
 
 | Pattern | Vấn đề | Ở đâu |
 |---|---|---|
-| **Modular Monolith** | Một tiến trình dễ chạy, dễ demo; nhưng vẫn cần ranh giới domain rõ | `backend/src/modules/<domain>` (`auth`, `access`, `homes`, `devices`, `automation`…) |
-| **Layered: Controller → Service → Repository** | Tách HTTP, nghiệp vụ, SQL; SQL chỉ nằm một chỗ | Mỗi module; quy ước "SQL chỉ trong repository/read-model" ở `modules/README.md` |
-| **Read Model (CQRS nhẹ)** | Màn hình cần dữ liệu join nhiều bảng, khác mô hình ghi | `devices/deviceReadModel.ts` (`DEVICE_SELECT_SQL`, `latestReadings`) |
-| **Middleware chain** | Auth, chống CSRF, rate limit, xác thực thiết bị áp cho cả nhóm route | `requireDashboard`, `requirePortalUser`, `requireMobileUser`, `csrfGuard`, các `*Limiter` trong `app.ts` |
-| **Factory theo kênh** | Mobile và Portal dùng chung nghiệp vụ, khác cách xác thực | `createCustomerRouter("web" \| "mobile")` |
-| **Policy / Permission matrix** | RBAC 2 tầng phải nhất quán ở mọi endpoint | `access/permissions.ts` (`ROLE_PERMISSIONS`) + guard `requireHomeMember`, `requireDeviceAccess` — 404/403 đúng bất biến 6 |
-| **Unit of Work** | Tạo nhà, claim ghi nhiều bảng phải cùng thành công hoặc cùng huỷ (bất biến 9) | `withTransaction(conn => …)` trong `lib/db.ts`; hàm nhận `Queryable` |
-| **Observer / in-process Event Bus** | Ingest, lệnh, thông báo cần báo cho WS hub, automation mà không gọi thẳng nhau | `lib/eventBus.ts`; phát `telemetry`, `device_state`, `notification`, `home_changed`; nghe ở `realtime/wsHub.ts`, `automation/automationEngine.ts` |
-| **Strategy (đăng ký handler)** | Thiết bị giả lập và thiết bị thật nhận lệnh theo 2 cách khác nhau | `registerSimulatedCommandHandler` trong `deviceCommand.service.ts` |
-| **Pending-request registry** | Chờ ack MQTT có timeout, không rò bộ nhớ | `pendingAcks` + `registerPending` (đăng ký **trước** khi publish) |
-| **Optimistic lock bằng UPDATE có điều kiện** | Hai số đo đến cùng lúc không được kích hoạt một luật hai lần | `automationEngine.ts`: "giành quyền chạy" bằng `UPDATE … WHERE last_condition_state = …` |
+| **Modular Monolith** | Một tiến trình dễ chạy, dễ demo; nhưng vẫn cần ranh giới domain rõ | `backend/src/modules/<domain>` (`identity`, `homes`, `devices`, `telemetry`, `control`, `automation`…), ghép ở `app.module.ts` |
+| **Vertical slice (module → feature) + quy tắc phụ thuộc kiểm tự động** | Mỗi use case gom một chỗ (`features/<f>/`), module chỉ lộ `index.ts`; để ranh giới không mục dần theo thời gian | `modules/<m>/{domain,infrastructure,features}`; `npm run check:arch` (`backend/tools/check-architecture.mjs`, chạy trong CI) kiểm tầng, cửa `index.ts`, feature không gọi feature, chủ sở hữu bảng — luật L1–L4, T1–T3, C1 ở `modules/README.md` §3 |
+| **Layered trong feature: Controller → Handler → Repository** | Tách HTTP, nghiệp vụ, SQL; SQL chỉ nằm một chỗ | `features/<f>/<f>.{controller,handler}.ts` + `infrastructure/*.repository.ts`; quy ước "SQL chỉ trong repository/read-model" (T1/T2) ở `modules/README.md` |
+| **Read Model (CQRS nhẹ)** | Màn hình cần dữ liệu join nhiều bảng, khác mô hình ghi | `devices/infrastructure/device.read-model.ts` (`DEVICE_SELECT_SQL`, `latestReadings`) |
+| **Middleware chain** | Auth, chống CSRF, rate limit, xác thực thiết bị áp cho cả nhóm route | `requireDashboard`, `requirePortalUser`, `requireMobileUser`, `csrfGuard` (`identity/guards/auth.guards.ts`), rate limit trong `core/http/rate-limit.ts` |
+| **Factory theo kênh** | Mobile và Portal dùng chung nghiệp vụ, khác cách xác thực | `buildCustomerRouter(channel)` trong `app.module.ts`: mỗi module gắn handler qua móc `customer` |
+| **Policy / Permission matrix** | RBAC 2 tầng phải nhất quán ở mọi endpoint | `homes/domain/permissions.ts` (`ROLE_PERMISSIONS`) + guard `requireHomeMember`, `requireDeviceAccess` — 404/403 đúng bất biến 6 |
+| **Unit of Work** | Tạo nhà, claim ghi nhiều bảng phải cùng thành công hoặc cùng huỷ (bất biến 9) | `withTransaction(conn => …)` trong `infrastructure/database/db.ts`; hàm nhận `Queryable` |
+| **Observer / in-process Event Bus** | Ingest, lệnh, thông báo cần báo cho WS hub, automation mà không gọi thẳng nhau | `shared/events/event-bus.ts`; phát `telemetry`, `device_state`, `notification`, `home_changed`; nghe ở `realtime/features/mobile-ws/`, `automation/features/run-automation-engine/` |
+| **Strategy (đăng ký handler)** | Thiết bị giả lập và thiết bị thật nhận lệnh theo 2 cách khác nhau | `registerSimulatedCommandHandler` trong `modules/control/domain/simulated-command.ts` |
+| **Pending-request registry** | Chờ ack MQTT có timeout, không rò bộ nhớ | `pendingAcks` + `registerPending` trong `control/domain/pending-acks.ts` (đăng ký **trước** khi publish) |
+| **Optimistic lock bằng UPDATE có điều kiện** | Hai số đo đến cùng lúc không được kích hoạt một luật hai lần | `automation/features/run-automation-engine/`: "giành quyền chạy" bằng `UPDATE … WHERE last_condition_state = …` |
 
 ### 3.2. Nên áp dụng
 
 #### a) Ingest Pipeline dùng chung cho HTTP và MQTT — **ưu tiên cao nhất**
 
-**Vấn đề (có thật):** đường HTTP (`middleware/validateDevice.ts` + `routes/data.routes.ts`) và đường MQTT (`services/mqttDataService.ts`) **chép lặp** cùng một chuỗi: kiểm HMAC gateway → kiểm HMAC node → `INSERT sensor_data` → `onTelemetryIngested` → cập nhật `last_seen`. Bất biến 4 ("hai đường phải cùng logic") hiện chỉ được giữ bằng cách sửa tay hai nơi.
+**Vấn đề (có thật):** đường HTTP (`telemetry/features/ingest-http/`: `validate-device.middleware.ts` + `ingest-http.handler.ts`) và đường MQTT (`telemetry/features/ingest-mqtt/`) **chép lặp** cùng một chuỗi: kiểm HMAC gateway → kiểm HMAC node → `INSERT sensor_data` → `onTelemetryIngested` → cập nhật `last_seen`. Bất biến 4 ("hai đường phải cùng logic") hiện chỉ được giữ bằng cách sửa tay hai nơi.
+
+**Hiện trạng sau refactor module → feature:** hai đường đã gọi chung hàm xác thực của `modules/devices` (`verifyGatewayHMAC`, `verifyDeviceHMAC`, `registerAuthFailure`) và bước `markGatewayAndSensorSeen` trong `telemetry/domain/ingest-common.ts`, nên lõi HMAC và chính sách khoá thiết bị chỉ còn một nơi. Nhưng *pipeline* (parse, thứ tự các bước, `insertSensorData`, `onTelemetryIngested`) vẫn nằm ở hai handler; hợp nhất thành lõi duy nhất dưới đây vẫn là bước tiếp theo.
 
 **Pattern:** *Pipeline* (Template Method dạng hàm) + *Adapter* cho từng transport. Lõi xác thực và ghi dữ liệu viết **một lần**; HTTP và MQTT chỉ là adapter đổi request/message thành input và đổi kết quả thành response/log.
 
 ```ts
-// modules/ingest/ingest.service.ts — lõi duy nhất
+// modules/telemetry/domain/ingest-pipeline.ts — lõi duy nhất (đề xuất, chưa có)
 export type IngestResult =
   | { ok: true; sensorDbId: number }
   | { ok: false; status: 400 | 401 | 403; code: string };
@@ -94,13 +97,13 @@ export async function ingestGatewayPayload(body: unknown, transport: "http" | "m
   // 4. onTelemetryIngested(...) rồi cập nhật last_seen
 }
 
-// routes/data.routes.ts — adapter HTTP
+// features/ingest-http — adapter HTTP
 router.post("/", async (req, res) => {
   const r = await ingestGatewayPayload(req.body, "http", clientIp(req));
   r.ok ? res.status(201).json({ ok: true }) : res.status(r.status).json({ error: r.code });
 });
 
-// services/mqttDataService.ts — adapter MQTT
+// features/ingest-mqtt — adapter MQTT
 client.on("message", (_t, buf) => void ingestGatewayPayload(safeJson(buf), "mqtt"));
 ```
 
@@ -108,7 +111,7 @@ Lợi ích: bất biến 4 được đảm bảo **bằng cấu trúc code**, kh
 
 #### b) Strategy registry cho trigger và action của automation
 
-**Vấn đề:** `automationEngine.ts` hiện xử lý 2 loại trigger (`sensor_threshold`, `schedule`) bằng code riêng. Camera sẽ thêm trigger `motion`, node phòng khách có thể thêm action `dimmer` — mỗi lần thêm phải sửa lõi engine.
+**Vấn đề:** `automation/features/run-automation-engine/` hiện xử lý 2 loại trigger (`sensor_threshold`, `schedule`) bằng code riêng. Camera sẽ thêm trigger `motion`, node phòng khách có thể thêm action `dimmer` — mỗi lần thêm phải sửa lõi engine.
 
 **Pattern:** *Strategy* + *Registry*. Mỗi loại trigger/action là một object cùng interface; engine chỉ tra bảng.
 
@@ -141,11 +144,13 @@ interface SnapshotStore {
 
 **Vấn đề:** 1 gateway gửi khung JPEG lên, N người xem trên Mobile; mạng một người chậm không được làm chậm người khác hay làm đầy RAM server.
 
-**Pattern:** *Publish–Subscribe* theo `deviceId` + *bounded buffer, drop-oldest* cho từng người xem. Khi người xem cuối rời → phát `live_stop` (giống `wsHub.ts` đang quản lý kết nối theo nhà).
+**Pattern:** *Publish–Subscribe* theo `deviceId` + *bounded buffer, drop-oldest* cho từng người xem. Khi người xem cuối rời → phát `live_stop` (giống `realtime/features/mobile-ws/mobile-ws.gateway.ts` đang quản lý kết nối theo nhà).
 
 #### e) Gom job định kỳ về một Scheduler
 
-**Vấn đề:** nhiều `setInterval` rải rác (automation tick, `habitSuggestion.job.ts`, `deviceMonitor.ts`, maintenance) — khó tắt sạch khi test, khó biết job nào đang chạy.
+**Vấn đề:** nhiều `setInterval` rải rác (automation tick, `run-habit-suggestions.job.ts`, `presence-monitor.job.ts`, các job purge) — khó tắt sạch khi test, khó biết job nào đang chạy.
+
+**Hiện trạng:** worker đã được khai báo tập trung — mỗi module liệt kê trong `<m>.module.ts` (`AppModule.workers`), `main.ts` khởi động tất cả qua `listWorkers()` của `app.module.ts`. Vẫn thiếu phần còn lại của Scheduler: `intervalMs` do từng job tự quản, chưa có chống chạy chồng và `stopAll()`.
 
 **Pattern:** một *Scheduler* nhỏ: đăng ký `{name, intervalMs, run}`, bọc try/catch, không chạy chồng nếu lần trước chưa xong, có `stopAll()`. Không cần thư viện cron.
 
@@ -367,10 +372,11 @@ static const struct { const char *action; cmd_handler_t fn; } CMD_TABLE[] = {
 
 **Backend**
 - [ ] SQL chỉ nằm trong repository/read-model; luôn dùng `?`.
+- [ ] Chạy `npm run check:arch` (cùng `npx tsc --noEmit`) và không thêm ngoại lệ `arch-allow` khi chưa có lý do.
 - [ ] Ghi ≥ 2 bảng nằm trong `withTransaction`.
 - [ ] Endpoint theo nhà đi qua `requireHomeMember` / `requireDeviceAccess` / `requireRoomAccess` (404/403 đúng).
 - [ ] Logic xác thực thiết bị chỉ ở **một** chỗ (sau khi có Ingest Pipeline).
-- [ ] Module nói chuyện với nhau qua `eventBus` hoặc hàm export rõ ràng, không import vòng.
+- [ ] Module nói chuyện với nhau qua `eventBus` hoặc hàm export trong `index.ts` (facade), không import sâu vào file nội bộ.
 
 **Web / Mobile**
 - [ ] Dữ liệu server lấy qua hook/provider, không fetch trực tiếp trong component/widget.
