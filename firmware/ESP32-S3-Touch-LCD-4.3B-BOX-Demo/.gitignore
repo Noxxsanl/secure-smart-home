@@ -1,0 +1,19 @@
+# Chỉ làm việc với ESP-IDF — bỏ bản Arduino và firmware .bin dựng sẵn của Waveshare
+/Arduino/
+/Firmware/
+
+# ESP-IDF build output
+build/
+sdkconfig
+sdkconfig.old
+
+# Component từ registry (tải lại theo main/idf_component.yml khi `idf.py build`)
+managed_components/
+ESP-IDF/*/components/*__*/
+
+# Editor / tooling
+.vscode/
+.devcontainer/
+.cache/
+.clangd
+compile_commands.json
