@@ -2,8 +2,8 @@
 # Ví dụ: make dev · make certs IP=192.168.1.100 · make test-security ARGS="http://localhost:5000 <GW_ID> ..."
 .PHONY: dev prod certs migrate test-security
 
-dev: ## Stack dev (compose.yaml + compose.override.yaml)
-	docker compose up --build
+dev: ## Stack dev (compose.yaml + compose.override.yaml); -V làm mới anonymous volume node_modules theo image vừa build
+	docker compose up --build --renew-anon-volumes
 
 prod: ## Stack prod
 	docker compose -f compose.prod.yaml up -d --build

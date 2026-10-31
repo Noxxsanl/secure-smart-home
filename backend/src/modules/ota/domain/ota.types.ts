@@ -1,4 +1,4 @@
-// DTO Dashboard của firmware/OTA (CONTRACT_V2 §5). Khớp frontend/packages/console/api/types.ts.
+// DTO Dashboard của firmware/OTA (CONTRACT_V2 §5). Khớp frontend/packages/api-client/src/dashboard/types.ts.
 
 export interface FirmwareVersion {
   id: number;

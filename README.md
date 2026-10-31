@@ -216,9 +216,11 @@ bash scripts/setup.sh
 **Or manually:**
 
 ```bash
-docker compose up -d --build
+docker compose up -d --build --renew-anon-volumes   # or: make dev (foreground)
 ```
 
+> `--renew-anon-volumes` (`-V`) refreshes the anonymous `node_modules` volumes from the freshly built images. Without it Compose reuses the old volumes when recreating containers, so new/renamed workspace packages (e.g. `@shh/*` in `frontend/`) are missing at runtime.
+>
 > First run takes 3–5 minutes for image pulls and builds. Subsequent starts are faster thanks to layer cache.
 
 ### Step 3 — Verify services
@@ -231,20 +233,24 @@ All services should be `running` or `running (healthy)`:
 
 ```
 NAME                 STATUS                  PORTS
-iot-nginx            running                 0.0.0.0:80->80/tcp
-iot-frontend         running                 0.0.0.0:3000->3000/tcp
-iot-backend          running (healthy)       0.0.0.0:5000->5000/tcp
-iot-mqtt-broker-1    running                 0.0.0.0:1883->1883/tcp
-iot-mqtt-broker-2    running                 0.0.0.0:8883->8883/tcp
-iot-postgres         running (healthy)       127.0.0.1:5433->5432/tcp
+iot-nginx              running                 0.0.0.0:80->80/tcp
+iot-frontend-admin     running                 0.0.0.0:3001->3000/tcp
+iot-frontend-operator  running                 0.0.0.0:3002->3000/tcp
+iot-frontend-user      running                 0.0.0.0:3003->3000/tcp
+iot-backend            running                 0.0.0.0:5000->5000/tcp
+iot-mosquitto-1        running                 0.0.0.0:1883->1883/tcp
+iot-mosquitto-2        running                 0.0.0.0:8883->8883/tcp
+iot-postgres           running (healthy)       127.0.0.1:5433->5432/tcp
 ```
 
 ### Step 4 — Access
 
 | Service | URL |
 |---------|-----|
-| **Dashboard** (via Nginx) | http://localhost |
-| **Dashboard** (direct) | http://localhost:3000 |
+| **Admin console** (via Nginx) | http://localhost or http://admin.localhost |
+| **Operator console** (via Nginx) | http://operator.localhost |
+| **Customer portal** (via Nginx) | http://user.localhost |
+| **Apps** (direct, dev) | http://localhost:3001 · :3002 · :3003 |
 | **Backend API** | http://localhost:5000 |
 | **Health check** | http://localhost:5000/api/health |
 | **MQTT Broker 1** | `mqtt://localhost:1883` |
@@ -271,6 +277,7 @@ docker compose restart backend          # Restart a service
 docker compose down                     # Stop (data preserved)
 docker compose down -v                  # Stop + wipe all data
 docker compose up -d --build backend    # Rebuild after code change
+docker compose up -d --build -V frontend-admin   # Rebuild after dependency change (fresh node_modules volume)
 
 # Production build
 docker compose -f compose.prod.yaml up -d --build

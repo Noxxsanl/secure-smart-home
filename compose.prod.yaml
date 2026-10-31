@@ -67,6 +67,8 @@ services:
     container_name: iot-backend
     volumes:
       - ./infra/mosquitto/certs/ca.crt:/certs/mqtt-ca.crt:ro
+      # Firmware upload (FIRMWARE_STORAGE_DIR mặc định storage/firmware) — giữ qua mỗi lần tạo lại container.
+      - firmware_data:/app/storage/firmware
     env_file:
       - ./backend/.env
     environment:
@@ -82,6 +84,9 @@ services:
       - MQTT_PORT=8883
       - MQTT_CA_FILE=/certs/mqtt-ca.crt
       - FRONTEND_URL=http://localhost
+      # Backend chỉ nhận request qua nginx (không publish cổng) → tin đúng 1 hop X-Forwarded-For để
+      # req.ip là IP thật của client; thiếu dòng này mọi client chung IP nginx và rate limit khoá cả hệ thống.
+      - TRUST_PROXY=1
     depends_on:
       postgres:
         condition: service_healthy
@@ -155,6 +160,7 @@ services:
 
 volumes:
   pg_data:
+  firmware_data:
   mosquitto1_data:
   mosquitto1_logs:
   mosquitto2_data:

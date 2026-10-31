@@ -92,6 +92,8 @@ services:
       - ./infra/mosquitto/certs/ca.crt:/certs/mqtt-ca.crt:ro
     env_file:
       - ./backend/.env
+    # Backend vừa qua nginx (:80) vừa publish :5000 cho dev/attack demo — không bật TRUST_PROXY mặc định
+    # (gọi thẳng :5000 có thể giả X-Forwarded-For). Muốn rate limit theo IP thật qua nginx: TRUST_PROXY=1 trong backend/.env.
     environment:
       # Override host values so Docker always uses service names,
       # regardless of what DB_HOST/MQTT_HOST are set to in .env
@@ -116,7 +118,9 @@ services:
       - iot-network
     restart: unless-stopped
 
-  # Frontend: 3 app Next.js trong frontend/ (npm workspaces), mỗi role một app.
+  # Frontend: 3 app Next.js trong frontend/apps/ (npm workspaces), mỗi role một app. Source bind-mount,
+  # node_modules ở anonymous volume — đổi phụ thuộc thì `docker compose up --build --renew-anon-volumes`
+  # (make dev), nếu không compose giữ node_modules cũ của container trước.
   frontend-admin:
     build:
       context: ./frontend
@@ -129,7 +133,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/admin/.next
+      - /app/apps/admin/.next
     environment:
       - BACKEND_URL=http://backend:5000
       - WATCHPACK_POLLING=true
@@ -152,7 +156,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/operator/.next
+      - /app/apps/operator/.next
     environment:
       - BACKEND_URL=http://backend:5000
       - WATCHPACK_POLLING=true
@@ -175,7 +179,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/user/.next
+      - /app/apps/user/.next
     environment:
       - BACKEND_URL=http://backend:5000
       - WATCHPACK_POLLING=true

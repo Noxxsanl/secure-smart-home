@@ -9,7 +9,7 @@ const APPS = [
 ];
 
 const children = APPS.map(({ name, port }) => {
-  const child = spawn("npm", ["run", "dev", "-w", `@smarthome/${name}`], {
+  const child = spawn("npm", ["run", "dev", "-w", `@shh/${name}`], {
     stdio: ["ignore", "pipe", "pipe"],
     shell: process.platform === "win32",
   });

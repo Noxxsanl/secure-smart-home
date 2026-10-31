@@ -1,4 +1,4 @@
-// DTO Dashboard của tự động hoá (CONTRACT_V2 §5). Khớp frontend/packages/console/api/types.ts.
+// DTO Dashboard của tự động hoá (CONTRACT_V2 §5). Khớp frontend/packages/api-client/src/dashboard/types.ts.
 
 export interface AutomationRuleDto {
   id: number;

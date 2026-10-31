@@ -162,12 +162,13 @@ interface SnapshotStore {
 
 | Pattern | Vấn đề | Ở đâu |
 |---|---|---|
-| **Monorepo + package dùng chung** | 3 app (admin, operator, user) trùng nhiều UI và client | npm workspaces; `packages/shared` (API client, UI, auth), `packages/console` (màn hình chung Admin/Operator) |
-| **Feature folders** | Code theo domain dễ tìm hơn theo loại file | `packages/console/<domain>/{api,hooks,components,pages}`, `admin/src/features` |
-| **Custom hook bọc SWR (stale-while-revalidate)** | Mỗi trang tự fetch, tự cache, tự poll sẽ lệch nhau | `useDeviceDetail`, `useDeviceList`… dùng `useDashboardSWR`, `refreshInterval` |
-| **Query-key factory** | Chuỗi key viết tay dễ sai, khó `mutate` đúng chỗ | `deviceKey(id)` trong `console/api/devices.api.ts` |
-| **API client duy nhất (Facade)** | Cookie, header `X-Portal`, 401, lỗi mạng xử lý một chỗ | `packages/shared/api/http.ts` (`api`, `configureApi`, `FetchError`, `apiErrorCode`) |
-| **Error-code → thông điệp** | UI phải hiện hướng dẫn tiếng Việt, không mã thô (bất biến 10) | `console/lib/errors.ts`, `shared/auth/errors.ts` |
+| **Micro-frontend trong monorepo** | 3 app (admin, operator, user) trùng nhiều màn hình; một app phình to thì khó tách việc | npm workspaces; app mỏng `apps/*` chỉ route + ghép; mỗi domain một package `packages/modules/<x>` (`@shh/<x>`) có cửa ra `index.ts`; nền chung `@shh/ui`, `@shh/api-client`, `@shh/utils` |
+| **Vertical slice theo ca sử dụng** | Code theo domain + ca sử dụng dễ tìm, dễ xoá hơn theo loại file | `packages/modules/<x>/src/{api,model,ui,features/<ca-sử-dụng>}`; quy tắc phụ thuộc kiểm bằng `npm run check:arch` (`frontend/scripts/check-architecture.mjs`) |
+| **Composition qua slot (render prop)** | Module không được import nhau mà trang cần phần của module khác | Feature nhận `renderTelemetry` / `renderLogs` / `renderDevices`, trang của app nối: `<DeviceDetailPage renderTelemetry={(p) => <DeviceTelemetryPanel {...p} />} />` |
+| **Custom hook bọc SWR (stale-while-revalidate)** | Mỗi trang tự fetch, tự cache, tự poll sẽ lệch nhau | `useDeviceDetail`, `useDeviceList`… (trong `api/` của module) dùng `useDashboardSWR`, `refreshInterval` |
+| **Query-key factory** | Chuỗi key viết tay dễ sai, khó `mutate` đúng chỗ | `deviceKey(id)` trong `modules/devices/src/api/devices.api.ts`; khoá mà nhiều module cùng làm mới ở `api-client/src/portal/keys.ts` |
+| **API client duy nhất (Facade)** | Cookie, header `X-Portal`, 401, lỗi mạng xử lý một chỗ | `packages/api-client/src/http.ts` (`api`, `configureApi`, `FetchError`, `apiErrorCode`); cửa ra theo kênh `@shh/api-client/dashboard`, `/portal` |
+| **Error-code → thông điệp** | UI phải hiện hướng dẫn tiếng Việt, không mã thô (bất biến 10) | `api-client/src/{dashboard,portal}/errors.ts`, `modules/auth/src/model/errors.ts` |
 
 ### 4.2. Nên áp dụng
 
@@ -188,9 +189,9 @@ Không dùng optimistic update cho thiết bị thật: trạng thái chỉ đ�
 
 #### b) Adapter mock ↔ API cho phần còn mock
 
-**Vấn đề:** AI Dashboard và Admin Settings vẫn đọc `packages/shared/mock/` trực tiếp trong component. Khi nối API thật phải sửa từng component.
+**Vấn đề:** AI Dashboard và Admin Settings chưa có API. Khi nối API thật không được phải sửa từng component.
 
-**Pattern:** đưa truy cập dữ liệu vào hook (`useAiOverview()`); bên trong hook chọn nguồn mock hoặc API. Component không biết dữ liệu đến từ đâu — cách Mobile đang làm với `USE_MOCK`.
+**Pattern:** truy cập dữ liệu chỉ nằm trong hook ở `api/` của module; bên trong hook chọn nguồn mock hoặc API. Component không biết dữ liệu đến từ đâu — cách Mobile đang làm với `USE_MOCK`. `@shh/ai` đã theo cách này (`api/useAiDashboard.ts` đọc `model/mockData.ts`, component trong `ui/` chỉ nhận props); `@shh/settings` còn giá trị cố định trong component.
 
 #### c) Giữ polling cho Dashboard
 

@@ -1,0 +1,26 @@
+{
+  "name": "@shh/ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Dashboard (dữ liệu mock — chưa có API).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@shh/api-client": "*",
+    "@shh/auth": "*",
+    "@shh/ui": "*",
+    "@shh/utils": "*",
+    "lucide-react": "^1.16.0",
+    "recharts": "^3.8.1",
+    "swr": "^2.4.1"
+  },
+  "peerDependencies": {
+    "next": "16.2.5",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}

@@ -1,4 +1,4 @@
-// DTO Dashboard của module identity (CONTRACT_V2 §5). Khớp frontend/packages/console/api/types.ts.
+// DTO Dashboard của module identity (CONTRACT_V2 §5). Khớp frontend/packages/api-client/src/dashboard/types.ts.
 
 export interface Customer {
   id: number;

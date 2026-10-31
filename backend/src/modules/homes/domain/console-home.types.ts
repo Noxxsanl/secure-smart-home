@@ -1,4 +1,4 @@
-// DTO Dashboard của module homes (CONTRACT_V2 §5). Khớp frontend/packages/console/api/types.ts.
+// DTO Dashboard của module homes (CONTRACT_V2 §5). Khớp frontend/packages/api-client/src/dashboard/types.ts.
 // Không có trường secret/hash nào ở đây (invariant 1, 2).
 import type { HomeStatus, PackageCode, MemberRole } from "../../../shared/types/domain";
 import type { Home, RoomSummary } from "./home.types";

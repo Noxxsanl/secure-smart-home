@@ -1,4 +1,4 @@
-// DTO Dashboard của nhật ký (CONTRACT_V2 §5). Khớp frontend/packages/console/api/types.ts.
+// DTO Dashboard của nhật ký (CONTRACT_V2 §5). Khớp frontend/packages/api-client/src/dashboard/types.ts.
 import type { Severity } from "../../../shared/types/domain";
 import type { LogCategory } from "./event-catalog";
 

@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 *.log
+# Firmware upload khi chạy local/dev (FIRMWARE_STORAGE_DIR mặc định)
+storage/
