@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_home_mobile/app.dart';
+import 'package:smart_home_mobile/app/app.dart';
 import 'package:smart_home_mobile/core/config/app_config.dart';
 import 'package:smart_home_mobile/core/storage/session_storage.dart';
-import 'package:smart_home_mobile/features/claim/presentation/providers/claim_providers.dart';
-import 'package:smart_home_mobile/features/shell/presentation/providers/realtime_controller.dart';
 import 'package:smart_home_mobile/mock/mock_backend.dart';
 import 'package:smart_home_mobile/mock/mock_providers.dart';
+import 'package:smart_home_mobile/modules/devices/devices.dart';
+import 'package:smart_home_mobile/modules/homes/features/claim/mobile_scanner_view.dart';
+import 'package:smart_home_mobile/modules/homes/homes.dart';
+import 'package:smart_home_mobile/modules/realtime/realtime.dart';
 
 Widget _app({MemorySessionStorage? storage}) => ProviderScope(
   retry: (_, _) => null,
@@ -109,6 +111,44 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Nguyễn Hoàng Đạt'), findsOneWidget);
     expect(find.text('Đăng xuất'), findsOneWidget);
+  });
+
+  testWidgets('named routes open pages owned by other modules', (tester) async {
+    await _pump(tester, _app());
+
+    // Login → register (auth).
+    await tester.tap(find.text('Chưa có tài khoản? Đăng ký'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Đăng ký tài khoản'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await _login(tester, 'user01@smarthome.local');
+
+    // Home dashboard → room detail (homes, RoomRouteArgs).
+    await tester.tap(
+      find.descendant(of: find.byType(RoomCard), matching: find.text('Phòng ngủ')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Phòng ngủ'), findsOneWidget);
+
+    // Room detail → device detail (devices, DeviceRouteArgs).
+    await tester.tap(
+      find.descendant(of: find.byType(DeviceRow), matching: find.text('Quạt phòng ngủ')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Quạt phòng ngủ'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    // Profile → members (homes, MembersRouteArgs).
+    await tester.tap(find.byKey(const ValueKey<String>('nav-Hồ sơ')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Thành viên'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Thành viên'), findsOneWidget);
   });
 
   testWidgets('VIEWER cannot switch relays and sees read-only automation', (

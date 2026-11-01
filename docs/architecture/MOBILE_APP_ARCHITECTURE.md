@@ -136,7 +136,7 @@ flowchart TB
     REPOIMPL --> REMOTE & LOCAL & WS
 ```
 
-**Nguyên tắc:** mọi feature mới (Rooms, Devices, Automation, Camera...) đều theo đúng khuôn `presentation/{pages,widgets,controllers} + domain/{entities,usecases,repositories} + data/{repositories_impl,datasources,models}` — thay thế cấu trúc thiếu nhất quán hiện tại (mục 1.1).
+**Nguyên tắc:** mỗi domain (Homes, Devices, Automation, Camera...) là một module `modules/<m>/` có đủ 3 lớp — `domain/` (entity, repository interface), `data/` (mapper, remote + mock repository), presentation tách thành `application/` (provider/notifier Riverpod), `ui/` (widget dùng chung) và `features/<màn hình>/` — thay thế cấu trúc thiếu nhất quán ở mục 1.1. Module khác chỉ dùng qua barrel `<m>.dart`; chi tiết ở Phần 8 và `mobile/README.md`.
 
 ### 2.2. State Management — chọn Riverpod
 
@@ -200,6 +200,8 @@ flowchart TD
 | **Onboarding Stack** | `/claim-home`, `/provision-wifi`, `/pair-devices` | Đã đăng nhập, chưa có Home nào |
 | **Main Shell (Bottom Nav)** | `/home`, `/rooms`, `/automation`, `/notifications`, `/profile` | Đã đăng nhập + đã có ≥1 Home |
 | **Chi tiết (push trên Shell)** | `/rooms/:roomId`, `/devices/:deviceId`, `/camera/:deviceId`, `/family`, `/settings/**` | Kế thừa guard Main Shell |
+
+Hiện trạng (2026-11-01): chưa dùng `go_router`; trang mở từ feature khác đi qua named route của `Navigator` (`core/navigation/app_routes.dart`, mỗi module dựng trang của mình trong `<m>_module.dart`, `app/router.dart` ghép), guard do `app/app_root.dart` đảm nhiệm. Chuyển sang `go_router` chỉ chạm các file đó.
 
 ### 4.2. Bottom Navigation mới (thay thế 5 tab hiện tại)
 
@@ -425,33 +427,35 @@ flowchart TD
 
 ## 8. COMPONENT TREE
 
+> **Cập nhật 2026-11-01:** cây dưới đây theo bố cục **module → feature** (cùng ranh giới module với backend `backend/src/modules/` và web `@shh/*`), thay cho `features/<x>/{data,domain,presentation}` trước đây. Hiện trạng, bảng route và quy tắc phụ thuộc A1–A6 (kiểm bằng `dart run tool/check_architecture.dart`): [`mobile/README.md`](../../mobile/README.md). Đánh dấu *(dự kiến)* là chưa có code.
+
 ```
 mobile/lib/
+├── app/                 composition root — nơi duy nhất biết trang của mọi module
+│   ├── app.dart, app_root.dart (splash → login → onboarding → shell)
+│   ├── router.dart      ghép route của các module (đích: go_router + guard — Phần 4)
+│   ├── shell/           AppShellPage + BottomNavBar (giữ pattern cũ — đã tốt)
+│   └── realtime_controller.dart   1 chỗ nhận sự kiện WS → notifier của các module (Phần 11)
 ├── core/
-│   ├── theme/ (app_theme.dart — mở rộng: light/dark, color tokens Đỏ/Cam/Vàng/Xám)
-│   ├── router/ (app_router.dart — go_router config + guard)
-│   ├── network/ (dio_client.dart, api_endpoints.dart, interceptors: auth/refresh/logging)
-│   ├── realtime/ (websocket_client.dart — Phần 11)
-│   ├── storage/ (secure_storage.dart — token, local_cache.dart — offline)
-│   └── di/ (provider bootstrap cho Riverpod)
-│
-└── features/
-    ├── auth/            {domain: entities/User, usecases/Login,Register,VerifyOtp,RefreshToken,BiometricLogin; data: repositories_impl, datasources/AuthRemoteDataSource; presentation: pages, controllers}
-    ├── onboarding/       {claim_home, wifi_provisioning, device_pairing} — mỗi cụm theo đủ 3 lớp
-    ├── smart_home/       Danh sách/chi tiết Home, chuyển đổi Home đang xem (nếu sở hữu nhiều nhà)
-    ├── rooms/            Room List/Detail — mở rộng model Room hiện tại (chỉ có name/icon) thành đầy đủ (id, room_type, devices[])
-    ├── devices/          Device Control theo loại (widgets riêng: LightControl, FanControl, CurtainControl, LockControl, SensorCard)
-    ├── automation/        Rule Builder, Scene Builder
-    ├── camera/            LiveView, Snapshot, History
-    ├── notifications/    Notification Center (thay thế trang tĩnh hiện tại) + phân loại severity
-    ├── recommendations/  AI Recommendation Card/Detail (feature mới)
-    ├── family/            Member list/invite (feature mới)
-    ├── profile/           Thông tin cá nhân, đổi mật khẩu/avatar
-    ├── settings/          WiFi/Gateway/Notification/Language/Theme/Security/About (gộp "about" cũ vào đây)
-    └── shell/             AppShellPage + BottomNavBar (giữ nguyên pattern hiện có — đã tốt)
+│   ├── theme/           light/dark, color tokens Đỏ/Cam/Vàng/Xám
+│   ├── navigation/      tên route + tham số (đích: cấu hình go_router)
+│   ├── network/         api_client (Bearer + refresh token xoay vòng), error_messages
+│   ├── realtime/        WebSocket client + backoff (Phần 11)
+│   ├── storage/         secure storage (token); local cache offline (dự kiến)
+│   └── config/ widgets/ utils/
+├── mock/                backend giả (USE_MOCK, test)
+└── modules/<m>/         <m>.dart (barrel) · <m>_module.dart (trang + route, chỉ app/) · domain/ · data/ · application/ · ui/ · features/<màn hình>/
+    ├── auth/            login, register, profile (hồ sơ, đổi mật khẩu, giới thiệu) · verify_otp, forgot_password, biometric (dự kiến)
+    ├── homes/           onboarding, home_dashboard (đổi nhà), room_list, room_detail, members (Family), my_invitations, claim · wifi_provisioning, device_pairing (dự kiến — Phần 12)
+    ├── devices/         device_detail (telemetry) · điều khiển theo loại LightControl/FanControl/CurtainControl/LockControl/SensorCard (dự kiến)
+    ├── automation/      rules (Rule Builder) + thẻ gợi ý AI (Phần 14) · Scene Builder (dự kiến)
+    ├── notifications/   notification_center · phân loại severity, push FCM (dự kiến — Phần 16)
+    ├── realtime/        nguồn WebSocket/mock + kiểu sự kiện (không có màn hình)
+    ├── camera/          LiveView, Snapshot, History (dự kiến)
+    └── settings/        WiFi/Gateway/Notification/Language/Theme/Security/About (dự kiến — gộp "Giới thiệu" từ auth/profile)
 ```
 
-**Nguyên tắc giữ lại:** `shell/` (AppShellPage + BottomNavBar) hiện tại đã đúng hướng (tách UI thuần, dùng `AnimatedSwitcher`) — giữ nguyên pattern, chỉ đổi danh sách tab (Phần 4.2).
+So với bản thiết kế trước: `smart_home/`, `rooms/`, `family/`, `onboarding/` gộp vào module `homes` (như backend/web); `recommendations/` là thẻ gợi ý trong `automation`; `profile/` thuộc `auth`; `shell/` chuyển lên `app/` vì ghép trang của nhiều module. UseCase (§2.1) hiện do notifier trong `application/` đảm nhiệm — tách class UseCase khi một logic được nhiều notifier dùng lại.
 
 ---
 

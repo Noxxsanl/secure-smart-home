@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import '../core/realtime/realtime_source.dart';
-import '../features/homes/domain/home_role.dart';
+import '../modules/homes/homes.dart';
 import 'mock_backend.dart';
 
 /// Realtime for the mock mode: forwards the [MockBackend] pushes (device state

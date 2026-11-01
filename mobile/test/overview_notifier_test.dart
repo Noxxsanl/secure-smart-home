@@ -3,17 +3,10 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_home_mobile/core/network/api_exception.dart';
-import 'package:smart_home_mobile/features/auth/presentation/providers/auth_providers.dart';
-import 'package:smart_home_mobile/features/devices/domain/device.dart';
-import 'package:smart_home_mobile/features/devices/domain/device_repository.dart';
-import 'package:smart_home_mobile/features/devices/presentation/providers/device_providers.dart';
-import 'package:smart_home_mobile/features/homes/domain/home.dart';
-import 'package:smart_home_mobile/features/homes/domain/home_repository.dart';
-import 'package:smart_home_mobile/features/homes/domain/home_role.dart';
-import 'package:smart_home_mobile/features/homes/domain/overview.dart';
-import 'package:smart_home_mobile/features/homes/presentation/providers/homes_providers.dart';
-import 'package:smart_home_mobile/features/rooms/domain/room.dart';
-import 'package:smart_home_mobile/features/shell/domain/realtime_event.dart';
+import 'package:smart_home_mobile/modules/auth/auth.dart';
+import 'package:smart_home_mobile/modules/devices/devices.dart';
+import 'package:smart_home_mobile/modules/homes/homes.dart';
+import 'package:smart_home_mobile/modules/realtime/realtime.dart';
 
 const _home = Home(
   id: 1,

@@ -205,11 +205,12 @@ Dashboard nhân viên **không cần** WebSocket: SWR poll 5 s đủ cho màn h�
 
 | Pattern | Vấn đề | Ở đâu |
 |---|---|---|
-| **Clean Architecture theo feature** | Tách UI, nghiệp vụ, nguồn dữ liệu; test được domain | `mobile/lib/features/<feature>/{data,domain,presentation}` |
-| **Repository interface + 2 hiện thực** | Chạy app không cần backend (demo, test) | `device_repository.dart` (interface) + `device_remote_repository.dart` / `device_mock_repository.dart`, chọn theo `USE_MOCK` (`core/config/app_config.dart`) |
-| **Riverpod làm DI + state** | Không dùng service locator toàn cục; dễ override khi test | `AsyncNotifier`, `Notifier`, `.autoDispose`, `.family` trong `presentation/providers` |
-| **Mapper** | JSON API ≠ entity domain | `device_mapper.dart` |
-| **Realtime có fallback** | WebSocket mất thì app vẫn phải cập nhật | `core/realtime/realtime_source.dart` (backoff 1→30 s), `realtime_controller.dart` (poll REST 15 s khi WS rớt) |
+| **Module → feature + Clean Architecture** | Tách UI, nghiệp vụ, nguồn dữ liệu; test được domain; cùng ranh giới module với backend và web | `mobile/lib/modules/<m>/{domain,data,application,ui,features/<f>}`, module khác chỉ qua barrel `<m>.dart`; quy tắc kiểm bằng `dart run tool/check_architecture.dart` (`mobile/README.md`) |
+| **Composition root + named route** | Feature không biết trang của feature khác, nhưng vẫn phải mở được nhau | `lib/app/router.dart` ghép `<m>Route` của từng module; feature gọi `Navigator.of(context).openDevice(...)` (`core/navigation/app_routes.dart`) |
+| **Repository interface + 2 hiện thực** | Chạy app không cần backend (demo, test) | `modules/devices/domain/device_repository.dart` (interface) + `data/device_remote_repository.dart` / `data/device_mock_repository.dart`, chọn theo `USE_MOCK` (`core/config/app_config.dart`) |
+| **Riverpod làm DI + state** | Không dùng service locator toàn cục; dễ override khi test | `AsyncNotifier`, `Notifier`, `.autoDispose`, `.family` trong `modules/<m>/application/` |
+| **Mapper** | JSON API ≠ entity domain | `modules/devices/data/device_mapper.dart` |
+| **Realtime có fallback** | WebSocket mất thì app vẫn phải cập nhật | `core/realtime/realtime_source.dart` (backoff 1→30 s), `app/realtime_controller.dart` (poll REST 15 s khi WS rớt) |
 
 ### 5.2. Nên áp dụng
 

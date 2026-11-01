@@ -496,7 +496,7 @@ Xác nhận kế hoạch có tạo Scene/Automation phải ghi **trong 1 transac
 ### 10.4. Vị trí code dự kiến
 
 - Backend: `backend/src/modules/agent/` gồm controller, orchestrator, `llm/` (adapter), `tools/`, `policy/` (catalog lệnh + luật rủi ro), repository, executor, fallback parser. Phân lớp theo [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) (NFR-M1).
-- Mobile: `mobile/lib/features/assistant/` gồm màn chat, thẻ kế hoạch, sheet xác thực lại. Theo Riverpod + Clean Architecture ([Mobile](../architecture/MOBILE_APP_ARCHITECTURE.md)).
+- Mobile: module `mobile/lib/modules/assistant/` gồm màn chat, thẻ kế hoạch, sheet xác thực lại (bố cục `mobile/README.md`). Theo Riverpod + Clean Architecture ([Mobile](../architecture/MOBILE_APP_ARCHITECTURE.md)).
 - Thêm dependency (SDK của nhà cung cấp LLM, gói HTTP/Riverpod cho Mobile) **khi kế hoạch được duyệt**.
 
 ---

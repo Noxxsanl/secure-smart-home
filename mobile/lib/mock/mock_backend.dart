@@ -3,16 +3,11 @@ import 'dart:math' as math;
 
 import '../core/network/api_exception.dart';
 import '../core/realtime/realtime_source.dart';
-import '../features/auth/domain/auth_user.dart';
-import '../features/automation/domain/automation_rule.dart';
-import '../features/claim/domain/claim_code.dart';
-import '../features/claim/domain/claim_repository.dart';
-import '../features/devices/domain/device.dart';
-import '../features/homes/domain/home.dart';
-import '../features/homes/domain/home_role.dart';
-import '../features/homes/domain/overview.dart';
-import '../features/notifications/domain/app_notification.dart';
-import '../features/rooms/domain/room.dart';
+import '../modules/auth/auth.dart';
+import '../modules/automation/automation.dart';
+import '../modules/devices/devices.dart';
+import '../modules/homes/homes.dart';
+import '../modules/notifications/notifications.dart';
 
 /// Demo account (contract §8) plus the staff accounts that must be refused.
 class MockAccount {

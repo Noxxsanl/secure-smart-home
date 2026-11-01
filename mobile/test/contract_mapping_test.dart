@@ -1,17 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_home_mobile/core/utils/json.dart';
-import 'package:smart_home_mobile/features/automation/data/automation_mapper.dart';
-import 'package:smart_home_mobile/features/automation/domain/automation_rule.dart';
-import 'package:smart_home_mobile/features/devices/data/device_mapper.dart';
-import 'package:smart_home_mobile/features/devices/domain/device.dart';
-import 'package:smart_home_mobile/features/homes/data/home_mapper.dart';
-import 'package:smart_home_mobile/features/homes/domain/home_role.dart';
-import 'package:smart_home_mobile/features/members/data/member_mapper.dart';
-import 'package:smart_home_mobile/features/notifications/data/notification_mapper.dart';
-import 'package:smart_home_mobile/features/notifications/domain/app_notification.dart';
-import 'package:smart_home_mobile/features/shell/data/realtime_event_mapper.dart';
-import 'package:smart_home_mobile/features/shell/domain/realtime_event.dart';
 import 'package:smart_home_mobile/core/realtime/realtime_source.dart';
+import 'package:smart_home_mobile/core/utils/json.dart';
+import 'package:smart_home_mobile/modules/automation/automation.dart';
+import 'package:smart_home_mobile/modules/automation/data/automation_mapper.dart';
+import 'package:smart_home_mobile/modules/devices/devices.dart';
+import 'package:smart_home_mobile/modules/homes/data/member_mapper.dart';
+import 'package:smart_home_mobile/modules/homes/homes.dart';
+import 'package:smart_home_mobile/modules/notifications/notifications.dart';
+import 'package:smart_home_mobile/modules/realtime/realtime.dart';
 
 const _home = {
   'id': 1,

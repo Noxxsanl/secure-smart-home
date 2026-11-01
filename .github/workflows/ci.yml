@@ -183,7 +183,7 @@ jobs:
       - run: npm run build
 
   mobile:
-    name: Mobile (analyze, test)
+    name: Mobile (analyze, check:arch, test)
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
@@ -199,6 +199,8 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter analyze
+      # Quy tắc module → feature (mobile/tool/check_architecture.dart, giải thích ở mobile/README.md)
+      - run: dart run tool/check_architecture.dart
       - run: flutter test
 
   agent:

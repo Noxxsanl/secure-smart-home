@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_home_mobile/features/claim/domain/claim_code.dart';
-import 'package:smart_home_mobile/features/claim/presentation/widgets/activation_code_formatter.dart';
+import 'package:smart_home_mobile/modules/homes/features/claim/activation_code_formatter.dart';
+import 'package:smart_home_mobile/modules/homes/homes.dart';
 
 void main() {
   group('normalizeActivationCode', () {
