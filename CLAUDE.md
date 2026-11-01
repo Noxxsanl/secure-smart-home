@@ -14,7 +14,7 @@
 | Hạ tầng | `compose.yaml`, `infra/mosquitto/`, `infra/nginx/` | 2 broker Mosquitto (1883 plaintext, 8883 TLS), PostgreSQL host 5433 (init `infra/postgres/init/00_init.sh`, role app không superuser) | Broker 2 chỉ TLS (cert: `infra/pki/gen_mqtt_certs.sh`, gitignored `infra/mosquitto/certs/`); cả hai vẫn `allow_anonymous true`, chưa ACL |
 | Demo tấn công | `tests/security/attack_demo*.sh` | bash + curl + openssl | Dùng khi bảo vệ |
 
-Bố cục gốc (từ 2026-10-27): `infra/{postgres,mosquitto,nginx,pki,media}`, `tests/{security,performance,kws,e2e}`, `contracts/`, `compose.yaml` + `compose.override.yaml` (dev, tự nạp) + `compose.prod.yaml`, `Makefile` (`make dev|prod|certs|migrate|test-security`); `scripts/` chỉ còn `setup.sh`/`setup.bat`. **Bản tạm, chưa code nào đọc**: `contracts/{asyncapi.yaml,datapoints.yaml,openapi.json}` (hợp đồng thật vẫn ở `docs/API_DESIGN.md`), `compose.override.yaml` (`services: {}` — cấu hình dev vẫn nằm trong `compose.yaml`). **Thư mục rỗng**: `infra/media/`, `tests/{performance,kws,e2e}/`, `agent/`.
+Bố cục gốc (từ 2026-10-27): `infra/{postgres,mosquitto,nginx,pki,media}`, `tests/{security,performance,kws,e2e}`, `contracts/`, `compose.yaml` + `compose.override.yaml` (dev, tự nạp) + `compose.prod.yaml`, `Makefile` (`make dev|prod|certs|migrate|test-security|agent-venv|agent-test`); `scripts/` chỉ còn `setup.sh`/`setup.bat`. **Bản tạm, chưa code nào đọc**: `contracts/{asyncapi.yaml,datapoints.yaml,openapi.json}` (hợp đồng thật vẫn ở `docs/API_DESIGN.md`), `compose.override.yaml` (`services: {}` — cấu hình dev vẫn nằm trong `compose.yaml`). **Thư mục rỗng**: `infra/media/`, `tests/{performance,kws,e2e}/`. `agent/` (từ 2026-11-01): **mới có khung** dịch vụ Python FastAPI + OpenAI (`agent/README.md`), cấu hình `agent/.env` (gitignored, mẫu `agent/.env.example`, `setup.sh` tự tạo); đã có `requirements*.txt`, service `agent` trong cả 2 file compose (prod không publish cổng, chưa qua nginx), job CI; code chính (planner/tools/guard/STT) chưa viết. Đề xuất gốc vẫn đặt Agent trong `backend/src/modules/agent/`.
 
 Luồng dữ liệu: Sensor —`local/sensors/+/data` (Broker 1)→ Gateway verify HMAC sensor, ký HMAC gateway —`gateway/<GW_ID>/data` (Broker 2, TLS)→ `backend/src/modules/telemetry/features/ingest-mqtt/` verify 2 lớp → `sensor_data`. Fallback HTTP `POST /api/device/data` (`telemetry/features/ingest-http/`).
 
@@ -63,6 +63,7 @@ Prompt giao cho agent phải tự đủ (agent không thấy hội thoại): m�
 - Frontend: `cd frontend && npm run typecheck && npm run check:arch && npm run lint` (`npm run build` khi đổi route/config)
 - Mobile: `cd mobile && flutter analyze && flutter test` (47 test; chạy máy ảo: `--dart-define=API_BASE_URL=…` hoặc `USE_MOCK=true`, xem `docs/guides/CHAY_LOCAL.md`)
 - Firmware: `pio run -d firmware/<node>`
+- Agent: `make agent-test` (= `cd agent && ruff check . && ruff format --check . && pytest` trong `agent/.venv`, Python 3.12; tạo venv: `make agent-venv`)
 - CI: `.github/workflows/ci.yml` chạy các lệnh trên (chỉ tầng có file đổi; backend và frontend gồm cả `check:arch`) + job "Bảo mật repo" chặn commit file bí mật và tắt TLS. Firmware build bằng `include/config_*.example.h` — thêm macro mới thì thêm vào file mẫu, không thì CI đỏ
 
-Chưa có test tự động cho backend/frontend (mobile có 47 test) — không nói "tests pass" khi không có test nào chạy.
+Chưa có test tự động cho backend/frontend (mobile có 47 test, agent có 5 test khung) — không nói "tests pass" khi không có test nào chạy.

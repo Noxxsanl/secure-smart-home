@@ -64,6 +64,14 @@ if not exist "backend\.env" (
     echo [OK] backend\.env da ton tai.
 )
 
+:: Setup agent .env (OPENAI_API_KEY de trong - agent van chay, chi bao llm_configured=false)
+if not exist "agent\.env" (
+    copy "agent\.env.example" "agent\.env" >nul
+    echo [OK] Da tao agent\.env tu .env.example - dien OPENAI_API_KEY de dung tro ly AI.
+) else (
+    echo [OK] agent\.env da ton tai.
+)
+
 :: Chung chi TLS cho MQTT Broker 2 (can Git Bash + openssl). Tham so cua setup.bat (IP LAN) duoc chuyen tiep.
 if not exist "infra\mosquitto\certs\server.crt" (
     if not exist "%ProgramFiles%\Git\bin\bash.exe" (

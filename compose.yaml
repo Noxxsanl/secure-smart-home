@@ -190,6 +190,34 @@ services:
       - iot-network
     restart: unless-stopped
 
+  # AI Agent (agent/, Python FastAPI) — mới có khung. Không phụ thuộc service nào lúc khởi động
+  # (chỉ gọi backend khi xử lý câu lệnh) nên chạy riêng được: `docker compose up --build agent`.
+  # Source bind-mount + --app-dir để import từ /app/src (ưu tiên hơn bản cài trong image) và tự reload.
+  agent:
+    build:
+      context: ./agent
+    container_name: iot-agent
+    command: ["uvicorn", "smarthome_agent.main:app", "--app-dir", "/app/src",
+              "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/src"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./agent/src:/app/src:ro
+      - ./agent/prompts:/app/prompts:ro
+    # Thiếu agent/.env vẫn chạy (OPENAI_API_KEY trống → /health báo llm_configured=false).
+    env_file:
+      - path: ./agent/.env
+        required: false
+    environment:
+      - AGENT_ENV=development
+      - BACKEND_URL=http://backend:5000
+      - AGENT_CORS_ORIGINS=http://localhost,http://localhost:3003
+      # Bind mount từ Windows/macOS không phát sự kiện inotify — reload phải poll.
+      - WATCHFILES_FORCE_POLLING=true
+    networks:
+      - iot-network
+    restart: unless-stopped
+
 volumes:
   pg_data:
   mosquitto1_data:

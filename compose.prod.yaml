@@ -142,6 +142,22 @@ services:
       - iot-network
     restart: always
 
+  # AI Agent — không publish cổng, chưa đi qua nginx: đường vào (nginx /agent/ hay backend gọi nội bộ)
+  # chốt khi có thiết kế. production bắt buộc OPENAI_API_KEY trong agent/.env, thiếu thì agent lỗi khởi động
+  # và khởi động lại liên tục (các service khác không bị ảnh hưởng).
+  agent:
+    build:
+      context: ./agent
+    container_name: iot-agent
+    env_file:
+      - ./agent/.env
+    environment:
+      - AGENT_ENV=production
+      - BACKEND_URL=http://backend:5000
+    networks:
+      - iot-network
+    restart: always
+
   nginx:
     image: nginx:alpine
     container_name: iot-nginx

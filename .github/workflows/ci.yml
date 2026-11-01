@@ -27,6 +27,7 @@ jobs:
       frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
       mobile: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.mobile == 'true' }}
       firmware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.firmware == 'true' }}
+      agent: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.agent == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -51,6 +52,9 @@ jobs:
               - 'firmware/gateway-node/**'
               - 'firmware/sensor-node/**'
               - 'infra/pki/gen_mqtt_certs.sh'
+              - '.github/workflows/ci.yml'
+            agent:
+              - 'agent/**'
               - '.github/workflows/ci.yml'
 
   # Bất biến 3 (CLAUDE.md): không commit credential/khoá, không tắt kiểm chứng TLS.
@@ -196,6 +200,27 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+
+  agent:
+    name: Agent (ruff, pytest)
+    needs: changes
+    if: needs.changes.outputs.agent == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: agent/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      # Không có agent/.env trên runner — test tự đặt biến cần thiết, không gọi OpenAI thật.
+      - run: pytest
 
   firmware:
     name: Firmware (${{ matrix.node }})

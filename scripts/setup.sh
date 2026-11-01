@@ -74,6 +74,14 @@ else
     ok "backend/.env đã tồn tại."
 fi
 
+# Setup agent .env (OPENAI_API_KEY để trống — agent vẫn chạy, chỉ báo llm_configured=false)
+if [ ! -f "agent/.env" ]; then
+    cp "agent/.env.example" "agent/.env"
+    ok "Đã tạo agent/.env từ .env.example — điền OPENAI_API_KEY để dùng trợ lý AI."
+else
+    ok "agent/.env đã tồn tại."
+fi
+
 # Chứng chỉ TLS cho MQTT Broker 2 — tham số của setup.sh (IP LAN) được chuyển tiếp
 if [ ! -f "infra/mosquitto/certs/server.crt" ]; then
     info "Chưa có chứng chỉ MQTT TLS — đang sinh..."
