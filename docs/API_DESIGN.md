@@ -336,7 +336,7 @@ Broker 2 (`mosquitto`, cổng 8883 TLS; 1883 chỉ cho môi trường dev). Gate
 | `home/<home_id>/gateway/<gw>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {restart, factory_reset}` | như trên |
 | `home/<home_id>/gateway/<gw>/ota/command` | Server → GW | 1 | `{job_id, version, target_type, checksum_sha256, ts, hmac}` | như trên |
 
-Ghi chú: firmware gateway hiện tại (`firmware/gateway-node`) **mới chỉ publish `gateway/+/data`**; chưa subscribe lệnh, chưa gửi ack. Lệnh tới gateway thật sẽ hết hạn `TIMEOUT` cho tới khi firmware làm xong bước 3 trong [IoT Node Network](firmware/IOT_NODE_NETWORK.md) §9.
+Ghi chú: firmware Gateway S3 bản sơ bộ (`firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting`, **chưa chạy trên board**) đã publish `gateway/+/data`, subscribe `.../device/+/command`, `.../command`, `.../ota/command` (wildcard `home/+`), kiểm HMAC + ts, chuyển lệnh xuống node qua ESP-NOW và gửi `.../command/ack`; `ota/command` mới kiểm chữ ký rồi log, `factory_reset` chưa làm. Firmware Arduino cũ `firmware/gateway-node` đã gỡ.
 
 ### 9.2. Dự kiến
 

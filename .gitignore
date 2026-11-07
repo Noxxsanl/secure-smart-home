@@ -14,10 +14,15 @@ dist/
 npm-debug.log*
 *.log
 
-# Firmware credentials
-firmware/**/config_1.h
-firmware/**/config_2.h
-firmware/**/config_gw.h
+# ESP-IDF (docs/guides/ESP_IDF_BUILD.md §7.3) — nvs_*.csv/bin chứa WiFi + secret thiết bị
+firmware/**/build/
+firmware/**/build_*/
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+firmware/**/managed_components/
+firmware/**/certs/
+firmware/**/nvs_*.csv
+firmware/**/nvs_*.bin
 
 # MQTT TLS — sinh bởi infra/pki/gen_mqtt_certs.sh (có khoá riêng CA/server)
 infra/mosquitto/certs/*

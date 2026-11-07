@@ -1,0 +1,29 @@
+# Chỉ tuỳ chọn KHÔNG bí mật.
+menu "ESP32-CAM: drivers"
+
+    config CAM_SNAPSHOT_JPEG_QUALITY
+        int "Chất lượng JPEG ảnh chụp (0-63, nhỏ hơn = đẹp hơn)"
+        range 4 63
+        default 12
+
+    config CAM_PIR_GPIO
+        int "GPIO cảm biến chuyển động PIR"
+        range 0 39
+        default 13
+        help
+            HC-SR501 nối GPIO13 (IOT_NODE_NETWORK Q2). Không dùng GPIO12 (strapping điện áp flash)
+            hay GPIO16/17 (PSRAM).
+
+    config CAM_PIR_COOLDOWN_S
+        int "Khoảng cách tối thiểu giữa 2 sự kiện chuyển động (giây)"
+        range 1 600
+        default 10
+
+    config CAM_PIR_WARMUP_S
+        int "Bỏ qua PIR sau khi bật nguồn (giây)"
+        range 0 120
+        default 30
+        help
+            HC-SR501 báo nhầm trong khoảng 30-60 giây đầu sau khi cấp nguồn.
+
+endmenu

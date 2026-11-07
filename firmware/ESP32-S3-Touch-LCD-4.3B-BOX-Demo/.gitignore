@@ -7,9 +7,11 @@ build/
 sdkconfig
 sdkconfig.old
 
-# Component từ registry (tải lại theo main/idf_component.yml khi `idf.py build`)
+# Component từ registry (tải lại theo idf_component.yml khi `idf.py build`; gateway: components/drivers/)
 managed_components/
 ESP-IDF/*/components/*__*/
+# Lock trỏ tới components/*__* bằng đường dẫn tuyệt đối của từng máy — sinh lại khi build
+ESP-IDF/*/dependencies.lock
 
 # Editor / tooling
 .vscode/

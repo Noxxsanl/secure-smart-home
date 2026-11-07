@@ -1,0 +1,41 @@
+# Chỉ tuỳ chọn KHÔNG bí mật. device_id, secret, MAC Gateway, LMK nằm trong NVS (README).
+menu "Node S3: services"
+
+    config NODE_HEARTBEAT_INTERVAL_S
+        int "Chu kỳ heartbeat ESP-NOW (giây)"
+        range 5 300
+        default 30
+        help
+            IOT_NODE_NETWORK §4.1: 30 giây/lần.
+
+    config NODE_PING_INTERVAL_S
+        int "Chu kỳ gửi PING khi chưa có giờ từ Gateway (giây)"
+        range 1 60
+        default 5
+
+    config NODE_LINK_MAX_FAILS
+        int "Số lần gửi thất bại liên tiếp trước khi dò lại kênh"
+        range 1 20
+        default 3
+        help
+            IOT_NODE_NETWORK §5.1: mất ack liên tiếp 3 lần thì quét lại kênh 1-13.
+
+    config NODE_CMD_REQUIRE_TS
+        bool "Bắt buộc lệnh CMD có trường ts (chống phát lại)"
+        default n
+        help
+            Hợp đồng hiện tại (API_DESIGN §11) chưa có ts trong CMD. Khi Gateway đã gửi {command_id, action,
+            ts} thì bật để node từ chối lệnh cũ/không có ts. Khi tắt: lệnh có ts vẫn được kiểm cửa sổ.
+
+    config NODE_CMD_TS_WINDOW_S
+        int "Cửa sổ chấp nhận ts của lệnh (giây)"
+        range 5 300
+        default 30
+
+    config NODE_ESPNOW_ALLOW_UNENCRYPTED
+        bool "[DEV] Cho ESP-NOW không mã hoá khi NVS chưa có session_key"
+        default n
+        help
+            Chỉ dùng khi Gateway chưa làm ghép nối ECDH. Bản demo/production phải tắt.
+
+endmenu

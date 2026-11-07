@@ -1,0 +1,12 @@
+# Flash 16 MB, không có factory — IOT_NODE_NETWORK §3.4, Firmware §15.
+# nvs 24K: identity, WiFi router, Local AP, cloud, danh sách node/camera đã ghép (gw_config, gw_registry).
+# storage: LittleFS/SPIFFS cho font tiếng Việt, ảnh, log vòng (chưa dùng). log: type tự định nghĩa 0x40.
+# Tổng vừa đúng 16 MB (app đầu tiên bắt đầu ở 0x20000).
+# Name,    Type, SubType, Offset, Size
+nvs,       data, nvs,     ,       24K
+otadata,   data, ota,     ,       8K
+phy_init,  data, phy,     ,       4K
+ota_0,     app,  ota_0,   ,       6M
+ota_1,     app,  ota_1,   ,       6M
+storage,   data, spiffs,  ,       3712K
+log,       0x40, 0x00,    ,       256K

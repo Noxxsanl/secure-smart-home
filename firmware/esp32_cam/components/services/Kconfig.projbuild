@@ -1,0 +1,40 @@
+# Chỉ tuỳ chọn KHÔNG bí mật. SSID, mật khẩu Local AP, device_id, secret, LMK nằm trong NVS (README).
+menu "ESP32-CAM: services"
+
+    config CAM_HEARTBEAT_INTERVAL_S
+        int "Chu kỳ heartbeat ESP-NOW (giây)"
+        range 5 300
+        default 30
+
+    config CAM_STREAM_MAX_FPS
+        int "Giới hạn số khung/giây của luồng MJPEG"
+        range 1 30
+        default 15
+
+    config CAM_GATEWAY_HTTP_PORT
+        int "Cổng HTTP của Gateway trên Local AP"
+        range 1 65535
+        default 80
+
+    config CAM_UPLOAD_TIMEOUT_MS
+        int "Thời gian chờ gửi ảnh tới Gateway (ms)"
+        range 500 10000
+        default 2500
+        help
+            Gateway chờ CMD_ACK tối đa 3 giây, nên để dưới 3000 ms.
+
+    config CAM_ESPNOW_ALLOW_UNENCRYPTED
+        bool "[DEV] Cho ESP-NOW không mã hoá khi NVS chưa có session_key"
+        default n
+        help
+            Chỉ dùng khi Gateway chưa làm ghép nối ECDH. Bản demo/production phải tắt.
+
+    config CAM_DEV_SNTP_SERVER
+        string "[DEV] Máy chủ SNTP (để trống = tắt)"
+        default ""
+        help
+            Production: Local AP không có Internet, giờ lấy từ Gateway qua ESP-NOW TIME_SYNC.
+            Khi dev nối camera vào AP có Internet (VD hotspot điện thoại) thì điền "pool.ntp.org"
+            để có giờ mà ký/kiểm HMAC.
+
+endmenu

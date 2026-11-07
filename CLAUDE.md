@@ -62,8 +62,8 @@ Prompt giao cho agent phải tự đủ (agent không thấy hội thoại): m�
 - Backend: `cd backend && npx tsc --noEmit && npm run check:arch`
 - Frontend: `cd frontend && npm run typecheck && npm run check:arch && npm run lint` (`npm run build` khi đổi route/config)
 - Mobile: `cd mobile && flutter analyze && dart run tool/check_architecture.dart && flutter test` (48 test; chạy máy ảo: `--dart-define=API_BASE_URL=…` hoặc `USE_MOCK=true`, xem `docs/guides/CHAY_LOCAL.md`)
-- Firmware: `pio run -d firmware/<node>`
+- Firmware (ESP-IDF 5.4, không dùng PlatformIO): `idf.py build` trong thư mục project — `firmware/esp32_cam`, `firmware/esp32_s3_firmware_node`, gateway `firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting` (xem `docs/guides/ESP_IDF_BUILD.md`)
 - Agent: `make agent-test` (= `cd agent && ruff check . && ruff format --check . && pytest` trong `agent/.venv`, Python 3.12; tạo venv: `make agent-venv`)
-- CI: `.github/workflows/ci.yml` chạy các lệnh trên (chỉ tầng có file đổi; backend, frontend và mobile gồm cả kiểm quy tắc kiến trúc) + job "Bảo mật repo" chặn commit file bí mật và tắt TLS. Firmware build bằng `include/config_*.example.h` — thêm macro mới thì thêm vào file mẫu, không thì CI đỏ
+- CI: `.github/workflows/ci.yml` chạy các lệnh trên (chỉ tầng có file đổi; backend, frontend và mobile gồm cả kiểm quy tắc kiến trúc) + job "Bảo mật repo" chặn commit file bí mật và tắt TLS. Firmware chưa có job CI (job PlatformIO cũ đã gỡ)
 
 Chưa có test tự động cho backend/frontend (mobile có 48 test, agent có 5 test khung) — không nói "tests pass" khi không có test nào chạy.

@@ -26,7 +26,6 @@ jobs:
       database: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.database == 'true' }}
       frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
       mobile: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.mobile == 'true' }}
-      firmware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.firmware == 'true' }}
       agent: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.agent == 'true' }}
     steps:
       - uses: actions/checkout@v7
@@ -48,11 +47,6 @@ jobs:
             mobile:
               - 'mobile/**'
               - '.github/workflows/ci.yml'
-            firmware:
-              - 'firmware/gateway-node/**'
-              - 'firmware/sensor-node/**'
-              - 'infra/pki/gen_mqtt_certs.sh'
-              - '.github/workflows/ci.yml'
             agent:
               - 'agent/**'
               - '.github/workflows/ci.yml'
@@ -69,6 +63,7 @@ jobs:
           bad=$(git ls-files | grep -E \
             -e '(^|/)config_(1|2|gw)\.h$' \
             -e '(^|/)mqtt_ca_cert\.h$' \
+            -e '(^|/)nvs_[^/]*\.(csv|bin)$' \
             -e '(^|/)\.env$' \
             -e '(^|/)\.env(\..+)?\.local$' \
             -e '^infra/mosquitto/certs/' \
@@ -223,41 +218,3 @@ jobs:
       - run: ruff format --check .
       # Không có agent/.env trên runner — test tự đặt biến cần thiết, không gọi OpenAI thật.
       - run: pytest
-
-  firmware:
-    name: Firmware (${{ matrix.node }})
-    needs: changes
-    if: needs.changes.outputs.firmware == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - node: gateway-node
-            config: config_gw
-          - node: sensor-node
-            config: config_1
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.platformio/.cache
-            ~/.platformio/packages
-            ~/.platformio/platforms
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/*/platformio.ini') }}
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - run: pip install --upgrade platformio
-
-      # config_*.h thật bị gitignore (chứa WiFi/secret) — CI build bằng file mẫu.
-      - name: Dùng cấu hình mẫu
-        run: cp firmware/${{ matrix.node }}/include/${{ matrix.config }}.example.h firmware/${{ matrix.node }}/include/${{ matrix.config }}.h
-
-      # mqtt_ca_cert.h cũng bị gitignore — sinh CA dùng-một-lần trên runner (không upload đi đâu).
-      - name: Sinh CA tạm cho gateway
-        if: matrix.node == 'gateway-node'
-        run: bash infra/pki/gen_mqtt_certs.sh
-
-      - run: pio run -d firmware/${{ matrix.node }}

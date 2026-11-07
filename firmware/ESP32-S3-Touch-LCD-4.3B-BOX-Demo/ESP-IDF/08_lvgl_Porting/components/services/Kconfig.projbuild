@@ -1,0 +1,69 @@
+# Chỉ tuỳ chọn KHÔNG bí mật. device_id, secret, WiFi, Local AP, danh sách node nằm trong NVS (README).
+menu "Gateway S3: services"
+
+    config GW_MQTT_URI_DEFAULT
+        string "MQTT Broker 2 mặc định (NVS cloud/mqtt_uri ghi đè)"
+        default "mqtts://192.168.1.100:8883"
+        help
+            Host phải nằm trong SAN của chứng chỉ broker (infra/pki/gen_mqtt_certs.sh, docs/guides/MQTT_TLS.md).
+
+    config GW_API_URL_DEFAULT
+        string "Địa chỉ Backend mặc định (NVS cloud/api_url ghi đè)"
+        default "https://192.168.1.100"
+        help
+            Dùng cho POST /api/device/data (đường dự phòng khi MQTT mất kết nối) và gửi ảnh camera.
+
+    config GW_SNTP_SERVER
+        string "Máy chủ NTP"
+        default "pool.ntp.org"
+
+    config GW_LOCAL_AP_CHANNEL
+        int "Kênh Local AP khi chưa nối router"
+        range 1 13
+        default 1
+        help
+            Khi đã nối router, Local AP và ESP-NOW tự chuyển sang kênh của router (1 radio dùng chung).
+
+    config GW_LOCAL_AP_MAX_CONN
+        int "Số camera tối đa trên Local AP"
+        range 1 4
+        default 2
+
+    config GW_HEARTBEAT_INTERVAL_S
+        int "Chu kỳ heartbeat Gateway → Server (giây)"
+        range 10 300
+        default 30
+
+    config GW_NODE_ACK_TIMEOUT_MS
+        int "Thời gian chờ CMD_ACK của node (ms)"
+        range 500 4500
+        default 3000
+        help
+            IOT_NODE_NETWORK §6.3: node im lặng 3 giây thì Gateway trả ack error. Backend chờ ack 5 giây.
+
+    config GW_NODE_OFFLINE_S
+        int "Coi node mất kết nối sau bao nhiêu giây không thấy gói"
+        range 30 600
+        default 90
+
+    config GW_MOTION_SNAPSHOT_WAIT_S
+        int "Chờ ảnh sau sự kiện chuyển động (giây)"
+        range 1 30
+        default 5
+        help
+            Hết thời gian mà camera chưa gửi ảnh thì publish camera/event không kèm snapshot_id.
+
+    config GW_ESPNOW_ALLOW_UNENCRYPTED
+        bool "[DEV] Cho peer ESP-NOW không mã hoá khi NVS thiếu LMK"
+        default n
+        help
+            Chỉ dùng khi node/camera cũng bật tuỳ chọn [DEV] tương ứng. Bản demo/production phải tắt.
+
+    config GW_DEV_ALLOW_PLAINTEXT
+        bool "[DEV] Cho kết nối Server không TLS (mqtt://, http://)"
+        default n
+        help
+            Hạ tầng hiện tại: Broker 2 chỉ nhận TLS (8883) nhưng nginx chỉ có cổng 80 (http). Bật để dùng đường
+            dự phòng POST http://.../api/device/data khi dev. Không bao giờ tắt kiểm chứng chứng chỉ khi dùng TLS.
+
+endmenu

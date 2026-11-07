@@ -1,0 +1,32 @@
+# sdkconfig.defaults — Node phòng khách ESP32-S3 (docs/guides/ESP_IDF_BUILD.md §3)
+# KHÔNG đặt device_id, secret, LMK ở đây — file này được commit (ESP_IDF_BUILD §7.1).
+# Sửa file này khi đã có sdkconfig thì phải xoá sdkconfig (hoặc chạy lại set-target) rồi build.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Flash 16 MB (theo sdkconfig hiện tại của board)
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# PSRAM: giữ Quad như sdkconfig hiện tại. Nếu module là N16R8 / N8R8 (PSRAM Octal) thì đổi thành
+# CONFIG_SPIRAM_MODE_OCT=y và KHÔNG dùng GPIO35–37 (README, mục "Ràng buộc chân").
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+
+# Bảng phân vùng riêng: 2 slot OTA + log (ESP_IDF_BUILD §4)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_node.csv"
+
+# OTA: rollback nếu app mới không xác nhận boot thành công
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Tick 1 ms — driver cảm biến chờ đo theo ms (SHT3x 15 ms); tick 10 ms mặc định làm tròn xuống sai
+CONFIG_FREERTOS_HZ=1000
+
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+
+# Bảo mật nhẹ, không đốt eFuse (README, mục "Bảo mật"):
+# - phát hiện tràn stack bằng canary
+CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
+# - driver WiFi không lưu cấu hình xuống NVS (node không giữ WiFi, chỉ dùng radio cho ESP-NOW)
+CONFIG_ESP_WIFI_NVS_ENABLED=n

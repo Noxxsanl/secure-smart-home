@@ -1,6 +1,8 @@
-# This file was generated using idf.py save-defconfig. It can be edited manually.
-# Espressif IoT Development Framework (ESP-IDF) 5.2.0 Project Minimal Configuration
-#
+# sdkconfig.defaults — Gateway ESP32-S3-N16R8 (docs/guides/ESP_IDF_BUILD.md §2.2)
+# KHÔNG đặt WiFi, secret, LMK ở đây — file này được commit (ESP_IDF_BUILD §7.1). Credential nằm trong NVS (README).
+# Sửa file này khi đã có sdkconfig thì phải xoá sdkconfig (hoặc chạy lại set-target) rồi build.
+
+# ---- Board (giữ nguyên từ ví dụ Waveshare 08_lvgl_Porting) ----------------------------------------------------
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
@@ -10,14 +12,17 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_SPIRAM_SPEED_80M=y
+# Giữ ảnh LCD RGB không trôi khi ghi flash (OTA, NVS) — IOT_NODE_NETWORK §3.2
 CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
 CONFIG_SPIRAM_RODATA=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_SIZE=64
 
+# Log qua cổng USB-C
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
+# ---- LCD + LVGL (giữ nguyên từ ví dụ) -------------------------------------------------------------------------
 CONFIG_EXAMPLE_LVGL_PORT_TASK_CORE=1
 CONFIG_EXAMPLE_LVGL_PORT_AVOID_TEAR_ENABLE=y
 
@@ -26,7 +31,6 @@ CONFIG_LV_MEM_CUSTOM=y
 CONFIG_LV_MEMCPY_MEMSET_STD=y
 CONFIG_LV_USE_LOG=y
 CONFIG_LV_LOG_PRINTF=y
-CONFIG_LV_USE_PERF_MONITOR=y
 CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
@@ -34,8 +38,35 @@ CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_USE_FONT_COMPRESSED=y
 CONFIG_LV_USE_IMGFONT=y
+# waveshare_rgb_lcd_port.h (code ví dụ, giữ nguyên) include lv_demos.h — header này chỉ có trong include path khi bật
+# ít nhất 1 demo. Gateway không gọi demo nên linker bỏ phần code demo, không tốn flash.
 CONFIG_LV_USE_DEMO_WIDGETS=y
-CONFIG_LV_USE_DEMO_BENCHMARK=y
-CONFIG_LV_USE_DEMO_STRESS=y
-CONFIG_LV_USE_DEMO_MUSIC=y
-CONFIG_LV_DEMO_MUSIC_AUTO_PLAY=y
+# Bỏ so với ví dụ: CONFIG_LV_USE_PERF_MONITOR (ô FPS trên màn hình), demo benchmark/stress/music.
+
+# ---- Gateway ------------------------------------------------------------------------------------------------
+# Bảng phân vùng riêng: 2 slot OTA 6 MB + storage + log (IOT_NODE_NETWORK §3.4)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_gateway.csv"
+
+# OTA: rollback nếu app mới không xác nhận boot thành công (Firmware §14)
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# app_main khởi tạo LCD + LVGL + NVS trước khi tạo task riêng
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+
+# Driver WiFi không tự ghi SSID/mật khẩu xuống NVS — gw_config tự quản (namespace wifi, local_ap)
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+# Số peer ESP-NOW mã hoá (node + camera) — khớp GW_REGISTRY_MAX trong services/include/gw_registry.h
+CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM=8
+
+# TLS (MQTT 8883 + HTTPS) cấp phát trong PSRAM để chừa SRAM cho WiFi và bounce buffer của LCD RGB
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# HTTP server Local AP: header của Camera có X-Device-Id, X-Timestamp, X-Signature (64 hex), X-Trigger, X-Command-Id
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# Socket: HTTP server (4) + MQTT + HTTPS + SNTP + DNS
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# Bảo mật nhẹ, không đốt eFuse (README, mục Bảo mật): phát hiện tràn stack bằng canary
+CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
