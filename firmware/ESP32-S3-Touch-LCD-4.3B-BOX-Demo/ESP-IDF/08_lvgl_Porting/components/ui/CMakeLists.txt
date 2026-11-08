@@ -2,8 +2,12 @@
 # Chỉ dùng drivers (gw_display: khoá LVGL); không biết services/application — dữ liệu được đẩy vào qua gw_ui_set_*.
 #   gw_ui     màn hình, mô hình dữ liệu, ảnh camera (2 bộ đệm RGB565 trong PSRAM)
 #   gw_jpeg   giải nén JPEG bằng TJpgDec trong ROM ESP32-S3 (esp_rom) — header riêng trong src/
+#   fonts/    font tiếng Việt có dấu 16/20/24 px (Montserrat + biểu tượng LVGL), sinh bằng fonts/gen_fonts.sh
 idf_component_register(SRCS "src/gw_ui.c"
                             "src/gw_jpeg.c"
+                            "fonts/gw_font_vi_16.c"
+                            "fonts/gw_font_vi_20.c"
+                            "fonts/gw_font_vi_24.c"
                        INCLUDE_DIRS "include"
                        REQUIRES esp_common
                        PRIV_REQUIRES drivers json esp_timer esp_rom)

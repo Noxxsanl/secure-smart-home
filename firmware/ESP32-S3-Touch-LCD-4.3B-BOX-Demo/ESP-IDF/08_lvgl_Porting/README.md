@@ -23,9 +23,11 @@ Thiết kế: [IOT_NODE_NETWORK](../../../../docs/firmware/IOT_NODE_NETWORK.md) 
 | Lệnh gateway `restart` | Có | `application/src/gw_app.c` |
 | Lệnh camera `snapshot` (camera tự chụp, gửi ảnh, `CMD_ACK`) | Có | như trên |
 | Heartbeat `home/<h>/gateway/<gw>/heartbeat`, sự kiện `.../camera/event`, gửi ảnh `POST /api/device/camera/snapshot` | Có ở firmware, **backend chưa có** (đề xuất) | `gw_envelope.c`, `gw_api.c` |
-| Màn hình trạng thái: WiFi, Server, giờ, nhiệt độ/độ ẩm/ánh sáng, chuyển động, ảnh gần nhất, bảng thiết bị | Có (chữ **không dấu**, xem [Việc còn lại](#việc-còn-lại)) | `ui/src/gw_ui.c` |
-| Ảnh chụp camera hiện thu nhỏ (200×150) trên thẻ Camera ngay khi nhận | Có | `ui/src/gw_ui.c`, `ui/src/gw_jpeg.c` |
-| Xem trực tiếp trên màn hình Gateway: kéo MJPEG `GET /stream` của camera (ký HMAC camera, IP lấy từ DHCP Local AP theo MAC đã ghép), giải nén bằng TJpgDec trong ROM, hiện 640×480 | Có — mở bằng nút (khi bật cảm ứng), khi camera báo chuyển động, hoặc 1 lần khi camera vừa vào Local AP | `services/src/gw_camera_live.c`, `ui/`, `application/src/gw_app.c` |
+| Giao diện cảm ứng: header (WiFi, Server, giờ) · thanh nav 3 mục **Camera / Phòng khách / Thiết bị** · nội dung mục đang chọn · dòng trạng thái | Có — chữ tiếng Việt có dấu (font riêng `ui/fonts/`), cảm ứng GT911 bật | `ui/src/gw_ui.c` |
+| Trang Phòng khách: nhiệt độ, độ ẩm (ô lớn) + trạng thái quạt, điều hoà, đèn, rèm cửa + node kết nối/RSSI/lần cập nhật | Có ở màn hình; trường trạng thái là **đề xuất**, node chưa gửi (mục *Giao diện*) | như trên |
+| Trang Thiết bị: bảng thiết bị đã ghép — loại, chấm kết nối xanh/vàng/đỏ, RSSI, giờ lần cuối kết nối (lưu NVS `seen`, nhớ qua khởi động lại) | Có — chi tiết: [MAN_HINH_GATEWAY](../../../../docs/guides/MAN_HINH_GATEWAY.md) | `ui/src/gw_ui.c`, `services/src/gw_registry.c` |
+| Xem trực tiếp ở trang Camera: kéo MJPEG `GET /stream` (ký HMAC camera, IP lấy từ DHCP Local AP theo MAC đã ghép), giải nén bằng TJpgDec trong ROM, co về 448×336; góc phải hàng tiêu đề báo kết nối Camera ↔ Gateway | Có — luồng chỉ chạy khi đang ở trang Camera; có chuyển động thì tự chuyển sang trang Camera | `services/src/gw_camera_live.c`, `ui/`, `application/src/gw_app.c` |
+| Ảnh chụp do chuyển động: nhận, kiểm HMAC, đẩy lên Server (không hiện trên màn hình) | Có (Server chưa có endpoint) | `services/src/gw_local_http.c`, `application/src/gw_app.c` |
 | Ghép nối ECDH (`PAIR_*`), cấp LMK/secret qua ESP-NOW, provisioning BLE/SoftAP | **Chưa**: nạp tay qua NVS | — |
 | Lệnh `live_start`/`live_stop` từ Server (xem từ xa trên Mobile, IOT_NODE_NETWORK §5.5) | **Chưa**: trả ack `error` | — |
 | `factory_reset`, OTA (`ota/command` đã kiểm HMAC, chỉ log) | **Chưa** | — |
@@ -57,7 +59,8 @@ Thiết kế: [IOT_NODE_NETWORK](../../../../docs/firmware/IOT_NODE_NETWORK.md) 
     │   ├── include/                 # gw_config, gw_registry, gw_time, gw_wifi, gw_espnow, gw_local_http,
     │   │                            # gw_camera_live, gw_tls, gw_envelope, gw_mqtt, gw_api
     │   └── src/
-    ├── ui/                          # LVGL: màn hình trạng thái + xem trực tiếp (gw_ui), giải nén JPEG (src/gw_jpeg)
+    ├── ui/                          # LVGL: header + nav 3 trang + dòng trạng thái (gw_ui), giải nén JPEG (src/gw_jpeg)
+    │   └── fonts/                   # font tiếng Việt 16/20/24 (gw_font_vi_*.c) + gen_fonts.sh
     └── application/                 # luồng nghiệp vụ: nối drivers ↔ services ↔ ui (gw_app)
 
 ../../../common/                     # dùng chung với Node/Camera
@@ -80,7 +83,7 @@ main ──► application ──► services ──► common/security_manager,
 
 Task: `lvgl` (ví dụ, nhân 1, ưu tiên 2), `gw_espnow` (nhân 0), `gw_app` (nhân 0, xử lý sự kiện, không chặn lâu), `gw_uplink` (nhân 1, HTTPS chặn tới vài giây), `gw_live` (nhân 1, ưu tiên 1 — đọc luồng camera và giải nén từng khung, nhường CPU sau mỗi khung cho task watchdog), task MQTT, httpd.
 
-Ảnh camera: ESP32-S3 không có bộ giải mã JPEG phần cứng → dùng TJpgDec có sẵn trong ROM (`rom/tjpgd.h`, như `esp32-camera`), không thêm thư viện. Mỗi ảnh có 2 bộ đệm RGB565 trong PSRAM (xem trực tiếp 2 × 600 KB, ảnh thu nhỏ 2 × 59 KB): giải nén vào bộ LVGL không vẽ rồi đổi dưới khoá LVGL. Giải nén không kịp thì khung cũ tự bị bỏ (camera dùng `CAMERA_GRAB_LATEST`), không dồn trễ.
+Ảnh camera: ESP32-S3 không có bộ giải mã JPEG phần cứng → dùng TJpgDec có sẵn trong ROM (`rom/tjpgd.h`, như `esp32-camera`), không thêm thư viện. Ảnh được co/giãn vừa khung, giữ tỉ lệ (TJpgDec thu thô 1/2/4/8, phần lẻ co điểm gần nhất — `ui/src/gw_jpeg.c`). Khung hình có 2 bộ đệm RGB565 trong PSRAM (2 × 294 KB): giải nén vào bộ LVGL không vẽ rồi đổi dưới khoá LVGL. Giải nén không kịp thì khung cũ tự bị bỏ (camera dùng `CAMERA_GRAB_LATEST`), không dồn trễ.
 
 ## Xác thực từng chặng
 
@@ -132,7 +135,7 @@ idf.py build
 
 `components/lvgl__lvgl`, `espressif__esp_lcd_touch*` đang có sẵn nên không tải lại; máy mới clone repo thì component manager tải về theo `components/drivers/idf_component.yml`. `dependencies.lock` sinh lại tự động (đường dẫn tuyệt đối của máy — đã gitignore). Đừng build với `IDF_COMPONENT_MANAGER=0`: component GT911 khai báo phụ thuộc `esp_lcd_touch` trong `idf_component.yml`.
 
-Đổi tuỳ chọn không bí mật: `idf.py menuconfig` → *Gateway S3: services* (URI broker, URL backend, NTP, kênh Local AP, timeout ack…) và *Example Configuration* (LVGL). Độ phân giải 1024×600 và bật cảm ứng: `ESP_PANEL_USE_1024_600_LCD`, `CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911` trong `components/drivers/src/lcd/lvgl_port.h` (macro của ví dụ, không phải Kconfig).
+Đổi tuỳ chọn không bí mật: `idf.py menuconfig` → *Gateway S3: services* (URI broker, URL backend, NTP, kênh Local AP, timeout ack…) và *Example Configuration* (LVGL). Độ phân giải 1024×600 và cảm ứng: `ESP_PANEL_USE_1024_600_LCD`, `CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911` trong `components/drivers/src/lcd/lvgl_port.h` (macro của ví dụ, không phải Kconfig). Cảm ứng **đang bật** (= 1, 2026-11-08) cho thanh nav; đây là dòng duy nhất đã sửa trong code ví dụ.
 
 ## Nạp NVS (giai đoạn dev)
 
@@ -162,7 +165,7 @@ idf.py -p COM5 flash monitor
 Log đúng:
 
 ```
-I (...) gw_display: LCD 800x480 ready, touch off
+I (...) gw_display: LCD 800x480 ready, touch on
 I (...) gw_time: time from RTC: 1762...            (hoặc "RTC has no valid time" ở lần đầu)
 I (...) gw_config: gateway_id=<id> wifi=<ssid> local_ap=<ssid> mqtt=mqtts://... api=... home_id=...
 I (...) gw_registry: node <id> mac=... lmk=set
@@ -201,20 +204,62 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-Device-Id: $ID" -H "X-Tim
   --data-binary @anh.jpg http://192.168.4.1/local/camera/snapshot
 ```
 
-Gửi cùng yêu cầu từ mạng router (IP STA của Gateway) phải nhận `403`. Nhận `201` thì ảnh hiện thu nhỏ trên thẻ **CAMERA CUA**.
+Gửi cùng yêu cầu từ mạng router (IP STA của Gateway) phải nhận `403`. Nhận `201` thì log có `gw_local_http: snapshot from <id>: … bytes`.
 
-**Xem trực tiếp từ ESP32-CAM** — cần camera đã vào Local AP **và** đã có giờ (TIME_SYNC qua ESP-NOW: `pairing/gateway_mac` + `session_key` của camera khớp `nodes/<i>_mac`, `<i>_lmk` của Gateway). Màn hình xem trực tiếp mở khi:
+**Giao diện và xem trực tiếp** — màn hình 800×480:
 
-| Cách mở | Thời gian | Tuỳ chọn |
+```
+┌ GATEWAY NHÀ THÔNG MINH  WiFi 192.168.x.x    Máy chủ --      12:34:56 ┐
+│ ┌───────────┐ ┌────────────────────────────────────────────────────┐ │
+│ │ CAMERA    │ │ CAMERA CỬA              ● Đã kết nối  3.3 khung/s  │ │
+│ │ Trực tiếp │ │ ┌────────────────────────────────────────────────┐ │ │
+│ └───────────┘ │ │                                                │ │ │
+│ ┌───────────┐ │ │            hình trực tiếp 448×336              │ │ │
+│ │PHÒNG KHÁCH│ │ │                                                │ │ │
+│ │28.4°C 61% │ │ │                                                │ │ │
+│ └───────────┘ │ │                                                │ │ │
+│ ┌───────────┐ │ │                                                │ │ │
+│ │ THIẾT BỊ  │ │ └────────────────────────────────────────────────┘ │ │
+│ │2/2 trực...│ └────────────────────────────────────────────────────┘ │
+└ dòng trạng thái ──────────────────────────────────────────────────────┘
+
+Trang Phòng khách:
+  PHÒNG KHÁCH                                         ● Đã kết nối
+  ┌ NHIỆT ĐỘ ───────────────┐ ┌ ĐỘ ẨM ──────────────────┐
+  │ 28.4  °C                │ │ 61  %                   │
+  └─────────────────────────┘ └─────────────────────────┘
+  ┌ QUẠT ──┐ ┌ ĐIỀU HÒA ┐ ┌ ĐÈN ───┐ ┌ RÈM CỬA ┐      (ô xanh = đang bật/mở)
+  │ BẬT    │ │ TẮT      │ │ BẬT    │ │ MỞ      │
+  │Đang chạy│ │Đang tắt  │ │Đang sáng│ │Mở 60%   │
+  └────────┘ └──────────┘ └────────┘ └─────────┘
+  Node <id>  |  Ánh sáng 350 lux  |  Cập nhật 12:30:05  |  -58 dBm
+```
+
+| Trang | Nội dung |
+|---|---|
+| Camera | Hình trực tiếp (chỉ kéo luồng khi đang ở trang này — IOT_NODE_NETWORK §5.4). Góc phải: kết nối Camera ↔ Gateway — **xanh** đang nhận hình (kèm khung/s), **vàng** đang kết nối / đã thấy camera qua ESP-NOW nhưng chưa có hình, **đỏ** mất kết nối (luồng đứt hoặc không thấy gói ESP-NOW trong `CONFIG_GW_NODE_OFFLINE_S`). Luồng rớt thì tự nối lại; camera mất hẳn thì thử lại sau 5 s, lùi dần tới 60 s |
+| Phòng khách | Nhiệt độ, độ ẩm (ô lớn); trạng thái **quạt, điều hoà (kèm nhiệt độ đặt), đèn, rèm cửa** (chỉ xem, chưa điều khiển từ màn hình); góc phải: kết nối node ↔ Gateway; dòng cuối: node, ánh sáng, lần cập nhật, RSSI |
+| Thiết bị | Bảng node/camera đã ghép: chấm kết nối, tín hiệu (RSSI), giờ lần cuối kết nối — [MAN_HINH_GATEWAY](../../../../docs/guides/MAN_HINH_GATEWAY.md) §2 |
+
+Trạng thái thiết bị phòng khách lấy từ `data` trong telemetry của node — **đề xuất, node chưa gửi** (`firmware/esp32_s3_firmware_node/README.md`, *Đề xuất hợp đồng cần chốt*). Gateway chỉ cập nhật trường có mặt, nên node gửi chung với số đo hay tách gói riêng (khi đổi trạng thái) đều được; chưa có trường nào thì ô hiện "--" / "Node chưa báo". Backend nhận `data` là object bất kỳ nên không phải sửa luồng ingest.
+
+| Trường `data` | Giá trị | Ô |
 |---|---|---|
-| **Luôn hiện** khi camera trực tuyến — bộ demo bật sẵn trong `sdkconfig.defaults` (chưa bật cảm ứng) | Không tự đóng; luồng rớt thì tự nối lại; camera mất hẳn thì về màn hình chính, tự mở lại (5 s, lùi tới 60 s) | `CONFIG_GW_CAMERA_LIVE_ALWAYS` — tắt thì dùng 3 cách bên dưới |
-| Camera vừa vào Local AP (1 lần sau mỗi lần khởi động Gateway) | 30 s | `CONFIG_GW_CAMERA_LIVE_ON_BOOT_S` (0 = tắt) |
-| Camera báo chuyển động (PIR) | 30 s, có chuyển động tiếp thì gia hạn | `CONFIG_GW_CAMERA_LIVE_ON_MOTION_S` (0 = tắt) |
-| Chạm "Xem truc tiep" trên thẻ Camera, "Dong" để tắt | tối đa 120 s | cần bật cảm ứng (`CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911` = 1 trong `components/drivers/src/lcd/lvgl_port.h`) |
+| `temperature`, `humidity` | số | NHIỆT ĐỘ, ĐỘ ẨM |
+| `light` | lux | dòng thông tin |
+| `fan`, `ac`, `lamp` | `0`/`1` hoặc `false`/`true` | QUẠT, ĐIỀU HÒA, ĐÈN (`light` đã là lux nên đèn dùng `lamp`) |
+| `ac_temp` | °C | nhiệt độ đặt, hiện khi điều hoà bật |
+| `curtain` | `0` đóng, `1` mở, `2..100` mở theo % | RÈM CỬA |
 
-Thời gian xem tính từ lúc lên hình (không tính mấy giây kết nối). Đo trên board 2026-11-08: VGA q=12 khoảng **3,3 khung/s** (87 khung/26 s), ảnh chụp SVGA ~11 KB tới Gateway trong < 0,3 s sau khi PIR báo.
+| Tuỳ chọn (menuconfig → *Gateway S3: services*) | Mặc định |
+|---|---|
+| `Trang hiện khi khởi động` (`CONFIG_GW_UI_START_PAGE_*`) | Camera |
+| `Chuyển sang trang Camera khi có chuyển động…` (`CONFIG_GW_CAMERA_LIVE_ON_MOTION_S`) — 30 s sau quay lại trang cũ; chạm nav thì huỷ việc quay lại | 30 s |
+| `Độ phân giải luồng camera` (VGA, hoặc QVGA phóng lên nếu VGA quá giật), `Chất lượng JPEG của luồng` | VGA, q=12 |
 
-Log đúng: `gw_camera_live: streaming from camera <id> (192.168.4.x, vga, q=12)`, cột phải màn hình hiện "Truc tiep" và số khung/giây. Đổi `CONFIG_GW_CAMERA_LIVE_*` bằng menuconfig rồi build: nếu sửa thẳng `Kconfig.projbuild`/`sdkconfig.defaults` thì chạy `idf.py reconfigure` trước, vì `idf.py build` không tự đọc lại. Độ phân giải/chất lượng: menuconfig → *Gateway S3: services* → `Độ phân giải luồng camera` (VGA, hoặc QVGA phóng ×2 nếu VGA quá giật), `Chất lượng JPEG của luồng`.
+Xem trực tiếp cần camera đã vào Local AP **và** đã có giờ (TIME_SYNC qua ESP-NOW: `pairing/gateway_mac` + `session_key` của camera khớp `nodes/<i>_mac`, `<i>_lmk` của Gateway). Đo trên board 2026-11-08 (khung 640×480 cũ): VGA q=12 khoảng **3,3 khung/s** (87 khung/26 s), ảnh chụp SVGA ~11 KB tới Gateway trong < 0,3 s sau khi PIR báo. Cảm ứng GT911 khởi tạo được trên board (`TouchPad_ID:0x39,0x31,0x31`; cảnh báo `Unable to initialize the I2C address` là driver thử địa chỉ thứ nhất, không ảnh hưởng).
+
+Log đúng: `gw_app: live view <id> (camera page)` rồi `gw_camera_live: streaming from camera <id> (192.168.4.x, vga, q=12)`. Sửa thẳng `Kconfig.projbuild`/`sdkconfig.defaults` thì chạy `idf.py reconfigure` trước khi build, vì `idf.py build` không tự đọc lại. Độ phân giải/chất lượng: menuconfig → *Gateway S3: services* → `Độ phân giải luồng camera` (VGA, hoặc QVGA phóng ×2 nếu VGA quá giật), `Chất lượng JPEG của luồng`.
 
 **Lệnh bật/tắt**: dùng Mobile/Dashboard (`POST /devices/:id/commands`) — backend ký lệnh, Gateway chuyển xuống node, ack về trong 5 s. Lệnh chưa ký đúng bị bỏ, backend báo `TIMEOUT`.
 
@@ -224,7 +269,7 @@ Log đúng: `gw_camera_live: streaming from camera <id> (192.168.4.x, vga, q=12)
 |---|---|
 | `app partition is too small` hoặc vẫn chạy demo cũ | `sdkconfig` cũ của ví dụ — xoá `sdkconfig`, `idf.py set-target esp32s3` |
 | `CONFLICT! driver_ng is not allowed to be used with this old driver` | Có code dùng `driver/i2c_master.h` — gateway phải dùng driver I2C cũ (mục Cấu trúc) |
-| Màn hình "Gateway chua duoc cap phat" | Chưa nạp `nvs_dev.bin`, sai tên namespace/key |
+| Màn hình "Gateway chưa được cấp phát" | Chưa nạp `nvs_dev.bin`, sai tên namespace/key |
 | `mqtts://... needs CA` | Thiếu `certs/mqtt_ca.crt` lúc build |
 | MQTT `transport error` | Host trong `mqtt_uri` không có trong SAN của cert broker, hoặc sai giờ (cert "chưa hiệu lực") |
 | `drop TELEMETRY ... HMAC mismatch` | `<i>_secret` khác secret trong NVS của node |
@@ -232,14 +277,16 @@ Log đúng: `gw_camera_live: streaming from camera <id> (192.168.4.x, vga, q=12)
 | Node log "gateway acks at MAC level but sends no TIME_SYNC" | LMK hai bên khác nhau, hoặc Gateway chưa có giờ |
 | `peer ... has no LMK — refusing unencrypted ESP-NOW` | Thiếu `<i>_lmk`. Khi dev có thể bật `[DEV]` ở cả hai phía |
 | Camera không vào được Local AP | Mật khẩu `local_ap` khác `wifi/password` của camera; camera lọc WPA2 trở lên |
-| Xem trực tiếp: "Camera chua vao Local AP" | Camera chưa nối Local AP, hoặc `nodes/<i>_mac` không phải MAC Station của camera |
-| Xem trực tiếp: "Camera chua co gio" (camera trả 503) | Camera chưa nhận TIME_SYNC: ESP-NOW chưa ghép (sai `gateway_mac`/LMK hai phía), hoặc Gateway chưa có giờ |
-| Xem trực tiếp: "Camera tu choi chu ky" (401) | `nodes/<i>_secret` khác `identity/device_secret` trong NVS camera, hoặc giờ hai bên lệch > 300 s |
-| Có hình nhưng giật (< 3 khung/s) | Chọn QVGA phóng ×2, hoặc tăng `CONFIG_GW_CAMERA_LIVE_QUALITY` (khung nhẹ hơn) |
+| Xem trực tiếp: "Camera chưa vào Local AP" | Camera chưa nối Local AP, hoặc `nodes/<i>_mac` không phải MAC Station của camera |
+| Xem trực tiếp: "Camera chưa có giờ" (camera trả 503) | Camera chưa nhận TIME_SYNC: ESP-NOW chưa ghép (sai `gateway_mac`/LMK hai phía), hoặc Gateway chưa có giờ |
+| Xem trực tiếp: "Camera từ chối chữ ký" (401) | `nodes/<i>_secret` khác `identity/device_secret` trong NVS camera, hoặc giờ hai bên lệch > 300 s |
+| Có hình nhưng giật (< 3 khung/s) | Chọn QVGA, hoặc tăng `CONFIG_GW_CAMERA_LIVE_QUALITY` (khung nhẹ hơn) |
+| Chạm màn hình không có tác dụng | Cảm ứng tắt (`CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911` = 0 trong `lvgl_port.h`); log có `gw_ui: touch is off` |
+| Reset liên tục ngay sau "Initialize touch controller GT911" | GT911 không trả lời (cáp màn hình, board khác đời): code ví dụ dừng bằng `ESP_ERROR_CHECK`. Tạm đặt macro trên = 0 để chạy không cảm ứng |
 
 ## Việc còn lại
 
-1. **Font tiếng Việt có dấu** (bất biến 10): Montserrat của LVGL không có dấu. Sinh font bằng `lv_font_conv` (VD Be Vietnam Pro, dải `0x20-0x7F,0xC0-0x1EF9`, cỡ 16/20/24), thêm vào `ui/`, rồi đổi chuỗi trong `gw_ui.c` sang có dấu.
+1. ~~Font tiếng Việt có dấu~~ — xong 2026-11-09: `ui/fonts/gw_font_vi_16/20/24.c` (Montserrat Medium + biểu tượng LVGL, chỉ ASCII + `°` + 134 chữ cái tiếng Việt), sinh lại bằng `bash components/ui/fonts/gen_fonts.sh` (cần Node.js, npx tải `lv_font_conv@1.5.2`). Thêm ký tự mới (VD `…`, `₫`) thì sửa script rồi chạy lại.
 2. Ghép nối ECDH + PMK chung (WiFi Provisioning §9) thay cho nạp tay `nodes/*` — bỏ hẳn nhu cầu `GET /api/device/sensors`.
 3. Backend: `POST /api/device/camera/snapshot`, subscribe `heartbeat` và `camera/event`, chốt chuỗi ký (API_DESIGN §14 Q2), thêm action `snapshot` vào `DeviceAction`.
 4. Đo số khung/giây thật của xem trực tiếp trên board. Nếu TJpgDec trong ROM không đủ (mục tiêu 10 khung/s, §5.4) thì thay phần thân `ui/src/gw_jpeg.c` bằng `espressif/esp_new_jpeg` (tối ưu SIMD cho S3, cần tải thư viện). Xem từ xa trên Mobile (`live_start`/`live_stop`, §5.5) cần Backend có WebSocket `/api/device/camera/live`.
@@ -253,7 +300,7 @@ Log đúng: `gw_camera_live: streaming from camera <id> (192.168.4.x, vga, q=12)
 | Kiểm | Kết quả |
 |---|---|
 | Biên dịch 22 file của gateway + `common/` (build sạch, thêm `gw_camera_live.c`, `gw_jpeg.c`) | 0 lỗi, 0 cảnh báo (cả log build) |
-| Ảnh firmware | `gateway_s3.bin` 0x14BC00 byte (~1,30 MB), slot OTA 6 MB còn trống 78% |
+| Ảnh firmware | `gateway_s3.bin` 0x1605B0 byte (~1,38 MB, có font 40 + cảm ứng — 2026-11-08), slot OTA 6 MB còn trống 77% |
 | TJpgDec ROM | `jd_prepare` = 0x40000858, `jd_decomp` = 0x40000864 (ROM ESP32-S3, không tốn flash) |
 | Bảng phân vùng | Vừa 16 MB, app đầu ở 0x20000 |
 | Chưa có `certs/mqtt_ca.crt` | CMake cảnh báo, vẫn build; lúc chạy từ chối `mqtts://` |

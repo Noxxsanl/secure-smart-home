@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "gw_config.h"
+#include "gw_time.h"
 #include "mbedtls/platform_util.h"
 #include "nvs.h"
 #include "sdkconfig.h"
@@ -17,6 +18,8 @@
 static const char *TAG = "gw_registry";
 
 #define NS "nodes"
+#define SEEN_NS "seen"                 /* "lần cuối thấy" của từng thiết bị — không bí mật */
+#define SEEN_SAVE_EVERY_S 300          /* thiết bị đang trực tuyến: ghi NVS tối đa 5 phút/lần */
 #define SECRET_MAX 128
 #define OFFLINE_US ((int64_t)CONFIG_GW_NODE_OFFLINE_S * 1000 * 1000)
 
@@ -32,7 +35,41 @@ static size_t s_count;
 
 /* Trạng thái chạy — dưới s_status_lock. */
 static gw_device_status_t s_status[GW_REGISTRY_MAX];
+static int64_t s_seen_saved[GW_REGISTRY_MAX];   /* giờ unix đã có trong NVS (đọc lúc load hoặc vừa ghi) */
 static SemaphoreHandle_t s_status_lock;
+
+/* FNV-1a 32 bit — chỉ để nhận ra khoá "s<i>" còn thuộc đúng thiết bị, không phải bảo mật. */
+static uint32_t id_hash(const char *s)
+{
+    uint32_t h = 2166136261u;
+    for (; *s; s++) {
+        h = (h ^ (uint8_t)*s) * 16777619u;
+    }
+    return h;
+}
+
+/* Đọc "lần cuối thấy" đã lưu; bỏ qua mục không khớp device_id hiện tại (danh sách nodes đã đổi). */
+static void load_seen(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(SEEN_NS, NVS_READONLY, &h) != ESP_OK) {
+        return;   /* lần đầu chạy: chưa có namespace */
+    }
+    for (size_t i = 0; i < s_count; i++) {
+        char key[16];   /* khoá NVS ≤ 15 ký tự */
+        uint32_t hash = 0;
+        int64_t ts = 0;
+        snprintf(key, sizeof(key), "h%u", (unsigned)i);
+        if (nvs_get_u32(h, key, &hash) != ESP_OK || hash != id_hash(s_entries[i].info.device_id)) {
+            continue;
+        }
+        snprintf(key, sizeof(key), "s%u", (unsigned)i);
+        if (nvs_get_i64(h, key, &ts) == ESP_OK && ts > 0) {
+            s_seen_saved[i] = ts;
+        }
+    }
+    nvs_close(h);
+}
 
 static int hex_val(char c)
 {
@@ -155,6 +192,7 @@ esp_err_t gw_registry_load(const char *gateway_id)
     }
     s_count = 0;
     memset(s_status, 0, sizeof(s_status));
+    memset(s_seen_saved, 0, sizeof(s_seen_saved));
 
     nvs_handle_t h;
     if (nvs_open(NS, NVS_READONLY, &h) != ESP_OK) {
@@ -190,6 +228,7 @@ esp_err_t gw_registry_load(const char *gateway_id)
         mbedtls_platform_zeroize(&e, sizeof(e));
     }
     nvs_close(h);
+    load_seen();
     ESP_LOGI(TAG, "%u paired device(s)", (unsigned)s_count);
     return ESP_OK;
 }
@@ -283,7 +322,69 @@ bool gw_registry_status(size_t idx, gw_device_status_t *out)
     }
     xSemaphoreTake(s_status_lock, portMAX_DELAY);
     *out = s_status[idx];
+    const int64_t saved = s_seen_saved[idx];
     xSemaphoreGive(s_status_lock);
-    out->online = out->last_seen_us != 0 && esp_timer_get_time() - out->last_seen_us < OFFLINE_US;
+    const int64_t now_us = esp_timer_get_time();
+    out->online = out->last_seen_us != 0 && now_us - out->last_seen_us < OFFLINE_US;
+    int64_t now;
+    if (out->last_seen_us != 0 && gw_time_now(&now)) {
+        out->last_seen_unix = now - (now_us - out->last_seen_us) / 1000000;   /* thấy từ lúc khởi động */
+    } else {
+        out->last_seen_unix = saved;   /* trước lần khởi động này (hoặc chưa có giờ để đổi) */
+    }
     return true;
+}
+
+void gw_registry_save_seen(bool force)
+{
+    int64_t now;
+    if (s_status_lock == NULL || !gw_time_now(&now)) {
+        return;   /* chưa có giờ unix để lưu */
+    }
+    nvs_handle_t h = 0;
+    bool opened = false;
+    for (size_t i = 0; i < s_count; i++) {
+        gw_device_status_t st;
+        gw_registry_status(i, &st);
+        xSemaphoreTake(s_status_lock, portMAX_DELAY);
+        const int64_t saved = s_seen_saved[i];
+        xSemaphoreGive(s_status_lock);
+        const int64_t ts = st.last_seen_unix;
+        if (st.last_seen_us == 0 || ts <= saved) {
+            continue;   /* chưa thấy từ lúc khởi động, hoặc NVS đã có mốc này */
+        }
+        if (!force && st.online && ts - saved < SEEN_SAVE_EVERY_S) {
+            continue;   /* đang trực tuyến: chờ đủ 5 phút mới ghi — đỡ mòn flash */
+        }
+        if (!opened) {
+            if (nvs_open(SEEN_NS, NVS_READWRITE, &h) != ESP_OK) {
+                ESP_LOGW(TAG, "cannot open NVS namespace %s", SEEN_NS);
+                return;
+            }
+            opened = true;
+        }
+        char key[16];   /* khoá NVS ≤ 15 ký tự */
+        const uint32_t hash = id_hash(s_entries[i].info.device_id);
+        uint32_t old_hash = 0;
+        snprintf(key, sizeof(key), "h%u", (unsigned)i);
+        esp_err_t err = ESP_OK;
+        if (nvs_get_u32(h, key, &old_hash) != ESP_OK || old_hash != hash) {
+            err = nvs_set_u32(h, key, hash);
+        }
+        snprintf(key, sizeof(key), "s%u", (unsigned)i);
+        if (err == ESP_OK) {
+            err = nvs_set_i64(h, key, ts);
+        }
+        if (err == ESP_OK) {
+            xSemaphoreTake(s_status_lock, portMAX_DELAY);
+            s_seen_saved[i] = ts;
+            xSemaphoreGive(s_status_lock);
+        } else {
+            ESP_LOGW(TAG, "save last-seen of %s: %s", s_entries[i].info.device_id, esp_err_to_name(err));
+        }
+    }
+    if (opened) {
+        nvs_commit(h);
+        nvs_close(h);
+    }
 }

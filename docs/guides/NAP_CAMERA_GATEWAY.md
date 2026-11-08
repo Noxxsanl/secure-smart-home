@@ -174,7 +174,7 @@ Remove-Item sdkconfig, sdkconfig.old -ErrorAction SilentlyContinue
 idf.py set-target esp32s3            # sinh sdkconfig từ sdkconfig.defaults, xoá build/
 
 # 2. (Tuỳ chọn) chỉnh luồng camera: menuconfig → "Gateway S3: services"
-#    Độ phân giải luồng (VGA / QVGA x2), chất lượng JPEG, tự mở khi chuyển động / khi camera vào Local AP
+#    Trang khởi động, độ phân giải luồng (VGA / QVGA), chất lượng JPEG, chuyển sang trang Camera khi có chuyển động
 idf.py menuconfig
 
 # 3. Build
@@ -187,7 +187,7 @@ idf.py -p COM5 erase-flash
 idf.py -p COM5 flash
 
 # 6. Ghi NVS (phân vùng 24K = 0x6000), rồi xoá file .bin chứa secret.
-#    BẮT BUỘC: idf.py build/flash KHÔNG nạp nvs_dev.csv — thiếu bước này màn hình báo "Gateway chua duoc cap phat".
+#    BẮT BUỘC: idf.py build/flash KHÔNG nạp nvs_dev.csv — thiếu bước này màn hình báo "Gateway chưa được cấp phát".
 #    Chỉ cần làm lại khi đổi nvs_dev.csv hoặc sau erase-flash; nạp lại firmware không xoá NVS.
 python $env:IDF_PATH\components\nvs_flash\nvs_partition_generator\nvs_partition_gen.py generate nvs_dev.csv nvs_dev.bin 0x6000
 python $env:IDF_PATH\components\partition_table\parttool.py -p COM5 write_partition --partition-name=nvs --input nvs_dev.bin
@@ -263,15 +263,15 @@ Bật Gateway trước (để có giờ NTP), rồi bật camera.
 
 | # | Kiểm | Dấu hiệu đạt |
 |---|---|---|
-| 1 | Camera vào Local AP | Gateway: `local AP: client <MAC_CAMERA> joined`; bảng **THIET BI** trên màn hình: camera "Truc tuyen" |
+| 1 | Camera vào Local AP | Gateway: `local AP: client <MAC_CAMERA> joined`; bảng **THIẾT BỊ** trên màn hình: chấm của camera **xanh** (ý nghĩa 3 màu: [MAN_HINH_GATEWAY](MAN_HINH_GATEWAY.md) §2.2) |
 | 2 | Camera có giờ | Camera: `cam_time: time synced from gateway` |
-| 3 | Xem trực tiếp | Vài giây sau khi camera vào Local AP, Gateway mở màn hình xem trực tiếp và **giữ luôn** (bộ demo bật `CONFIG_GW_CAMERA_LIVE_ALWAYS`): log `gw_app: live view <ID_CAMERA>, no time limit (always on)` rồi `gw_camera_live: streaming from camera <ID_CAMERA>`, cột phải hiện "Truc tiep" và số khung/giây (~3 khung/s ở VGA); camera log `stream started (vga, q=12)`. Tắt camera thì Gateway về màn hình chính, bật lại thì tự mở lại |
-| 4 | Ảnh chụp do chuyển động | Đợi 30 s sau khi camera bật nguồn (PIR khởi động), vẫy tay trước PIR. Không có PIR: nối tạm GPIO13 của camera lên chân 3V3 bằng dây rồi rút ra. Camera: `snapshot sent (… bytes, motion)`; Gateway: `snapshot from <ID_CAMERA>: … bytes (motion)`, ảnh thu nhỏ vào thẻ **CAMERA CUA** (thấy khi màn hình xem trực tiếp đóng) |
-| 5 | Chỉ khi tắt "luôn hiện" | Màn hình xem trực tiếp mở 30 s (tính từ lúc lên hình) khi camera vào Local AP / có chuyển động, hết giờ thì về màn hình chính; camera log `stream ended: N frames in M s` |
+| 3 | Xem trực tiếp | Gateway khởi động ở trang **Camera** (thanh nav bên trái). Vài giây sau khi camera vào Local AP: log `gw_app: live view <ID_CAMERA> (camera page)` rồi `gw_camera_live: streaming from camera <ID_CAMERA>`; góc trên phải hiện "Trực tiếp" và số khung/giây (~3 khung/s ở VGA); camera log `stream started (vga, q=12)`. Chấm ở góc phải hàng tiêu đề: **xanh** "Đã kết nối" (kèm khung/s), **vàng** đang kết nối, **đỏ** mất kết nối. Tắt camera thì khung hình hiện "Chờ camera...", bật lại thì tự nối lại |
+| 4 | Ảnh chụp do chuyển động | Đợi 30 s sau khi camera bật nguồn (PIR khởi động), vẫy tay trước PIR. Không có PIR: nối tạm GPIO13 của camera lên chân 3V3 bằng dây rồi rút ra. Camera: `snapshot sent (… bytes, motion)`; Gateway: `snapshot from <ID_CAMERA>: … bytes (motion)` (ảnh chỉ đẩy lên Server, không hiện trên màn hình) |
+| 5 | Chạm nav | Chạm **PHÒNG KHÁCH** / **THIẾT BỊ**: đổi trang ngay, luồng camera dừng (camera log `stream ended: N frames in M s`); chạm **CAMERA**: luồng chạy lại. Đang ở trang khác mà có chuyển động: tự về trang Camera, 30 s sau quay lại trang cũ |
 
-Ghi lại số khung/giây đo được (mục tiêu 10 khung/s, IOT_NODE_NETWORK §5.4). Giật quá thì menuconfig → *Gateway S3: services* → chọn **QVGA phóng x2**, hoặc tăng `Chất lượng JPEG của luồng` (số lớn hơn = khung nhẹ hơn).
+Ghi lại số khung/giây đo được (mục tiêu 10 khung/s, IOT_NODE_NETWORK §5.4). Giật quá thì menuconfig → *Gateway S3: services* → chọn **QVGA**, hoặc tăng `Chất lượng JPEG của luồng` (số lớn hơn = khung nhẹ hơn).
 
-**Nút "Xem truc tiep" trên màn hình** chỉ có khi bật cảm ứng: đặt `CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911` = `1` trong `components/drivers/src/lcd/lvgl_port.h`, build và nạp lại. Mở bằng nút thì tự đóng sau 2 phút; nút "Dong" để tắt ngay.
+**Cảm ứng** đang bật (`CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911` = `1` trong `components/drivers/src/lcd/lvgl_port.h`) để dùng thanh nav. Nếu Gateway reset liên tục ngay sau dòng log `Initialize touch controller GT911` thì GT911 không trả lời — đặt tạm macro về `0` (chỉ còn trang khởi động, chọn trong menuconfig → `Trang hiện khi khởi động`). Bố cục màn hình: [README Gateway](../../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/README.md), mục *Giao diện và xem trực tiếp*.
 
 Thử nhận ảnh khi chưa có camera (laptop nối Local AP, gửi JPEG có chữ ký): [README Gateway](../../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/README.md), mục *Thử từng chặng*. Thử luồng camera khi chưa có Gateway: [README Camera](../../firmware/esp32_cam/README.md), mục *Thử luồng khi chưa có Gateway*.
 
@@ -295,7 +295,7 @@ Hiện backend **chưa có** `POST /api/device/camera/snapshot` và chưa subscr
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
 |---|---|---|
 | Gateway vẫn chạy demo cũ, hoặc `app partition is too small` | Dùng `sdkconfig` cũ của ví dụ Waveshare | Mục 5 bước 1 |
-| Màn hình "Gateway chua duoc cap phat" (thanh trên "Mat ket noi") | Mới `idf.py build` + `flash` mà chưa chạy bước ghi NVS — `flash` không nạp `nvs_dev.csv`; hoặc sai tên namespace/key | Chạy mục 5 bước 6 (`nvs_partition_gen` + `parttool write_partition`), so `nvs_dev.csv` với mục 4.1 |
+| Màn hình "Gateway chưa được cấp phát" (thanh trên "Mất kết nối") | Mới `idf.py build` + `flash` mà chưa chạy bước ghi NVS — `flash` không nạp `nvs_dev.csv`; hoặc sai tên namespace/key | Chạy mục 5 bước 6 (`nvs_partition_gen` + `parttool write_partition`), so `nvs_dev.csv` với mục 4.1 |
 | Camera log `not provisioned` | Chưa ghi NVS camera | Mục 6 |
 | Camera reset liên tục, `Brownout detector was triggered` | Nguồn 5 V yếu | Adapter ≥ 2 A, dây ngắn, tụ lọc gần chân nguồn |
 | `camera init failed: ESP_ERR_NOT_FOUND` | Cáp camera lỏng, module không phải AI-Thinker | Cắm lại cáp OV2640 |
@@ -303,11 +303,11 @@ Hiện backend **chưa có** `POST /api/device/camera/snapshot` và chưa subscr
 | Gateway log `RTC has no valid time — waiting for NTP` mà không bao giờ có `time synced from NTP`; camera không có giờ | Gateway chưa vào được router / router không có Internet, RTC chưa từng đặt giờ | Kiểm `wifi/ssid`, `password` của Gateway; router phải 2.4 GHz và có Internet |
 | Camera log `refusing unencrypted ESP-NOW` | Thiếu `pairing/session_key` | Mục 4.2 |
 | Camera không có dòng `time synced from gateway` dù đã vào Local AP | `gateway_mac` không phải MAC Station Gateway, hoặc LMK hai bên khác nhau, hoặc `0_mac` sai | Mục 2, 4.3 |
-| Màn hình Gateway: "Camera chua vao Local AP" | Camera chưa nối Local AP, hoặc `nodes/0_mac` không phải MAC camera | Mục 2, 4.3 |
-| Màn hình Gateway: "Camera chua co gio: kiem tra ghep noi ESP-NOW" (camera trả 503) | Như dòng trên | Mục 2, 4.3 |
-| Màn hình Gateway: "Camera tu choi chu ky" (401); hoặc Gateway log `reject snapshot … bad signature` | `0_secret` (Gateway) khác `device_secret` (camera), hoặc giờ hai bên lệch > 300 s | Mục 4.3 |
-| Màn hình Gateway: "Camera dang phat cho ket noi khac" (409) | Luồng cũ chưa đóng hẳn | Đợi vài giây; vẫn bị thì reset camera |
-| Có hình nhưng giật (< 3 khung/s) | Giải nén JPEG bằng phần mềm trên S3 | Mục 7: QVGA phóng x2 hoặc tăng chất lượng JPEG |
+| Màn hình Gateway: "Camera chưa vào Local AP" | Camera chưa nối Local AP, hoặc `nodes/0_mac` không phải MAC camera | Mục 2, 4.3 |
+| Màn hình Gateway: "Camera chưa có giờ: kiểm tra ghép nối ESP-NOW" (camera trả 503) | Như dòng trên | Mục 2, 4.3 |
+| Màn hình Gateway: "Camera từ chối chữ ký" (401); hoặc Gateway log `reject snapshot … bad signature` | `0_secret` (Gateway) khác `device_secret` (camera), hoặc giờ hai bên lệch > 300 s | Mục 4.3 |
+| Màn hình Gateway: "Camera đang phát cho kết nối khác" (409) | Luồng cũ chưa đóng hẳn | Đợi vài giây; vẫn bị thì reset camera |
+| Có hình nhưng giật (< 3 khung/s) | Giải nén JPEG bằng phần mềm trên S3 | Mục 7: QVGA hoặc tăng chất lượng JPEG |
 | `parttool.py` báo không đọc được bảng phân vùng / không thấy `nvs` | Ghi NVS khi board chưa có bảng phân vùng mới (VD vừa `erase-flash`) | Nạp firmware trước (mục 5 bước 5), rồi mới ghi NVS |
 
 Vẫn không được: gửi log `idf.py monitor` của **cả hai** board từ lúc khởi động, cùng dòng chữ cuối màn hình Gateway. Log không chứa secret/mật khẩu (firmware không in ra), nhưng vẫn kiểm trước khi gửi.

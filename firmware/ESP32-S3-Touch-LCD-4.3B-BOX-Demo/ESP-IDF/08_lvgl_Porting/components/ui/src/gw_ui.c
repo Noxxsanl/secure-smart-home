@@ -20,44 +20,78 @@
 static const char *TAG = "gw_ui";
 
 #define REFRESH_MS 500
-#define STATUS_MAX 96
-#define HINT_MAX 64
+#define STATUS_MAX 160   /* UTF-8: chữ có dấu chiếm 2–3 byte */
 
+/* Bố cục 800x480: header 0–44 và dòng trạng thái ở y 452 giữ như bản trước; giữa là nav + nội dung. */
 #define SCREEN_W 800
-#define SCREEN_H 480
-#define LIVE_W 640            /* VGA vừa màn hình 800x480, còn 160 px cho cột trạng thái (IOT_NODE_NETWORK §5.4) */
-#define LIVE_H 480
-#define THUMB_W 200           /* ảnh SVGA thu 1/4 */
-#define THUMB_H 150
-#define LIVE_LOCK_MS 100      /* không lấy kịp khoá LVGL → bỏ khung, không xếp hàng (§5.4) */
-#define THUMB_LOCK_MS 500
-#define DECODE_WARN_EVERY 100
+#define BODY_Y 48
+#define BODY_H 396
+#define NAV_X 8
+#define NAV_W 150
+#define NAV_GAP 9
+#define NAV_BTN_H ((BODY_H - (GW_UI_PAGE_COUNT - 1) * NAV_GAP) / GW_UI_PAGE_COUNT)
+#define CONTENT_X (NAV_X + NAV_W + 8)
+#define CONTENT_W (SCREEN_W - CONTENT_X - 8)
+#define PAD 12
+#define INNER_W (CONTENT_W - 2 * PAD)   /* 602 */
+#define INNER_H (BODY_H - 2 * PAD)      /* 372 */
+#define TITLE_H 34                      /* hàng tiêu đề: tên trang (trái) · trạng thái kết nối (phải) */
 
-#if LV_FONT_MONTSERRAT_24
-#define FONT_VALUE (&lv_font_montserrat_24)
+/* Trang Camera: khung hình chiếm hết phần dưới hàng tiêu đề, ảnh 4:3 căn giữa */
+#define LIVE_BOX_H (INNER_H - TITLE_H)  /* 338 */
+#define LIVE_W 448                      /* VGA x0,7 — cao vừa LIVE_BOX_H, giữ tỉ lệ 4:3 */
+#define LIVE_H 336
+
+/* Trang Phòng khách: 2 ô số đo + 4 ô thiết bị + 1 dòng thông tin node */
+#define GAP 12
+#define CLIMATE_W ((INNER_W - GAP) / 2)          /* 295 */
+#define CLIMATE_H 140
+#define ACT_COUNT 4
+#define ACT_W ((INNER_W - (ACT_COUNT - 1) * GAP) / ACT_COUNT)   /* 141 */
+#define ACT_H 122
+#define ACT_Y (TITLE_H + CLIMATE_H + GAP)        /* 186 */
+#define INFO_Y (ACT_Y + ACT_H + 16)              /* 324 */
+
+#define LIVE_LOCK_MS 100      /* không lấy kịp khoá LVGL → bỏ khung, không xếp hàng (§5.4) */
+#define DECODE_WARN_EVERY 100
+#define STATE_UNKNOWN (-1)
+
+/*
+ * Font tiếng Việt có dấu (bất biến 10): Montserrat Medium + biểu tượng LV_SYMBOL_* — sinh bằng fonts/gen_fonts.sh.
+ * Riêng số đo cỡ lớn chỉ cần chữ số → dùng Montserrat 40 có sẵn của LVGL.
+ */
+LV_FONT_DECLARE(gw_font_vi_16);
+LV_FONT_DECLARE(gw_font_vi_20);
+LV_FONT_DECLARE(gw_font_vi_24);
+#define FONT_TEXT (&gw_font_vi_16)
+#define FONT_TITLE (&gw_font_vi_20)
+#define FONT_VALUE (&gw_font_vi_24)
+#if LV_FONT_MONTSERRAT_40
+#define FONT_BIG (&lv_font_montserrat_40)
 #else
-#define FONT_VALUE LV_FONT_DEFAULT
-#endif
-#if LV_FONT_MONTSERRAT_20
-#define FONT_TITLE (&lv_font_montserrat_20)
-#else
-#define FONT_TITLE LV_FONT_DEFAULT
-#endif
-#if LV_FONT_MONTSERRAT_16
-#define FONT_TEXT (&lv_font_montserrat_16)
-#else
-#define FONT_TEXT LV_FONT_DEFAULT
+#define FONT_BIG FONT_VALUE
 #endif
 
 #define COLOR_BG lv_color_hex(0x10151b)
 #define COLOR_CARD lv_color_hex(0x1c242d)
-#define COLOR_IMG_BG lv_color_hex(0x0b0f14)
+#define COLOR_TILE lv_color_hex(0x252f3b)
+#define COLOR_TILE_ON lv_color_hex(0x173a2a)   /* ô thiết bị đang bật */
+#define COLOR_ACCENT lv_color_hex(0x2563eb)
+#define COLOR_ON_ACCENT lv_color_hex(0xdbe7ff)
 #define COLOR_TEXT lv_color_hex(0xe8edf2)
 #define COLOR_MUTED lv_color_hex(0x8a96a3)
 #define COLOR_OK lv_color_hex(0x3ecf8e)
+#define COLOR_WARN lv_color_hex(0xf5b942)
 #define COLOR_BAD lv_color_hex(0xf06a5b)
 
 /* ---- mô hình (dưới s_lock) ---------------------------------------------------------------------------- */
+
+typedef enum {
+    ACT_FAN = 0,
+    ACT_AC,
+    ACT_LAMP,
+    ACT_CURTAIN,
+} act_t;
 
 typedef struct {
     char status[STATUS_MAX];
@@ -67,26 +101,20 @@ typedef struct {
     bool server;
     bool time_synced;
 
-    bool has_climate;
-    char climate_dev[GW_UI_ID_MAX + 1];
-    float temperature, humidity, light;   /* NAN = không có */
-    int64_t climate_ts;
-
-    int64_t motion_ts;
-    size_t snap_bytes;
-    int64_t snap_ts;
-    bool snap_uploaded;
+    /* Node phòng khách — chỉ trường có trong telemetry mới được cập nhật */
+    char room_dev[GW_UI_ID_MAX + 1];
+    float temperature, humidity, light, ac_temp;   /* NAN = chưa có */
+    int16_t act[ACT_COUNT];                         /* STATE_UNKNOWN, 0, 1; rèm có thể 2..100 (%) */
+    int64_t room_ts;                                /* sn_timestamp của gói gần nhất */
 
     gw_ui_device_t devices[GW_UI_MAX_DEVICES];
     size_t device_count;
 
+    gw_ui_page_t page;
     gw_ui_live_state_t live_state;
-    char live_dev[GW_UI_ID_MAX + 1];
-    uint32_t live_close_in_s;
     bool live_has_frame;       /* đã có khung của lần mở này (không hiện khung cũ của lần trước) */
     uint16_t live_fps_x10;
     uint32_t live_session;     /* tăng mỗi lần mở → đếm khung/giây lại từ đầu */
-    char live_hint[HINT_MAX];
 } model_t;
 
 static SemaphoreHandle_t s_lock;
@@ -94,33 +122,44 @@ static model_t s_model;
 static bool s_dirty;
 static bool s_started;
 
-/* ---- ảnh: 2 bộ đệm RGB565 trong PSRAM — giải nén vào bộ LVGL không vẽ, rồi đổi dưới khoá LVGL ------------ */
+/* ---- khung hình: 2 bộ đệm RGB565 trong PSRAM — giải nén vào bộ LVGL không vẽ, rồi đổi dưới khoá LVGL ----- */
 
 typedef struct {
     uint16_t *buf[2];
     lv_img_dsc_t dsc[2];
     int front;                 /* bộ đệm LVGL đang vẽ, -1 = chưa có ảnh; chỉ đổi khi giữ khoá LVGL */
     uint16_t max_w, max_h;
-    bool allow_2x;
-    gw_jpeg_decoder_t dec;     /* vùng làm việc TJpgDec (SRAM) — mỗi slot chỉ 1 task giải nén */
+    gw_jpeg_decoder_t dec;     /* vùng làm việc TJpgDec (SRAM) — chỉ task gw_live giải nén */
 } frame_slot_t;
 
-static frame_slot_t s_live_slot;    /* task gw_live */
-static frame_slot_t s_thumb_slot;   /* task gw_app */
+static frame_slot_t s_live_slot;
 
 /* ---- widget (chỉ task LVGL truy cập sau khi tạo, hoặc task khác khi giữ khoá LVGL) ---------------------- */
 
-static lv_obj_t *s_lbl_wifi, *s_lbl_server, *s_lbl_clock;
-static lv_obj_t *s_lbl_temp, *s_lbl_hum, *s_lbl_light, *s_lbl_climate_at;
-static lv_obj_t *s_lbl_motion, *s_lbl_snap, *s_lbl_live_hint;
-static lv_obj_t *s_thumb_img, *s_thumb_empty;
-static lv_obj_t *s_table;
-static lv_obj_t *s_lbl_status;
-static lv_obj_t *s_live, *s_live_img, *s_live_wait;
-static lv_obj_t *s_live_lbl_dev, *s_live_lbl_state, *s_live_lbl_fps, *s_live_lbl_clock, *s_live_lbl_close;
+/* Báo hiệu kết nối ở góc phải hàng tiêu đề: chấm màu + chữ. */
+typedef struct {
+    lv_obj_t *dot;
+    lv_obj_t *label;
+} link_ind_t;
 
-static gw_ui_live_cb_t s_live_cb;
-static void *s_live_ctx;
+static lv_obj_t *s_lbl_wifi, *s_lbl_server, *s_lbl_clock, *s_lbl_status;
+static lv_obj_t *s_nav_btn[GW_UI_PAGE_COUNT], *s_nav_icon[GW_UI_PAGE_COUNT], *s_nav_title[GW_UI_PAGE_COUNT],
+    *s_nav_sub[GW_UI_PAGE_COUNT];
+static lv_obj_t *s_page_obj[GW_UI_PAGE_COUNT];
+static gw_ui_page_t s_shown_page = GW_UI_PAGE_CAMERA;
+/* trang Camera */
+static link_ind_t s_cam_link;
+static lv_obj_t *s_live_img, *s_live_wait;
+/* trang Phòng khách */
+static link_ind_t s_room_link;
+static lv_obj_t *s_climate_val[2];
+static lv_obj_t *s_act_tile[ACT_COUNT], *s_act_state[ACT_COUNT], *s_act_sub[ACT_COUNT];
+static lv_obj_t *s_room_info;
+/* trang Thiết bị */
+static lv_obj_t *s_table;
+
+static gw_ui_page_cb_t s_page_cb;
+static void *s_page_ctx;
 
 static void model_update_begin(void)
 {
@@ -145,14 +184,13 @@ static void fmt_hms(int64_t ts, char *buf, size_t cap)
     strftime(buf, cap, "%H:%M:%S", &tm);
 }
 
-/* ---- bộ đệm ảnh ----------------------------------------------------------------------------------------- */
+/* ---- bộ đệm khung hình ---------------------------------------------------------------------------------- */
 
-static bool slot_init(frame_slot_t *s, uint16_t max_w, uint16_t max_h, bool allow_2x)
+static bool slot_init(frame_slot_t *s, uint16_t max_w, uint16_t max_h)
 {
     s->front = -1;
     s->max_w = max_w;
     s->max_h = max_h;
-    s->allow_2x = allow_2x;
     const size_t bytes = (size_t)max_w * max_h * sizeof(uint16_t);
     for (int i = 0; i < 2; i++) {
         s->buf[i] = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -178,7 +216,7 @@ static esp_err_t slot_show(frame_slot_t *s, lv_obj_t *img, lv_obj_t *placeholder
     }
     const int back = (s->front == 0) ? 1 : 0;
     uint16_t w = 0, h = 0;
-    esp_err_t err = gw_jpeg_decode_rgb565(&s->dec, jpeg, len, s->buf[back], s->max_w, s->max_h, s->allow_2x, &w, &h);
+    esp_err_t err = gw_jpeg_decode_fit(&s->dec, jpeg, len, s->buf[back], s->max_w, s->max_h, &w, &h);
     if (err != ESP_OK) {
         return err;
     }
@@ -203,112 +241,339 @@ static esp_err_t slot_show(frame_slot_t *s, lv_obj_t *img, lv_obj_t *placeholder
     return ESP_OK;
 }
 
-/* ---- dựng màn hình ------------------------------------------------------------------------------------ */
-
-static void on_live_btn(lv_event_t *e)
-{
-    const bool open = (uintptr_t)lv_event_get_user_data(e) != 0;
-    if (s_live_cb != NULL) {
-        s_live_cb(open, s_live_ctx);
-    }
-}
-
-static lv_obj_t *make_card(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h, const char *title)
-{
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_set_pos(card, x, y);
-    lv_obj_set_size(card, w, h);
-    lv_obj_set_style_bg_color(card, COLOR_CARD, 0);
-    lv_obj_set_style_border_width(card, 0, 0);
-    lv_obj_set_style_radius(card, 10, 0);
-    lv_obj_set_style_pad_all(card, 12, 0);
-    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *t = lv_label_create(card);
-    lv_label_set_text(t, title);
-    lv_obj_set_style_text_font(t, FONT_TITLE, 0);
-    lv_obj_set_style_text_color(t, COLOR_MUTED, 0);
-    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, 0);
-    return card;
-}
+/* ---- khối dựng ------------------------------------------------------------------------------------------ */
 
 /* Khối nền phẳng, không viền/đệm (toạ độ con tính từ góc trên trái). */
-static lv_obj_t *make_box(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h, lv_color_t bg)
+static lv_obj_t *make_box(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h, lv_color_t bg,
+                          lv_opa_t opa)
 {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_remove_style_all(o);
     lv_obj_set_pos(o, x, y);
     lv_obj_set_size(o, w, h);
     lv_obj_set_style_bg_color(o, bg, 0);
-    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(o, opa, 0);
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     return o;
 }
 
-static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_coord_t x, lv_coord_t y, const char *text)
+static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_coord_t x, lv_coord_t y, const char *text,
+                            lv_color_t color)
 {
     lv_obj_t *l = lv_label_create(parent);
     lv_label_set_text(l, text);
     lv_obj_set_style_text_font(l, font, 0);
-    lv_obj_set_style_text_color(l, COLOR_TEXT, 0);
+    lv_obj_set_style_text_color(l, color, 0);
     lv_obj_set_pos(l, x, y);
     return l;
 }
 
-static lv_obj_t *make_wrap_label(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, const char *text)
+static lv_obj_t *make_tile(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h)
 {
-    lv_obj_t *l = make_label(parent, FONT_TEXT, x, y, text);
-    lv_obj_set_width(l, w);
-    lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-    return l;
+    lv_obj_t *t = make_box(parent, x, y, w, h, COLOR_TILE, LV_OPA_COVER);
+    lv_obj_set_style_radius(t, 10, 0);
+    return t;
 }
 
-static void make_button(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h, const char *text,
-                        bool open)
+/* Góc phải hàng tiêu đề: chấm tròn 12 px + chữ trạng thái kết nối. */
+static void make_link_ind(lv_obj_t *page, link_ind_t *ind)
 {
-    lv_obj_t *b = lv_btn_create(parent);
-    lv_obj_set_pos(b, x, y);
-    lv_obj_set_size(b, w, h);
-    lv_obj_add_event_cb(b, on_live_btn, LV_EVENT_CLICKED, (void *)(uintptr_t)open);
-    lv_obj_t *l = lv_label_create(b);
-    lv_label_set_text(l, text);
-    lv_obj_set_style_text_font(l, FONT_TEXT, 0);
-    lv_obj_center(l);
+    ind->label = lv_label_create(page);
+    lv_label_set_text(ind->label, "");
+    lv_obj_set_style_text_font(ind->label, FONT_TEXT, 0);
+    lv_obj_set_style_text_color(ind->label, COLOR_MUTED, 0);
+    lv_obj_align(ind->label, LV_ALIGN_TOP_RIGHT, 0, 4);
+
+    ind->dot = lv_obj_create(page);
+    lv_obj_remove_style_all(ind->dot);
+    lv_obj_set_size(ind->dot, 12, 12);
+    lv_obj_set_style_radius(ind->dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(ind->dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(ind->dot, COLOR_MUTED, 0);
+    lv_obj_clear_flag(ind->dot, LV_OBJ_FLAG_CLICKABLE);
 }
 
-/* Màn hình xem trực tiếp: phủ toàn màn hình, ẩn khi không xem. */
-static void build_live_view(lv_obj_t *scr)
+static void set_link_ind(const link_ind_t *ind, lv_color_t color, const char *text)
 {
-    s_live = make_box(scr, 0, 0, SCREEN_W, SCREEN_H, lv_color_black());
-    lv_obj_add_flag(s_live, LV_OBJ_FLAG_CLICKABLE);   /* chặn chạm xuống màn hình bên dưới */
-    lv_obj_add_flag(s_live, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(ind->label, text);
+    lv_obj_set_style_text_color(ind->label, color, 0);
+    lv_obj_set_style_bg_color(ind->dot, color, 0);
+    lv_obj_update_layout(ind->label);   /* chiều rộng chữ mới, để đặt chấm ngay bên trái */
+    lv_obj_align_to(ind->dot, ind->label, LV_ALIGN_OUT_LEFT_MID, -8, 0);
+}
 
-    lv_obj_t *view = make_box(s_live, 0, 0, LIVE_W, LIVE_H, lv_color_black());
-    s_live_wait = lv_label_create(view);
-    lv_label_set_text(s_live_wait, "Dang ket noi camera...");
+/* ---- thanh nav ------------------------------------------------------------------------------------------ */
+
+/* Task LVGL: hiện trang `page`, ẩn các trang khác, tô mục đang chọn. */
+static void apply_page(gw_ui_page_t page)
+{
+    for (int i = 0; i < GW_UI_PAGE_COUNT; i++) {
+        const bool sel = i == (int)page;
+        if (sel) {
+            lv_obj_clear_flag(s_page_obj[i], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_page_obj[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_set_style_bg_color(s_nav_btn[i], sel ? COLOR_ACCENT : COLOR_CARD, 0);
+        lv_obj_set_style_text_color(s_nav_icon[i], sel ? COLOR_ON_ACCENT : COLOR_MUTED, 0);
+        lv_obj_set_style_text_color(s_nav_title[i], sel ? lv_color_white() : COLOR_TEXT, 0);
+    }
+    s_shown_page = page;
+}
+
+static void on_nav(lv_event_t *e)
+{
+    const gw_ui_page_t page = (gw_ui_page_t)(uintptr_t)lv_event_get_user_data(e);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_model.page = page;
+    s_dirty = true;
+    xSemaphoreGive(s_lock);
+    apply_page(page);   /* đổi ngay, không chờ lần vẽ lại kế tiếp */
+    if (s_page_cb != NULL) {
+        s_page_cb(page, s_page_ctx);   /* kể cả chạm lại mục đang chọn: tầng trên coi là có người thao tác */
+    }
+}
+
+static void make_nav(lv_obj_t *scr, gw_ui_page_t page, const char *icon, const char *title)
+{
+    lv_obj_t *b = lv_btn_create(scr);
+    lv_obj_set_pos(b, NAV_X, BODY_Y + (lv_coord_t)page * (NAV_BTN_H + NAV_GAP));
+    lv_obj_set_size(b, NAV_W, NAV_BTN_H);
+    lv_obj_set_style_radius(b, 10, 0);
+    lv_obj_set_style_bg_color(b, COLOR_CARD, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_style_pad_all(b, 12, 0);
+    lv_obj_add_event_cb(b, on_nav, LV_EVENT_CLICKED, (void *)(uintptr_t)page);
+    s_nav_btn[page] = b;
+    s_nav_icon[page] = make_label(b, FONT_VALUE, 0, 0, icon, COLOR_MUTED);
+    s_nav_title[page] = make_label(b, FONT_TEXT, 0, 36, title, COLOR_TEXT);
+    s_nav_sub[page] = make_label(b, FONT_TEXT, 0, 62, "", COLOR_MUTED);
+    lv_obj_set_width(s_nav_sub[page], NAV_W - 24);
+    lv_label_set_long_mode(s_nav_sub[page], LV_LABEL_LONG_WRAP);
+}
+
+/* ---- các trang ------------------------------------------------------------------------------------------ */
+
+static void build_camera_page(lv_obj_t *page)
+{
+    make_label(page, FONT_TITLE, 0, 0, "CAMERA CỬA", COLOR_MUTED);
+    make_link_ind(page, &s_cam_link);
+
+    lv_obj_t *video = make_box(page, 0, TITLE_H, INNER_W, LIVE_BOX_H, lv_color_black(), LV_OPA_COVER);
+    lv_obj_set_style_radius(video, 8, 0);   /* không clip_corner: mặt nạ bo góc làm chậm vẽ mỗi khung */
+    s_live_wait = lv_label_create(video);
+    lv_label_set_text(s_live_wait, "");
+    lv_obj_set_width(s_live_wait, INNER_W - 60);
+    lv_label_set_long_mode(s_live_wait, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(s_live_wait, FONT_TITLE, 0);
     lv_obj_set_style_text_color(s_live_wait, COLOR_MUTED, 0);
     lv_obj_set_style_text_align(s_live_wait, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_center(s_live_wait);
-    s_live_img = lv_img_create(view);
+    s_live_img = lv_img_create(video);
     lv_obj_center(s_live_img);
     lv_obj_add_flag(s_live_img, LV_OBJ_FLAG_HIDDEN);
+}
 
-    const lv_coord_t pw = SCREEN_W - LIVE_W;
-    lv_obj_t *panel = make_box(s_live, LIVE_W, 0, pw, SCREEN_H, COLOR_BG);
-    make_label(panel, FONT_TITLE, 12, 14, "CAMERA CUA");
-    s_live_lbl_dev = make_label(panel, FONT_TEXT, 12, 46, "");
-    lv_obj_set_width(s_live_lbl_dev, pw - 24);
-    lv_label_set_long_mode(s_live_lbl_dev, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_color(s_live_lbl_dev, COLOR_MUTED, 0);
-    s_live_lbl_state = make_wrap_label(panel, 12, 84, pw - 24, "");
-    s_live_lbl_fps = make_label(panel, FONT_TEXT, 12, 146, "");
-    s_live_lbl_clock = make_label(panel, FONT_TITLE, 12, 176, "--:--:--");
-    s_live_lbl_close = make_wrap_label(panel, 12, 216, pw - 24, "");
-    lv_obj_set_style_text_color(s_live_lbl_close, COLOR_MUTED, 0);
-    if (gw_display_touch_enabled()) {
-        make_button(panel, 12, SCREEN_H - 76, pw - 24, 60, LV_SYMBOL_CLOSE " Dong", false);
+static void build_room_page(lv_obj_t *page)
+{
+    make_label(page, FONT_TITLE, 0, 0, "PHÒNG KHÁCH", COLOR_MUTED);
+    make_link_ind(page, &s_room_link);
+
+    static const char *const climate_names[2] = {"NHIỆT ĐỘ", "ĐỘ ẨM"};
+    static const char *const climate_units[2] = {"°C", "%"};
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *tile = make_tile(page, (lv_coord_t)i * (CLIMATE_W + GAP), TITLE_H, CLIMATE_W, CLIMATE_H);
+        make_label(tile, FONT_TEXT, 16, 14, climate_names[i], COLOR_MUTED);
+        s_climate_val[i] = make_label(tile, FONT_BIG, 16, 50, "--", COLOR_TEXT);
+        make_label(tile, FONT_TITLE, 16, 104, climate_units[i], COLOR_MUTED);
     }
+
+    static const char *const act_names[ACT_COUNT] = {"QUẠT", "ĐIỀU HÒA", "ĐÈN", "RÈM CỬA"};
+    for (int i = 0; i < ACT_COUNT; i++) {
+        s_act_tile[i] = make_tile(page, (lv_coord_t)i * (ACT_W + GAP), ACT_Y, ACT_W, ACT_H);
+        make_label(s_act_tile[i], FONT_TEXT, 14, 14, act_names[i], COLOR_MUTED);
+        s_act_state[i] = make_label(s_act_tile[i], FONT_VALUE, 14, 46, "--", COLOR_MUTED);
+        s_act_sub[i] = make_label(s_act_tile[i], FONT_TEXT, 14, 80, "", COLOR_MUTED);
+        lv_obj_set_width(s_act_sub[i], ACT_W - 28);
+        lv_label_set_long_mode(s_act_sub[i], LV_LABEL_LONG_WRAP);   /* tối đa 2 dòng trong ô */
+    }
+
+    s_room_info = make_label(page, FONT_TEXT, 0, INFO_Y, "", COLOR_MUTED);
+    lv_obj_set_width(s_room_info, INNER_W);
+    lv_label_set_long_mode(s_room_info, LV_LABEL_LONG_DOT);
+}
+
+/*
+ * Bảng thiết bị. Độ rộng cột đủ cho nội dung dài nhất ở font 16 cộng đệm 2 × DEV_CELL_PAD ("Camera", "-100 dBm",
+ * "08/11 23:59"). Mọi ô KHÔNG xuống dòng: LVGL 8.4 có cờ TEXT_CROP nhưng lv_table.c (draw_main) tính xong
+ * LV_TEXT_FLAG_EXPAND lại không gán vào label_dsc → chữ vẫn tự xuống dòng ("Camer" / "a"). Gán bù ở on_table_draw_begin.
+ */
+#define DEV_COLS 5
+#define DEV_COL_STATUS 2
+#define DEV_CELL_PAD 10
+#define DEV_DOT 14       /* đường kính chấm trạng thái */
+#define DEV_ID_SHOW 15   /* id dài hơn (VD UUID) → 15 ký tự đầu + "..." */
+static const lv_coord_t s_dev_widths[DEV_COLS] = {176, 100, 104, 96, 126};   /* tổng = INNER_W (602) */
+static int8_t s_dev_row_link[GW_UI_MAX_DEVICES + 2];   /* gw_ui_link_t theo hàng bảng; -1 = không vẽ chấm */
+
+static lv_color_t link_color(gw_ui_link_t link)
+{
+    switch (link) {
+    case GW_UI_LINK_OK:
+        return COLOR_OK;
+    case GW_UI_LINK_CONNECTING:
+        return COLOR_WARN;
+    default:
+        return COLOR_BAD;
+    }
+}
+
+static const char *link_text(gw_ui_link_t link)
+{
+    switch (link) {
+    case GW_UI_LINK_OK:
+        return "Đã kết nối";
+    case GW_UI_LINK_CONNECTING:
+        return "Đang kết nối";
+    default:
+        return "Chưa kết nối";
+    }
+}
+
+/* Task LVGL, trước khi vẽ từng ô: không xuống dòng; hàng tiêu đề chữ nhạt nền sẫm. */
+static void on_table_draw_begin(lv_event_t *e)
+{
+    lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(e);
+    if (dsc->class_p != &lv_table_class || dsc->type != LV_TABLE_DRAW_PART_CELL) {
+        return;
+    }
+    dsc->label_dsc->flag |= LV_TEXT_FLAG_EXPAND;
+    if (dsc->id / DEV_COLS == 0) {
+        dsc->label_dsc->color = COLOR_MUTED;
+        dsc->rect_dsc->bg_color = COLOR_TILE;
+    }
+}
+
+/* Task LVGL, sau khi vẽ ô: cột "Trạng thái" chỉ là 1 chấm màu (xanh / vàng / đỏ). */
+static void on_table_draw_end(lv_event_t *e)
+{
+    lv_obj_draw_part_dsc_t *dsc = lv_event_get_draw_part_dsc(e);
+    if (dsc->class_p != &lv_table_class || dsc->type != LV_TABLE_DRAW_PART_CELL || dsc->draw_area == NULL) {
+        return;
+    }
+    const uint32_t row = dsc->id / DEV_COLS;
+    if (row == 0 || row > GW_UI_MAX_DEVICES || dsc->id % DEV_COLS != DEV_COL_STATUS || s_dev_row_link[row] < 0) {
+        return;
+    }
+    lv_draw_rect_dsc_t rd;
+    lv_draw_rect_dsc_init(&rd);
+    rd.radius = LV_RADIUS_CIRCLE;
+    rd.bg_opa = LV_OPA_COVER;
+    rd.bg_color = link_color((gw_ui_link_t)s_dev_row_link[row]);
+    const lv_area_t *c = dsc->draw_area;
+    lv_area_t dot;
+    dot.x1 = c->x1 + DEV_CELL_PAD + 2;   /* thẳng hàng với chữ "Trạng thái" ở tiêu đề */
+    dot.x2 = dot.x1 + DEV_DOT - 1;
+    dot.y1 = (c->y1 + c->y2) / 2 - DEV_DOT / 2;
+    dot.y2 = dot.y1 + DEV_DOT - 1;
+    lv_draw_rect(dsc->draw_ctx, &rd, &dot);
+}
+
+/* Chú thích màu ở góc phải hàng tiêu đề: ● Đã kết nối  ● Đang kết nối  ● Chưa kết nối */
+static void make_link_legend(lv_obj_t *page)
+{
+    lv_obj_t *row = lv_obj_create(page);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 6, 0);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(row, LV_ALIGN_TOP_RIGHT, 0, 4);
+
+    static const gw_ui_link_t links[3] = {GW_UI_LINK_OK, GW_UI_LINK_CONNECTING, GW_UI_LINK_NONE};
+    static const char *const names[3] = {"Đã kết nối", "Đang kết nối", "Chưa kết nối"};
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *dot = lv_obj_create(row);
+        lv_obj_remove_style_all(dot);
+        lv_obj_set_size(dot, 10, 10);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(dot, link_color(links[i]), 0);
+        lv_obj_t *l = lv_label_create(row);
+        lv_label_set_text(l, names[i]);
+        lv_obj_set_style_text_font(l, FONT_TEXT, 0);
+        lv_obj_set_style_text_color(l, COLOR_MUTED, 0);
+        if (i < 2) {
+            lv_obj_set_style_pad_right(l, 10, 0);
+        }
+    }
+}
+
+/* merge = true: hàng thông báo trải hết chiều ngang (VD "Chưa ghép thiết bị nào"). */
+static void table_row_ctrl(uint16_t row, bool merge)
+{
+    for (uint16_t c = 0; c < DEV_COLS; c++) {
+        lv_table_add_cell_ctrl(s_table, row, c, LV_TABLE_CELL_CTRL_TEXT_CROP);
+        if (merge && c < DEV_COLS - 1) {
+            lv_table_add_cell_ctrl(s_table, row, c, LV_TABLE_CELL_CTRL_MERGE_RIGHT);
+        } else {
+            lv_table_clear_cell_ctrl(s_table, row, c, LV_TABLE_CELL_CTRL_MERGE_RIGHT);
+        }
+    }
+}
+
+/* Giờ lần cuối kết nối: hôm nay → "HH:MM:SS", ngày khác (hoặc Gateway chưa có giờ để so) → "DD/MM HH:MM". */
+static void fmt_last_seen(int64_t ts, bool clock_ok, char *buf, size_t cap)
+{
+    if (ts <= 0) {
+        strlcpy(buf, "Chưa từng", cap);
+        return;
+    }
+    time_t t = (time_t)ts;
+    struct tm tm;
+    localtime_r(&t, &tm);   /* múi giờ đặt ở application (TZ) */
+    if (clock_ok) {
+        time_t now = time(NULL);
+        struct tm today;
+        localtime_r(&now, &today);
+        if (today.tm_year == tm.tm_year && today.tm_yday == tm.tm_yday) {
+            strftime(buf, cap, "%H:%M:%S", &tm);
+            return;
+        }
+    }
+    strftime(buf, cap, "%d/%m %H:%M", &tm);
+}
+
+static void build_devices_page(lv_obj_t *page)
+{
+    make_label(page, FONT_TITLE, 0, 0, "THIẾT BỊ ĐÃ GHÉP", COLOR_MUTED);
+    make_link_legend(page);
+
+    s_table = lv_table_create(page);
+    lv_obj_set_pos(s_table, 0, TITLE_H);
+    lv_obj_set_size(s_table, INNER_W, INNER_H - TITLE_H);
+    lv_obj_set_style_bg_opa(s_table, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_table, 0, 0);
+    lv_obj_set_style_pad_all(s_table, 0, 0);
+    lv_obj_set_style_text_font(s_table, FONT_TEXT, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(s_table, COLOR_TEXT, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(s_table, COLOR_CARD, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(s_table, 1, LV_PART_ITEMS);
+    lv_obj_set_style_border_side(s_table, LV_BORDER_SIDE_BOTTOM, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(s_table, COLOR_TILE, LV_PART_ITEMS);
+    lv_obj_set_style_pad_ver(s_table, 10, LV_PART_ITEMS);
+    lv_obj_set_style_pad_hor(s_table, DEV_CELL_PAD, LV_PART_ITEMS);
+    lv_obj_add_event_cb(s_table, on_table_draw_begin, LV_EVENT_DRAW_PART_BEGIN, NULL);
+    lv_obj_add_event_cb(s_table, on_table_draw_end, LV_EVENT_DRAW_PART_END, NULL);
+    lv_table_set_col_cnt(s_table, DEV_COLS);
+    static const char *const heads[DEV_COLS] = {"Thiết bị", "Loại", "Trạng thái", "Tín hiệu", "Lần cuối"};
+    for (uint16_t c = 0; c < DEV_COLS; c++) {
+        lv_table_set_col_width(s_table, c, s_dev_widths[c]);
+        lv_table_set_cell_value(s_table, 0, c, heads[c]);
+    }
+    lv_table_set_row_cnt(s_table, 1);
+    table_row_ctrl(0, false);
 }
 
 static void build_screen(void)
@@ -319,189 +584,308 @@ static void build_screen(void)
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Thanh trên */
-    lv_obj_t *title = make_label(scr, FONT_TITLE, 16, 12, "SMART HOME GATEWAY");
-    lv_obj_set_style_text_color(title, COLOR_TEXT, 0);
-    s_lbl_wifi = make_label(scr, FONT_TEXT, 360, 14, LV_SYMBOL_WIFI " ...");
-    s_lbl_server = make_label(scr, FONT_TEXT, 560, 14, LV_SYMBOL_UPLOAD " Server ...");
-    s_lbl_clock = make_label(scr, FONT_TITLE, 700, 12, "--:--:--");
+    /* Header (giữ nguyên) */
+    make_label(scr, FONT_TITLE, 16, 12, "GATEWAY NHÀ THÔNG MINH", COLOR_TEXT);
+    s_lbl_wifi = make_label(scr, FONT_TEXT, 360, 14, LV_SYMBOL_WIFI " ...", COLOR_TEXT);
+    s_lbl_server = make_label(scr, FONT_TEXT, 560, 14, LV_SYMBOL_UPLOAD " Máy chủ ...", COLOR_TEXT);
+    s_lbl_clock = make_label(scr, FONT_TITLE, 700, 12, "--:--:--", COLOR_TEXT);
 
-    /* Phòng khách (bản sơ bộ: node đầu tiên gửi telemetry) */
-    lv_obj_t *room = make_card(scr, 10, 48, 384, 190, "PHONG KHACH");
-    s_lbl_temp = make_label(room, FONT_VALUE, 0, 36, "Nhiet do: --");
-    s_lbl_hum = make_label(room, FONT_VALUE, 0, 72, "Do am: --");
-    s_lbl_light = make_label(room, FONT_VALUE, 0, 108, "Anh sang: --");
-    s_lbl_climate_at = make_label(room, FONT_TEXT, 0, 146, "Chua co du lieu");
-    lv_obj_set_style_text_color(s_lbl_climate_at, COLOR_MUTED, 0);
+    /* Nav */
+    make_nav(scr, GW_UI_PAGE_CAMERA, LV_SYMBOL_VIDEO, "CAMERA");
+    make_nav(scr, GW_UI_PAGE_ROOM, LV_SYMBOL_HOME, "PHÒNG KHÁCH");
+    make_nav(scr, GW_UI_PAGE_DEVICES, LV_SYMBOL_LIST, "THIẾT BỊ");
 
-    /* Camera: cột chữ bên trái (rộng 156), ảnh chụp gần nhất thu nhỏ bên phải */
-    lv_obj_t *cam = make_card(scr, 406, 48, 384, 190, "CAMERA CUA");
-    s_lbl_motion = make_wrap_label(cam, 0, 30, 156, "Chuyen dong:\nchua co");
-    s_lbl_snap = make_wrap_label(cam, 0, 72, 156, "Anh chup:\nchua co");
-    if (gw_display_touch_enabled()) {
-        make_button(cam, 0, 124, 152, 40, LV_SYMBOL_VIDEO " Xem truc tiep", true);
-    } else {
-        s_lbl_live_hint = make_wrap_label(cam, 0, 124, 156, "");
-        lv_obj_set_style_text_color(s_lbl_live_hint, COLOR_MUTED, 0);
+    /* Nội dung: 1 thẻ chung, mỗi trang là 1 khối con trong suốt, chỉ hiện trang đang chọn */
+    lv_obj_t *content = lv_obj_create(scr);
+    lv_obj_set_pos(content, CONTENT_X, BODY_Y);
+    lv_obj_set_size(content, CONTENT_W, BODY_H);
+    lv_obj_set_style_bg_color(content, COLOR_CARD, 0);
+    lv_obj_set_style_border_width(content, 0, 0);
+    lv_obj_set_style_radius(content, 10, 0);
+    lv_obj_set_style_pad_all(content, PAD, 0);
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    for (int i = 0; i < GW_UI_PAGE_COUNT; i++) {
+        s_page_obj[i] = make_box(content, 0, 0, INNER_W, INNER_H, COLOR_CARD, LV_OPA_TRANSP);
     }
-    lv_obj_t *thumb = make_box(cam, 160, 8, THUMB_W, THUMB_H, COLOR_IMG_BG);
-    s_thumb_empty = lv_label_create(thumb);
-    lv_label_set_text(s_thumb_empty, "Chua co anh");
-    lv_obj_set_style_text_font(s_thumb_empty, FONT_TEXT, 0);
-    lv_obj_set_style_text_color(s_thumb_empty, COLOR_MUTED, 0);
-    lv_obj_center(s_thumb_empty);
-    s_thumb_img = lv_img_create(thumb);
-    lv_obj_center(s_thumb_img);
-    lv_obj_add_flag(s_thumb_img, LV_OBJ_FLAG_HIDDEN);
+    build_camera_page(s_page_obj[GW_UI_PAGE_CAMERA]);
+    build_room_page(s_page_obj[GW_UI_PAGE_ROOM]);
+    build_devices_page(s_page_obj[GW_UI_PAGE_DEVICES]);
 
-    /* Thiết bị */
-    lv_obj_t *dev = make_card(scr, 10, 246, 780, 196, "THIET BI");
-    s_table = lv_table_create(dev);
-    lv_obj_set_pos(s_table, 0, 30);
-    lv_obj_set_size(s_table, 756, 140);
-    lv_obj_set_style_text_font(s_table, FONT_TEXT, LV_PART_ITEMS);
-    lv_obj_set_style_bg_color(s_table, COLOR_CARD, 0);
-    lv_obj_set_style_bg_color(s_table, COLOR_CARD, LV_PART_ITEMS);
-    lv_obj_set_style_text_color(s_table, COLOR_TEXT, LV_PART_ITEMS);
-    lv_obj_set_style_border_width(s_table, 0, 0);
-    lv_obj_set_style_pad_ver(s_table, 4, LV_PART_ITEMS);
-    lv_table_set_col_cnt(s_table, 5);
-    static const lv_coord_t widths[5] = {300, 100, 140, 90, 120};
-    static const char *const heads[5] = {"Thiet bi", "Loai", "Trang thai", "RSSI", "Lan cuoi"};
-    for (uint16_t c = 0; c < 5; c++) {
-        lv_table_set_col_width(s_table, c, widths[c]);
-        lv_table_set_cell_value(s_table, 0, c, heads[c]);
-    }
-    lv_table_set_row_cnt(s_table, 1);
-
-    /* Dòng trạng thái */
-    s_lbl_status = make_label(scr, FONT_TEXT, 16, 452, "Dang khoi dong...");
+    /* Footer — dòng trạng thái (giữ nguyên) */
+    s_lbl_status = make_label(scr, FONT_TEXT, 16, 452, "Đang khởi động...", COLOR_MUTED);
     lv_obj_set_width(s_lbl_status, 768);
     lv_label_set_long_mode(s_lbl_status, LV_LABEL_LONG_DOT);
 
-    /* Tạo sau cùng → nằm trên mọi thứ khác */
-    build_live_view(scr);
+    apply_page(s_model.page);
 }
 
 /* ---- vẽ lại từ mô hình (task LVGL, đã giữ khoá LVGL) -------------------------------------------------- */
 
-/* snprintf của newlib (LVGL 8 mặc định không in số thực: LV_SPRINTF_USE_FLOAT = 0). */
-static void set_value(lv_obj_t *l, const char *name, float v, const char *unit, int decimals)
+static const gw_ui_device_t *find_device(const model_t *m, bool camera)
 {
-    char buf[48];
-    if (isnan(v)) {
-        snprintf(buf, sizeof(buf), "%s: --", name);
-    } else {
-        snprintf(buf, sizeof(buf), "%s: %.*f %s", name, decimals, (double)v, unit);
+    for (size_t i = 0; i < m->device_count; i++) {
+        if (m->devices[i].is_camera == camera) {
+            return &m->devices[i];
+        }
     }
-    lv_label_set_text(l, buf);
+    return NULL;
 }
 
-static void render_live(const model_t *m)
+/* Node phòng khách: node đang gửi dữ liệu, không có thì node đầu tiên đã ghép. */
+static const gw_ui_device_t *find_room_node(const model_t *m)
 {
-    if (m->live_state == GW_UI_LIVE_OFF) {
-        lv_obj_add_flag(s_live, LV_OBJ_FLAG_HIDDEN);
-        return;
+    if (m->room_dev[0] != '\0') {
+        for (size_t i = 0; i < m->device_count; i++) {
+            if (!m->devices[i].is_camera && strcmp(m->devices[i].device_id, m->room_dev) == 0) {
+                return &m->devices[i];
+            }
+        }
     }
-    lv_obj_clear_flag(s_live, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(s_live_lbl_dev, m->live_dev);
+    return find_device(m, false);
+}
 
-    const char *state;
+/* snprintf của newlib (LVGL 8 mặc định không in số thực: LV_SPRINTF_USE_FLOAT = 0). */
+static void fmt_value(char *buf, size_t cap, float v, int decimals)
+{
+    if (isnan(v)) {
+        strlcpy(buf, "--", cap);
+    } else {
+        snprintf(buf, cap, "%.*f", decimals, (double)v);
+    }
+}
+
+static void render_header_footer(const model_t *m)
+{
+    char buf[48];
+    snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %s", m->wifi ? m->ip : "Mất kết nối");
+    lv_label_set_text(s_lbl_wifi, buf);
+    lv_obj_set_style_text_color(s_lbl_wifi, m->wifi ? COLOR_OK : COLOR_BAD, 0);
+    lv_label_set_text(s_lbl_server, m->server ? LV_SYMBOL_UPLOAD " Máy chủ OK" : LV_SYMBOL_UPLOAD " Máy chủ --");
+    lv_obj_set_style_text_color(s_lbl_server, m->server ? COLOR_OK : COLOR_BAD, 0);
+    lv_label_set_text(s_lbl_status, m->status);
+    lv_obj_set_style_text_color(s_lbl_status, m->status_error ? COLOR_BAD : COLOR_MUTED, 0);
+}
+
+/* Dòng tóm tắt dưới mỗi mục nav. */
+static void render_nav(const model_t *m)
+{
+    char buf[40];
+    lv_color_t color[GW_UI_PAGE_COUNT];
+
+    const gw_ui_device_t *cam = find_device(m, true);
+    if (m->live_state == GW_UI_LIVE_PLAYING) {
+        lv_label_set_text(s_nav_sub[GW_UI_PAGE_CAMERA], "Trực tiếp");
+        color[GW_UI_PAGE_CAMERA] = COLOR_OK;
+    } else if (cam == NULL) {
+        lv_label_set_text(s_nav_sub[GW_UI_PAGE_CAMERA], "Chưa ghép");
+        color[GW_UI_PAGE_CAMERA] = COLOR_MUTED;
+    } else {
+        lv_label_set_text(s_nav_sub[GW_UI_PAGE_CAMERA], link_text(cam->link));
+        color[GW_UI_PAGE_CAMERA] = link_color(cam->link);
+    }
+
+    if (!isnan(m->temperature)) {
+        char t[16], h[16];
+        fmt_value(t, sizeof(t), m->temperature, 1);
+        fmt_value(h, sizeof(h), m->humidity, 0);
+        snprintf(buf, sizeof(buf), "%s°C  %s%%", t, h);
+        lv_label_set_text(s_nav_sub[GW_UI_PAGE_ROOM], buf);
+        color[GW_UI_PAGE_ROOM] = COLOR_TEXT;
+    } else {
+        lv_label_set_text(s_nav_sub[GW_UI_PAGE_ROOM], "Chưa có dữ liệu");
+        color[GW_UI_PAGE_ROOM] = COLOR_MUTED;
+    }
+
+    unsigned online = 0;
+    for (size_t i = 0; i < m->device_count; i++) {
+        online += m->devices[i].link == GW_UI_LINK_OK ? 1 : 0;
+    }
+    snprintf(buf, sizeof(buf), "%u/%u đã kết nối", online, (unsigned)m->device_count);
+    lv_label_set_text(s_nav_sub[GW_UI_PAGE_DEVICES], buf);
+    color[GW_UI_PAGE_DEVICES] = (m->device_count > 0 && online == m->device_count) ? COLOR_OK : COLOR_MUTED;
+
+    for (int i = 0; i < GW_UI_PAGE_COUNT; i++) {
+        /* Trên nền xanh của mục đang chọn, màu trạng thái khó đọc → dùng màu sáng chung. */
+        lv_obj_set_style_text_color(s_nav_sub[i], i == (int)s_shown_page ? COLOR_ON_ACCENT : color[i], 0);
+    }
+}
+
+/*
+ * Kết nối Camera ↔ Gateway: xanh = đang nhận hình; vàng = đang kết nối / đã thấy camera qua ESP-NOW nhưng chưa có
+ * luồng; đỏ = mất kết nối (luồng đứt hoặc không thấy gói ESP-NOW nào trong CONFIG_GW_NODE_OFFLINE_S).
+ */
+static void render_camera(const model_t *m)
+{
+    char buf[64];
+    const gw_ui_device_t *cam = find_device(m, true);
+    const char *link;
     lv_color_t color;
-    switch (m->live_state) {
-    case GW_UI_LIVE_PLAYING:
-        state = "Truc tiep";
-        color = COLOR_OK;
-        break;
-    case GW_UI_LIVE_RETRY:
-        state = "Mat ket noi,\ndang thu lai...";
-        color = COLOR_BAD;
-        break;
-    default:
-        state = "Dang ket noi\ncamera...";
+    if (cam == NULL) {
+        link = "Chưa ghép camera";
         color = COLOR_MUTED;
-        break;
+    } else {
+        switch (m->live_state) {
+        case GW_UI_LIVE_PLAYING:
+            if (m->live_fps_x10 > 0) {
+                snprintf(buf, sizeof(buf), "Đã kết nối  %u.%u khung/s", m->live_fps_x10 / 10u, m->live_fps_x10 % 10u);
+                link = buf;
+            } else {
+                link = "Đã kết nối";
+            }
+            color = COLOR_OK;
+            break;
+        case GW_UI_LIVE_CONNECTING:
+            link = "Đang kết nối...";
+            color = COLOR_WARN;
+            break;
+        case GW_UI_LIVE_RETRY:
+            link = "Mất kết nối - đang thử lại";
+            color = COLOR_BAD;
+            break;
+        default:
+            /* Chưa có luồng hình: theo kết nối camera ↔ Gateway (ESP-NOW + Local AP) */
+            link = cam->link == GW_UI_LINK_OK ? "Đã kết nối, chờ hình" : link_text(cam->link);
+            color = cam->link == GW_UI_LINK_NONE ? COLOR_BAD : COLOR_WARN;
+            break;
+        }
     }
-    lv_label_set_text(s_live_lbl_state, state);
-    lv_obj_set_style_text_color(s_live_lbl_state, color, 0);
+    set_link_ind(&s_cam_link, color, link);
 
-    char buf[40] = "";
-    if (m->live_state == GW_UI_LIVE_PLAYING && m->live_fps_x10 > 0) {
-        snprintf(buf, sizeof(buf), "%u.%u khung/s", m->live_fps_x10 / 10u, m->live_fps_x10 % 10u);
+    const char *wait;
+    if (cam == NULL) {
+        wait = "Chưa ghép camera\n(NVS nodes/<i>_kind = camera)";
+    } else if (m->live_state == GW_UI_LIVE_CONNECTING) {
+        wait = "Đang kết nối camera...";
+    } else if (m->live_state == GW_UI_LIVE_RETRY) {
+        wait = "Mất kết nối camera,\nđang thử lại...";
+    } else {
+        wait = "Chờ camera trực tuyến...";
     }
-    lv_label_set_text(s_live_lbl_fps, buf);
-    buf[0] = '\0';
-    if (m->live_close_in_s > 0) {
-        snprintf(buf, sizeof(buf), "Tu dong dong\nsau %" PRIu32 " s", m->live_close_in_s);
-    }
-    lv_label_set_text(s_live_lbl_close, buf);
-
-    if (m->live_has_frame) {
+    if (cam != NULL && m->live_has_frame && m->live_state != GW_UI_LIVE_OFF) {
         lv_obj_clear_flag(s_live_img, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_live_wait, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(s_live_img, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(s_live_wait, state);
+        lv_label_set_text(s_live_wait, wait);
         lv_obj_clear_flag(s_live_wait, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
-static void render(const model_t *m)
+/* Ô thiết bị: "BẬT"/"TẮT" (rèm "MỞ"/"ĐÓNG"), nền xanh khi đang bật/mở, "--" khi node chưa báo trạng thái. */
+static void render_actuator(int i, int16_t state, const char *sub)
 {
-    char buf[96];
-    snprintf(buf, sizeof(buf), LV_SYMBOL_WIFI " %s", m->wifi ? m->ip : "Mat ket noi");
-    lv_label_set_text(s_lbl_wifi, buf);
-    lv_obj_set_style_text_color(s_lbl_wifi, m->wifi ? COLOR_OK : COLOR_BAD, 0);
-    lv_label_set_text(s_lbl_server, m->server ? LV_SYMBOL_UPLOAD " Server OK" : LV_SYMBOL_UPLOAD " Server --");
-    lv_obj_set_style_text_color(s_lbl_server, m->server ? COLOR_OK : COLOR_BAD, 0);
+    const bool known = state != STATE_UNKNOWN;
+    const bool on = known && state > 0;
+    char buf[16];
+    if (!known) {
+        strlcpy(buf, "--", sizeof(buf));
+    } else if (i == ACT_CURTAIN) {
+        strlcpy(buf, on ? "MỞ" : "ĐÓNG", sizeof(buf));
+    } else {
+        strlcpy(buf, on ? "BẬT" : "TẮT", sizeof(buf));
+    }
+    lv_label_set_text(s_act_state[i], buf);
+    lv_obj_set_style_text_color(s_act_state[i], on ? COLOR_OK : (known ? COLOR_TEXT : COLOR_MUTED), 0);
+    lv_obj_set_style_bg_color(s_act_tile[i], on ? COLOR_TILE_ON : COLOR_TILE, 0);
+    lv_label_set_text(s_act_sub[i], known ? sub : "Node chưa báo");
+}
 
-    char t[12];
-    if (m->has_climate) {
-        set_value(s_lbl_temp, "Nhiet do", m->temperature, "\xC2\xB0" "C", 1);   /* ° có trong font Montserrat */
-        set_value(s_lbl_hum, "Do am", m->humidity, "%", 0);
-        set_value(s_lbl_light, "Anh sang", m->light, "lux", 0);
-        fmt_hms(m->climate_ts, t, sizeof(t));
-        snprintf(buf, sizeof(buf), "Cap nhat %s  (%.24s)", t, m->climate_dev);
-        lv_label_set_text(s_lbl_climate_at, buf);
-    }
-    if (m->motion_ts > 0) {
-        fmt_hms(m->motion_ts, t, sizeof(t));
-        snprintf(buf, sizeof(buf), "Chuyen dong luc\n%s", t);
-        lv_label_set_text(s_lbl_motion, buf);
-    }
-    if (m->snap_ts > 0) {
-        fmt_hms(m->snap_ts, t, sizeof(t));
-        snprintf(buf, sizeof(buf), "Anh chup %s\n%u KB - %s", t, (unsigned)((m->snap_bytes + 1023) / 1024),
-                 m->snap_uploaded ? "da gui" : "chua gui");
-        lv_label_set_text(s_lbl_snap, buf);
-    }
-    if (s_lbl_live_hint != NULL) {
-        lv_label_set_text(s_lbl_live_hint, m->live_hint);
+static void render_room(const model_t *m)
+{
+    const gw_ui_device_t *node = find_room_node(m);
+    if (node == NULL) {
+        set_link_ind(&s_room_link, COLOR_MUTED, "Chưa ghép node");
+    } else {
+        set_link_ind(&s_room_link, link_color(node->link), link_text(node->link));
     }
 
+    char v[16];
+    fmt_value(v, sizeof(v), m->temperature, 1);
+    lv_label_set_text(s_climate_val[0], v);
+    fmt_value(v, sizeof(v), m->humidity, 0);
+    lv_label_set_text(s_climate_val[1], v);
+
+    char sub[32];
+    for (int i = 0; i < ACT_COUNT; i++) {
+        const int16_t st = m->act[i];
+        sub[0] = '\0';
+        if (i == ACT_AC && st > 0 && !isnan(m->ac_temp)) {
+            fmt_value(v, sizeof(v), m->ac_temp, 0);
+            snprintf(sub, sizeof(sub), "Đặt %s°C", v);
+        } else if (i == ACT_CURTAIN && st > 1) {
+            snprintf(sub, sizeof(sub), "Mở %d%%", st);
+        } else if (st != STATE_UNKNOWN) {
+            static const char *const on_text[ACT_COUNT] = {"Đang chạy", "Đang bật", "Đang sáng", "Đang mở"};
+            static const char *const off_text[ACT_COUNT] = {"Đang tắt", "Đang tắt", "Đang tắt", "Đang đóng"};
+            strlcpy(sub, st > 0 ? on_text[i] : off_text[i], sizeof(sub));
+        }
+        render_actuator(i, st, sub);
+    }
+
+    /* Dòng thông tin: node · ánh sáng · lần cập nhật · tín hiệu */
+    char info[200], t[12], lux[16];
+    fmt_hms(m->room_ts, t, sizeof(t));
+    fmt_value(lux, sizeof(lux), m->light, 0);
+    if (node != NULL && node->has_rssi) {
+        snprintf(info, sizeof(info), "Node %.32s   |   Ánh sáng %s lux   |   Cập nhật %s   |   %d dBm",
+                 node->device_id, lux, t, node->rssi);
+    } else {
+        snprintf(info, sizeof(info), "Node %.32s   |   Ánh sáng %s lux   |   Cập nhật %s",
+                 node ? node->device_id : "--", lux, t);
+    }
+    lv_label_set_text(s_room_info, info);
+}
+
+static void render_devices(const model_t *m)
+{
+    char buf[48];
+    memset(s_dev_row_link, -1, sizeof(s_dev_row_link));   /* -1 = không vẽ chấm */
+
+    if (m->device_count == 0) {
+        lv_table_set_row_cnt(s_table, 2);
+        table_row_ctrl(1, true);
+        lv_table_set_cell_value(s_table, 1, 0, "Chưa ghép thiết bị nào (NVS nodes)");
+        for (uint16_t c = 1; c < DEV_COLS; c++) {
+            lv_table_set_cell_value(s_table, 1, c, "");
+        }
+        return;
+    }
     lv_table_set_row_cnt(s_table, (uint16_t)(m->device_count + 1));
     for (size_t i = 0; i < m->device_count; i++) {
         const gw_ui_device_t *d = &m->devices[i];
-        uint16_t r = (uint16_t)(i + 1);
-        char cell[24];
-        lv_table_set_cell_value(s_table, r, 0, d->device_id);
-        lv_table_set_cell_value(s_table, r, 1, d->is_camera ? "Camera" : "Node");
-        lv_table_set_cell_value(s_table, r, 2, d->online ? "Truc tuyen" : "Mat ket noi");
-        if (d->seen_ago_s == UINT32_MAX) {
-            lv_table_set_cell_value(s_table, r, 3, "--");
-            lv_table_set_cell_value(s_table, r, 4, "chua thay");
+        const uint16_t r = (uint16_t)(i + 1);
+        table_row_ctrl(r, false);
+        if (strlen(d->device_id) > DEV_ID_SHOW + 1) {
+            snprintf(buf, sizeof(buf), "%.*s...", DEV_ID_SHOW, d->device_id);   /* id chỉ gồm ASCII */
+            lv_table_set_cell_value(s_table, r, 0, buf);
         } else {
-            snprintf(cell, sizeof(cell), "%d", d->rssi);
-            lv_table_set_cell_value(s_table, r, 3, cell);
-            snprintf(cell, sizeof(cell), "%" PRIu32 " s truoc", d->seen_ago_s);
-            lv_table_set_cell_value(s_table, r, 4, cell);
+            lv_table_set_cell_value(s_table, r, 0, d->device_id);
         }
+        lv_table_set_cell_value(s_table, r, 1, d->is_camera ? "Camera" : "Node");
+        lv_table_set_cell_value(s_table, r, DEV_COL_STATUS, "");   /* chỉ chấm màu — on_table_draw_end */
+        s_dev_row_link[r] = (int8_t)d->link;
+        if (d->has_rssi) {
+            snprintf(buf, sizeof(buf), "%d dBm", d->rssi);
+            lv_table_set_cell_value(s_table, r, 3, buf);
+        } else {
+            lv_table_set_cell_value(s_table, r, 3, "--");
+        }
+        fmt_last_seen(d->last_seen_ts, m->time_synced, buf, sizeof(buf));
+        lv_table_set_cell_value(s_table, r, 4, buf);
     }
+    lv_obj_invalidate(s_table);   /* chấm màu vẽ ngoài nội dung ô: đổi màu cũng phải vẽ lại */
+}
 
-    lv_label_set_text(s_lbl_status, m->status);
-    lv_obj_set_style_text_color(s_lbl_status, m->status_error ? COLOR_BAD : COLOR_MUTED, 0);
-
-    render_live(m);
+static void render(const model_t *m)
+{
+    if (m->page != s_shown_page) {
+        apply_page(m->page);   /* tầng trên đổi trang (gw_ui_show_page) */
+    }
+    render_header_footer(m);
+    render_nav(m);
+    render_camera(m);
+    render_room(m);
+    render_devices(m);
 }
 
 static void refresh_cb(lv_timer_t *timer)
@@ -520,9 +904,6 @@ static void refresh_cb(lv_timer_t *timer)
     char t[12];
     fmt_hms(synced ? (int64_t)time(NULL) : 0, t, sizeof(t));
     lv_label_set_text(s_lbl_clock, t);
-    if (!lv_obj_has_flag(s_live, LV_OBJ_FLAG_HIDDEN)) {
-        lv_label_set_text(s_live_lbl_clock, t);
-    }
     if (dirty) {
         render(&m);
     }
@@ -537,12 +918,15 @@ esp_err_t gw_ui_start(void)
     if (s_lock == NULL) {
         return ESP_ERR_NO_MEM;
     }
-    s_model.temperature = s_model.humidity = s_model.light = NAN;
-    strlcpy(s_model.status, "Dang khoi dong...", sizeof(s_model.status));
+    s_model.temperature = s_model.humidity = s_model.light = s_model.ac_temp = NAN;
+    for (int i = 0; i < ACT_COUNT; i++) {
+        s_model.act[i] = STATE_UNKNOWN;
+    }
+    s_model.page = GW_UI_PAGE_CAMERA;
+    strlcpy(s_model.status, "Đang khởi động...", sizeof(s_model.status));
 
-    /* Thiếu PSRAM thì màn hình vẫn chạy, chỉ không hiện được ảnh camera. */
-    slot_init(&s_live_slot, LIVE_W, LIVE_H, true);
-    slot_init(&s_thumb_slot, THUMB_W, THUMB_H, false);
+    /* Thiếu PSRAM thì màn hình vẫn chạy, chỉ không hiện được hình camera. */
+    slot_init(&s_live_slot, LIVE_W, LIVE_H);
 
     if (!gw_display_lock(-1)) {
         return ESP_FAIL;
@@ -550,12 +934,37 @@ esp_err_t gw_ui_start(void)
     build_screen();
     lv_timer_create(refresh_cb, REFRESH_MS, NULL);
     gw_display_unlock();
+    s_dirty = true;
     s_started = true;
+    if (!gw_display_touch_enabled()) {
+        ESP_LOGW(TAG, "touch is off — nav cannot be used (CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911 in lvgl_port.h)");
+    }
     ESP_LOGI(TAG, "UI ready (touch %s)", gw_display_touch_enabled() ? "on" : "off");
     return ESP_OK;
 }
 
 /* ---- API cho task khác -------------------------------------------------------------------------------- */
+
+void gw_ui_set_page_handler(gw_ui_page_cb_t cb, void *ctx)
+{
+    /* Callback được đọc trong task LVGL — đổi dưới khoá LVGL. */
+    bool locked = s_started && gw_display_lock(-1);
+    s_page_cb = cb;
+    s_page_ctx = ctx;
+    if (locked) {
+        gw_display_unlock();
+    }
+}
+
+void gw_ui_show_page(gw_ui_page_t page)
+{
+    if (!s_started || (int)page < 0 || (int)page >= GW_UI_PAGE_COUNT) {
+        return;
+    }
+    model_update_begin();
+    s_model.page = page;
+    model_update_end();
+}
 
 void gw_ui_set_status(const char *text, bool is_error)
 {
@@ -581,10 +990,31 @@ void gw_ui_set_network(bool wifi, const char *ip, bool server, bool time_synced)
     model_update_end();
 }
 
-static float json_float(const cJSON *data, const char *key)
+/* Số hoặc true/false → true và *out. */
+static bool json_number(const cJSON *data, const char *key, double *out)
 {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(data, key);
-    return cJSON_IsNumber(v) ? (float)v->valuedouble : NAN;
+    if (cJSON_IsNumber(v)) {
+        *out = v->valuedouble;
+        return true;
+    }
+    if (cJSON_IsBool(v)) {
+        *out = cJSON_IsTrue(v) ? 1.0 : 0.0;
+        return true;
+    }
+    return false;
+}
+
+/* Trạng thái thiết bị: ≤ 0 tắt/đóng, 1 bật/mở; rèm cho phép 2..100 (% mở). */
+static int16_t to_state(double v, bool percent)
+{
+    if (!(v > 0.0)) {   /* cả NaN */
+        return 0;
+    }
+    if (!percent || v <= 1.0) {
+        return 1;
+    }
+    return (int16_t)(v >= 100.0 ? 100 : v + 0.5);
 }
 
 void gw_ui_set_telemetry(const char *device_id, const char *payload, size_t len)
@@ -596,50 +1026,34 @@ void gw_ui_set_telemetry(const char *device_id, const char *payload, size_t len)
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
     const cJSON *ts = cJSON_GetObjectItemCaseSensitive(root, "sn_timestamp");
     if (cJSON_IsObject(data)) {
+        static const char *const act_keys[ACT_COUNT] = {"fan", "ac", "lamp", "curtain"};
+        double v;
         model_update_begin();
-        s_model.has_climate = true;
-        strlcpy(s_model.climate_dev, device_id ? device_id : "", sizeof(s_model.climate_dev));
-        s_model.temperature = json_float(data, "temperature");
-        s_model.humidity = json_float(data, "humidity");
-        s_model.light = json_float(data, "light");
-        s_model.climate_ts = cJSON_IsNumber(ts) ? (int64_t)ts->valuedouble : 0;
+        strlcpy(s_model.room_dev, device_id ? device_id : "", sizeof(s_model.room_dev));
+        /* Chỉ cập nhật trường có mặt: gói chỉ có trạng thái không xoá số đo, và ngược lại. */
+        if (json_number(data, "temperature", &v)) {
+            s_model.temperature = (float)v;
+        }
+        if (json_number(data, "humidity", &v)) {
+            s_model.humidity = (float)v;
+        }
+        if (json_number(data, "light", &v)) {
+            s_model.light = (float)v;
+        }
+        if (json_number(data, "ac_temp", &v)) {
+            s_model.ac_temp = (float)v;
+        }
+        for (int i = 0; i < ACT_COUNT; i++) {
+            if (json_number(data, act_keys[i], &v)) {
+                s_model.act[i] = to_state(v, i == ACT_CURTAIN);
+            }
+        }
+        if (cJSON_IsNumber(ts)) {
+            s_model.room_ts = (int64_t)ts->valuedouble;
+        }
         model_update_end();
     }
     cJSON_Delete(root);
-}
-
-void gw_ui_set_motion(const char *device_id, int64_t ts)
-{
-    if (!s_started) {
-        return;
-    }
-    model_update_begin();
-    s_model.motion_ts = ts;
-    model_update_end();
-}
-
-void gw_ui_set_snapshot(const char *device_id, size_t bytes, int64_t ts, bool uploaded)
-{
-    if (!s_started) {
-        return;
-    }
-    model_update_begin();
-    s_model.snap_bytes = bytes;
-    s_model.snap_ts = ts;
-    s_model.snap_uploaded = uploaded;
-    model_update_end();
-}
-
-esp_err_t gw_ui_set_snapshot_image(const uint8_t *jpeg, size_t len)
-{
-    if (!s_started) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    esp_err_t err = slot_show(&s_thumb_slot, s_thumb_img, s_thumb_empty, jpeg, len, THUMB_LOCK_MS);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "snapshot (%u bytes) not shown: %s", (unsigned)len, esp_err_to_name(err));
-    }
-    return err;
 }
 
 void gw_ui_set_devices(const gw_ui_device_t *list, size_t n)
@@ -658,41 +1072,19 @@ void gw_ui_set_devices(const gw_ui_device_t *list, size_t n)
     model_update_end();
 }
 
-void gw_ui_set_live_handler(gw_ui_live_cb_t cb, void *ctx)
-{
-    /* Callback được đọc trong task LVGL — đổi dưới khoá LVGL. */
-    bool locked = s_started && gw_display_lock(-1);
-    s_live_cb = cb;
-    s_live_ctx = ctx;
-    if (locked) {
-        gw_display_unlock();
-    }
-}
-
-void gw_ui_set_live_hint(const char *text)
+void gw_ui_set_live(gw_ui_live_state_t state)
 {
     if (!s_started) {
         return;
     }
     model_update_begin();
-    strlcpy(s_model.live_hint, text ? text : "", sizeof(s_model.live_hint));
-    model_update_end();
-}
-
-void gw_ui_set_live(gw_ui_live_state_t state, const char *device_id, uint32_t close_in_s)
-{
-    if (!s_started) {
-        return;
-    }
-    model_update_begin();
-    if (s_model.live_state == GW_UI_LIVE_OFF && state != GW_UI_LIVE_OFF) {
-        s_model.live_has_frame = false;   /* không hiện khung cũ của lần xem trước */
-        s_model.live_fps_x10 = 0;
+    if (state != GW_UI_LIVE_PLAYING && state != GW_UI_LIVE_RETRY) {
+        /* Mở lại / chờ camera: không hiện khung cũ của lần xem trước, đếm khung/giây lại từ đầu. */
         s_model.live_session++;
+        s_model.live_has_frame = false;
+        s_model.live_fps_x10 = 0;
     }
     s_model.live_state = state;
-    strlcpy(s_model.live_dev, device_id ? device_id : "", sizeof(s_model.live_dev));
-    s_model.live_close_in_s = close_in_s;
     model_update_end();
 }
 

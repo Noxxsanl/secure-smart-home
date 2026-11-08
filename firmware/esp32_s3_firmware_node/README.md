@@ -223,4 +223,5 @@ Chưa có trong [API_DESIGN](../../docs/API_DESIGN.md) §11, §14 Q4. Cần ch�
 |---|---|
 | `action` của node | `turn_on`, `turn_off` (đã có ở backend) + `params.channel` khi nhiều relay; `ir_send {code}`, `ir_learn {code}` (mới) |
 | `ts` trong `CMD` Gateway → Node | Gateway thêm `ts` (đã có giờ từ NTP/RTC); node kiểm ±30 s, sau đó bật `CONFIG_NODE_CMD_REQUIRE_TS` |
+| Trạng thái thiết bị trong telemetry `data` (màn hình Gateway, trang Phòng khách — đã đọc sẵn) | `fan`, `ac`, `lamp`: `0`/`1` (hoặc `false`/`true`); `ac_temp`: °C đặt; `curtain`: `0` đóng, `1` mở, `2..100` mở theo %. Đèn dùng `lamp` vì `light` đã là lux. Gửi chung với số đo hoặc một gói `TELEMETRY` riêng mỗi khi đổi trạng thái (gói chỉ có 5 trường này ~220 byte, dưới giới hạn 246); Gateway chỉ cập nhật trường có mặt. Quạt/đèn từ `drv_relay`, điều hoà/rèm là trạng thái node tự nhớ sau lệnh IR (không có phản hồi thật) |
 | Âm thanh | Mic/loa dùng cho việc gì (từ khoá đánh thức tại node, gửi giọng nói cho Agent, âm báo). ESP-NOW 250 byte/gói không hợp để truyền âm thanh liên tục; nếu cần thì đi Local AP của Gateway như Camera (IOT_NODE_NETWORK §5.2) |

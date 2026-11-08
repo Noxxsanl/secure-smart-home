@@ -63,7 +63,7 @@ menu "Gateway S3: services"
         config GW_CAMERA_LIVE_FS_VGA
             bool "VGA 640x480 (nét, ít khung/giây hơn)"
         config GW_CAMERA_LIVE_FS_QVGA
-            bool "QVGA 320x240, phóng x2 lên 640x480 (mượt hơn, kém nét)"
+            bool "QVGA 320x240, phóng lên khung 448x336 (mượt hơn, kém nét)"
     endchoice
 
     config GW_CAMERA_LIVE_QUALITY
@@ -71,32 +71,29 @@ menu "Gateway S3: services"
         range 10 30
         default 12
 
-    config GW_CAMERA_LIVE_ALWAYS
-        bool "Luôn hiện xem trực tiếp khi camera trực tuyến"
-        default n
+    choice GW_UI_START_PAGE
+        prompt "Trang hiện khi khởi động"
+        default GW_UI_START_PAGE_CAMERA
         help
-            Màn hình xem trực tiếp mở ngay khi camera vào Local AP và không tự đóng: luồng rớt thì tự nối lại; camera
-            mất hẳn thì về màn hình chính, tự mở lại khi camera vào lại (thử sau 5 s, lùi dần tới 60 s nếu hỏng liên
-            tiếp). Đóng bằng nút trên màn hình (khi bật cảm ứng) thì 2 phút sau mới tự mở lại.
-            Đổi lại: camera phát liên tục (nóng hơn) và màn hình chính bị che. Bật thì 2 tuỳ chọn thời gian bên
-            dưới không còn tác dụng. Mặc định của thiết kế là tắt (IOT_NODE_NETWORK §5.4: chỉ kéo luồng khi có
-            người xem); bộ demo bật trong sdkconfig.defaults vì chưa bật cảm ứng.
+            Màn hình có thanh nav 3 mục (Camera, Phòng khách, Thiết bị). Luồng camera chỉ chạy khi đang ở trang
+            Camera (IOT_NODE_NETWORK §5.4: chỉ kéo luồng khi có người xem).
+
+        config GW_UI_START_PAGE_CAMERA
+            bool "Camera (xem trực tiếp)"
+        config GW_UI_START_PAGE_ROOM
+            bool "Phòng khách"
+        config GW_UI_START_PAGE_DEVICES
+            bool "Danh sách thiết bị"
+    endchoice
 
     config GW_CAMERA_LIVE_ON_MOTION_S
-        int "Tự mở xem trực tiếp khi camera báo chuyển động (giây, 0 = tắt)"
+        int "Chuyển sang trang Camera khi có chuyển động, quay lại trang cũ sau (giây, 0 = không chuyển)"
         range 0 300
         default 30
         help
-            Camera cửa báo EVENT motion qua ESP-NOW → màn hình Gateway hiện luồng trực tiếp trong khoảng này, tính
-            từ lúc lên hình. Có chuyển động tiếp thì gia hạn.
-
-    config GW_CAMERA_LIVE_ON_BOOT_S
-        int "Mở xem trực tiếp khi camera vừa vào Local AP sau khởi động (giây, 0 = tắt)"
-        range 0 3600
-        default 30
-        help
-            Kiểm tra nhanh đường hình Camera → Gateway khi chưa bật cảm ứng và chưa nối PIR. Chỉ chạy 1 lần
-            sau mỗi lần khởi động Gateway; thời gian tính từ lúc lên hình.
+            Camera cửa báo EVENT motion qua ESP-NOW → màn hình tự chuyển sang trang Camera (bật luồng trực tiếp).
+            Còn chuyển động thì gia hạn; hết thời gian mà không ai chạm màn hình thì về trang đang xem trước đó.
+            Chạm vào nav thì huỷ việc tự quay lại.
 
     config GW_ESPNOW_ALLOW_UNENCRYPTED
         bool "[DEV] Cho peer ESP-NOW không mã hoá khi NVS thiếu LMK"

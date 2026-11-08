@@ -47,8 +47,9 @@ typedef struct {
 
 typedef struct {
     bool online;
-    int64_t last_seen_us;   /* esp_timer_get_time(); 0 = chưa thấy */
-    int rssi;
+    int64_t last_seen_us;     /* esp_timer_get_time(); 0 = chưa thấy từ lúc Gateway khởi động */
+    int64_t last_seen_unix;   /* giờ unix lần cuối nhận gói hợp lệ, nhớ qua khởi động lại (NVS "seen"); 0 = chưa từng */
+    int rssi;                 /* dBm của gói ESP-NOW gần nhất — chỉ có nghĩa khi last_seen_us != 0 */
     uint32_t uptime_s;
     char fw_version[GW_FW_VERSION_MAX + 1];
 } gw_device_status_t;
@@ -81,6 +82,14 @@ void gw_registry_set_heartbeat(size_t idx, uint32_t uptime_s, const char *fw_ver
 
 /** Bản sao trạng thái; online tính theo CONFIG_GW_NODE_OFFLINE_S. */
 bool gw_registry_status(size_t idx, gw_device_status_t *out);
+
+/**
+ * Ghi "lần cuối thấy" của từng thiết bị xuống NVS (namespace "seen", khoá "s<i>" = giờ unix, "h<i>" = băm device_id
+ * để bỏ giá trị cũ khi danh sách nodes đổi). Gọi định kỳ (~1 phút) từ 1 task. Để không mòn flash: thiết bị đang trực
+ * tuyến chỉ ghi khi cách lần ghi trước ≥ 5 phút; mất kết nối thì ghi đúng mốc cuối 1 lần. force = ghi mọi giá trị mới
+ * (VD trước khi khởi động lại). Cần Gateway có giờ.
+ */
+void gw_registry_save_seen(bool force);
 
 #ifdef __cplusplus
 }
