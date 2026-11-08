@@ -2,9 +2,9 @@
 
 Firmware ESP-IDF v5.4.4 cho ESP32-CAM AI-Thinker (OV2640, PSRAM 4 MB). Camera chỉ nối **Local AP của Gateway**, không bao giờ biết WiFi thật của nhà.
 
-Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.2, §5.2, §5.4, §6.2. Hợp đồng: [API_DESIGN](../../docs/API_DESIGN.md) §10.2, §10.3, §11. Lệnh build/nạp chi tiết: [ESP_IDF_BUILD](../../docs/guides/ESP_IDF_BUILD.md) §2.3.
+Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.2, §5.2, §5.4, §6.2. Hợp đồng: [API_DESIGN](../../docs/API_DESIGN.md) §10.2, §10.3, §11. Lệnh build/nạp chi tiết: [ESP_IDF_BUILD](../../docs/guides/ESP_IDF_BUILD.md) §2.3. Từng bước chuẩn bị + nạp cùng Gateway để xem hình trên màn hình Gateway: [NAP_CAMERA_GATEWAY](../../docs/guides/NAP_CAMERA_GATEWAY.md).
 
-> **Đã build, chưa chạy trên board.** `idf.py build` (ESP-IDF 5.4.4, 2026-11-07) đạt, không cảnh báo trong code dự án; `esp32_cam.bin` 0x110590 byte (~1,07 MB), còn trống 43% slot OTA 1920K. Chưa nạp lên ESP32-CAM. Gateway S3 chưa có phía nhận (`/local/camera/snapshot`, ESP-NOW), nên luồng đầu-cuối chưa kiểm được.
+> **Đã build, chưa chạy trên board.** `idf.py build` (ESP-IDF 5.4.4, 2026-11-07) đạt, không cảnh báo trong code dự án; `esp32_cam.bin` 0x110590 byte (~1,07 MB), còn trống 43% slot OTA 1920K. Chưa nạp lên ESP32-CAM. Phía Gateway S3 (`firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting`) đã có code nhận ảnh `/local/camera/snapshot` (hiện thu nhỏ trên màn hình), ESP-NOW, và kéo `GET /stream` để xem trực tiếp trên LCD — cũng mới build, chưa nạp, nên luồng đầu-cuối chưa kiểm trên board.
 
 ## Đã có / chưa có
 
@@ -12,6 +12,7 @@ Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.2,
 |---|---|---|
 | Khởi tạo OV2640, SVGA, JPEG q=12, 2 bộ đệm PSRAM, `GRAB_LATEST` | Có | `drivers/src/cam_camera.c` |
 | PIR GPIO13: bỏ qua 30 s đầu, nghỉ 10 s giữa 2 sự kiện | Có | `drivers/src/cam_pir.c` |
+| Đèn flash GPIO4 nháy báo board đang chạy: sáng 100 ms mỗi 1 s, độ sáng 20 % (PWM LEDC timer 1/kênh 1) | Có — chỉnh/tắt ở menu *ESP32-CAM: drivers* | `drivers/src/cam_led.c` |
 | Đọc identity, Local AP, MAC Gateway, LMK từ NVS | Có | `services/src/cam_config.c` |
 | WiFi STA vào Local AP, WPA2 trở lên, tự nối lại (1 → 30 s) | Có | `services/src/cam_wifi.c` |
 | ESP-NOW: PING, HEARTBEAT 30 s, EVENT motion, CMD `snapshot`, CMD_ACK, TIME_SYNC | Có, mã `type` là **đề xuất** | `services/src/cam_espnow.c`, `../common/espnow_proto` |
@@ -19,13 +20,13 @@ Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.2,
 | `GET /stream` MJPEG, kiểm HMAC ±300 s, 1 luồng (409), VGA/QVGA | Có | `services/src/cam_stream.c` |
 | Nối sự kiện: chuyển động → EVENT + chụp; lệnh → chụp → CMD_ACK | Có | `application/src/cam_app.c` |
 | HMAC dùng chung `HMAC-SHA256(secret, "<device_id>:<unix_ts>")` | Có | `../common/security_manager` |
-
-Đường dẫn trong bảng tính từ `components/`.
 | Ghép nối ECDH (`PAIR_*`), nhận LMK + Local AP qua ESP-NOW | **Chưa**: đang nạp tay qua NVS | — |
 | PMK ESP-NOW chung | **Chưa**: dùng PMK mặc định của ESP-IDF | — |
-| Đèn flash GPIO4 khi tối, LED báo lỗi | **Chưa** | — |
+| Đèn flash bật khi chụp trong tối, LED báo lỗi (nháy kiểu khác khi mất kết nối) | **Chưa** | — |
 | Giữ ảnh khi mất Gateway, gửi lại sau | **Chưa** | — |
 | OTA, NVS Encryption | **Chưa** (bảng phân vùng đã có 2 slot OTA) | — |
+
+Đường dẫn trong bảng tính từ `components/`.
 
 ## Cấu trúc
 
@@ -36,11 +37,11 @@ esp32_cam/
 │   ├── CMakeLists.txt           # PRIV_REQUIRES application
 │   └── main.c                   # app_main() → cam_app_start()
 ├── components/
-│   ├── drivers/                 # phần cứng: OV2640, PIR
+│   ├── drivers/                 # phần cứng: OV2640, PIR, đèn flash GPIO4
 │   │   ├── CMakeLists.txt
-│   │   ├── Kconfig.projbuild    # menu "ESP32-CAM: drivers" (GPIO PIR, chất lượng JPEG…)
+│   │   ├── Kconfig.projbuild    # menu "ESP32-CAM: drivers" (GPIO PIR, chất lượng JPEG, nháy đèn flash…)
 │   │   ├── idf_component.yml    # espressif/esp32-camera ^2.0.0 (require: public)
-│   │   ├── include/             # cam_camera.h, cam_pir.h
+│   │   ├── include/             # cam_camera.h, cam_pir.h, cam_led.h
 │   │   └── src/
 │   ├── services/                # NVS, đồng hồ, WiFi Local AP, ESP-NOW, gửi ảnh, luồng MJPEG
 │   │   ├── CMakeLists.txt
@@ -117,6 +118,7 @@ idf.py -p COM6 flash monitor
 Log đúng:
 
 ```
+I (...) cam_led: flash LED GPIO4: on 100 ms every 1000 ms, brightness 20%
 I (...) cam_config: device_id=<id> local_ap=<ssid> gateway_mac=set lmk=set
 I (...) cam_camera: OV2640 ready (SVGA, q=12)
 I (...) cam_wifi: connected, ip=192.168.4.x gateway=192.168.4.1
@@ -153,7 +155,8 @@ Mở 2 luồng cùng lúc thì luồng thứ hai nhận `409`.
 | Hiện tượng | Nguyên nhân thường gặp |
 |---|---|
 | `camera init failed: ESP_ERR_NOT_FOUND` | Cáp camera lỏng, sai sơ đồ chân (module không phải AI-Thinker) |
-| Reset liên tục, `Brownout detector was triggered` | Nguồn 5 V yếu. Dùng adapter ≥ 2 A, tụ lọc. **Không** tắt brownout |
+| Reset liên tục, `Brownout detector was triggered` | Nguồn 5 V yếu. Dùng adapter ≥ 2 A, tụ lọc. **Không** tắt brownout. Nếu chỉ reset đúng lúc đèn flash nháy: giảm `Độ sáng đèn khi nháy` hoặc tắt `Nháy đèn flash theo chu kỳ` (menu *ESP32-CAM: drivers*) |
+| Khung hình/ảnh chụp lúc sáng lúc tối theo nhịp 1 s | Đèn flash nằm cạnh ống kính nên chiếu sáng cảnh mỗi lần nháy. Giảm độ sáng hoặc tắt nháy |
 | `not provisioned` | Chưa nạp `nvs_dev.bin`, hoặc sai tên namespace/key |
 | `/stream` trả 503 | Camera chưa có giờ: chưa nhận `TIME_SYNC` từ Gateway, hoặc chưa bật SNTP dev |
 | Gateway trả 401 cho ảnh | Sai `device_secret`, hoặc giờ camera lệch > 300 s |
@@ -163,5 +166,5 @@ Mở 2 luồng cùng lúc thì luồng thứ hai nhận `409`.
 
 - Giá trị số của `type` ESP-NOW trong `../common/espnow_proto/include/espnow_proto.h` (docs mới chốt tên).
 - Gateway trả `TIME_SYNC` khi nhận `PING` và sau mỗi `HEARTBEAT`.
-- `live_start` / `live_stop` do Gateway xử lý (mở/đóng `GET /stream`), camera trả `CMD_ACK error` nếu nhận được.
+- `live_start` / `live_stop` do Gateway xử lý (mở/đóng `GET /stream`), camera trả `CMD_ACK error` nếu nhận được. Gateway đã kéo luồng với `fs` và `q` theo menuconfig của nó (mặc định `vga`, `q=12`); cả ảnh chụp lẫn luồng đều cần camera **có giờ** (TIME_SYNC qua ESP-NOW), chưa có thì camera trả `503` và không ký được ảnh.
 - Camera gửi `CMD_ACK` cho `snapshot` **sau** khi Gateway trả 201 (thời gian chờ gửi 2,5 s, dưới mốc 3 s Gateway chờ ack).

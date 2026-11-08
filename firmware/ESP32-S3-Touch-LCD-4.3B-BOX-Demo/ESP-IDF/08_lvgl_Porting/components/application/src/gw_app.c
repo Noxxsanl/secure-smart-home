@@ -23,6 +23,7 @@
 #include "gw_rtc.h"
 
 #include "gw_api.h"
+#include "gw_camera_live.h"
 #include "gw_config.h"
 #include "gw_envelope.h"
 #include "gw_espnow.h"
@@ -51,6 +52,18 @@ static const char *TAG = "gw_app";
 #define ACK_TIMEOUT_US ((int64_t)CONFIG_GW_NODE_ACK_TIMEOUT_MS * 1000)
 #define MOTION_WAIT_US ((int64_t)CONFIG_GW_MOTION_SNAPSHOT_WAIT_S * 1000 * 1000)
 #define LOCAL_TZ "<+07>-7"        /* giờ Việt Nam cho màn hình; giờ hệ thống và HMAC vẫn là UTC */
+#define LIVE_MANUAL_S 120         /* mở bằng nút: tự đóng sau 2 phút (màn hình chưa có hẹn giờ tắt — §3.3) */
+#define LIVE_FOREVER_S UINT32_MAX /* "không tự đóng" */
+#define LIVE_FOREVER_US INT64_MAX
+#define LIVE_REOPEN_MIN_US (5 * 1000 * 1000LL)    /* chế độ luôn hiện: hỏng thì thử mở lại sau 5 s, */
+#define LIVE_REOPEN_MAX_US (60 * 1000 * 1000LL)   /* hỏng liên tiếp thì lùi dần tới 60 s */
+#define STATUS_MAX 96
+
+#if CONFIG_GW_CAMERA_LIVE_ALWAYS
+#define LIVE_ALWAYS 1
+#else
+#define LIVE_ALWAYS 0
+#endif
 
 /* ---- sự kiện từ các task khác → task gw_app ----------------------------------------------------------- */
 
@@ -61,6 +74,8 @@ typedef enum {
     EV_SNAPSHOT,
     EV_DEVICE_CMD,
     EV_GATEWAY_CMD,
+    EV_LIVE_UI,      /* chạm nút xem trực tiếp / đóng */
+    EV_LIVE_STATE,   /* gw_camera_live đổi trạng thái */
 } ev_type_t;
 
 typedef struct {
@@ -94,6 +109,15 @@ typedef struct {
             char command_id[ID_MAX + 1];
             char action[ACTION_MAX + 1];
         } gcmd;
+        struct {
+            bool open;
+        } lui;
+        struct {
+            size_t idx;
+            gw_live_state_t state;
+            gw_live_err_t err;
+            int http_status;
+        } lst;
     };
 } app_event_t;
 
@@ -138,6 +162,19 @@ static bool s_api_ok;
 static char s_home_id[GW_HOME_ID_MAX + 1];
 static pending_t s_pending[PENDING_MAX];
 static motion_t s_motion[GW_REGISTRY_MAX];
+
+/* Xem trực tiếp (chỉ task gw_app): camera đang xem, hạn đóng, trạng thái đang hiện. */
+static int s_live_idx = -1;
+static int64_t s_live_until_us;              /* LIVE_FOREVER_US = không tự đóng */
+static uint32_t s_live_seconds;              /* thời gian xin mở — tính lại từ khung đầu tiên */
+static bool s_live_counting;                 /* đã lên hình ở lần mở này (bắt đầu đếm) */
+static gw_ui_live_state_t s_live_ui = GW_UI_LIVE_OFF;
+static bool s_live_boot_done;
+static int64_t s_live_reopen_at_us;          /* chế độ luôn hiện: chưa mở lại trước thời điểm này */
+static int s_live_failures;                  /* chế độ luôn hiện: số lần hỏng liên tiếp */
+static char s_ready_status[STATUS_MAX];   /* dòng trạng thái lúc khởi động xong — khôi phục khi luồng chạy lại */
+static bool s_ready_status_error;
+static bool s_status_by_live;              /* dòng trạng thái đang là lỗi xem trực tiếp */
 
 /* ==== callback từ services (chạy trong task của services — chỉ chép và đẩy vào hàng đợi) ================= */
 
@@ -210,6 +247,25 @@ static void on_mqtt_connection(bool connected, void *ctx)
     ESP_LOGI(TAG, "server %s", connected ? "online" : "offline");
 }
 
+/* Task gw_live: giải nén ngay tại đây (không qua hàng đợi) — camera tự bỏ khung cũ khi Gateway đọc chậm. */
+static void on_live_frame(size_t idx, const uint8_t *jpeg, size_t len, void *ctx)
+{
+    gw_ui_live_frame(jpeg, len);
+}
+
+static void on_live_state(size_t idx, gw_live_state_t state, gw_live_err_t err, int http_status, void *ctx)
+{
+    app_event_t ev = {.type = EV_LIVE_STATE, .lst = {.idx = idx, .state = state, .err = err, .http_status = http_status}};
+    post(&ev, "live state");
+}
+
+/* Task LVGL (đang giữ khoá LVGL) — chỉ đẩy vào hàng đợi. */
+static void on_ui_live(bool open, void *ctx)
+{
+    app_event_t ev = {.type = EV_LIVE_UI, .lui = {.open = open}};
+    post(&ev, "live request");
+}
+
 /* ==== xử lý trong task gw_app ============================================================================ */
 
 static void learn_home(const char *home)
@@ -249,6 +305,229 @@ static void publish_camera_event(const char *home, const char *device_id, int64_
     free(json);
 }
 
+/* ---- xem trực tiếp camera (IOT_NODE_NETWORK §5.4) ---------------------------------------------------- */
+
+static int first_camera(void)
+{
+    for (size_t i = 0; i < gw_registry_count(); i++) {
+        if (gw_registry_get(i)->kind == GW_DEV_CAMERA) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* Chế độ luôn hiện (CONFIG_GW_CAMERA_LIVE_ALWAYS): mọi cách mở đều không tự đóng. */
+static uint32_t live_seconds(uint32_t seconds)
+{
+    return LIVE_ALWAYS ? LIVE_FOREVER_S : seconds;
+}
+
+static int64_t live_deadline(uint32_t seconds)
+{
+    return seconds == LIVE_FOREVER_S ? LIVE_FOREVER_US : esp_timer_get_time() + (int64_t)seconds * 1000000;
+}
+
+static void live_ui_update(void)
+{
+    if (s_live_idx < 0) {
+        gw_ui_set_live(GW_UI_LIVE_OFF, NULL, 0);
+        return;
+    }
+    uint32_t close_in = 0;   /* 0 = không hiện đếm ngược */
+    if (s_live_until_us != LIVE_FOREVER_US) {
+        int64_t left_us = s_live_until_us - esp_timer_get_time();
+        close_in = left_us > 0 ? (uint32_t)((left_us + 999999) / 1000000) : 0;
+    }
+    gw_ui_set_live(s_live_ui, gw_registry_get((size_t)s_live_idx)->device_id, close_in);
+}
+
+/*
+ * Mở (hoặc gia hạn) xem trực tiếp camera idx trong `seconds` giây (LIVE_FOREVER_S = không tự đóng). Thời gian được
+ * tính lại từ lúc lên hình (handle_live_state), nên mấy giây kết nối không ăn vào thời gian xem.
+ */
+static void live_open(int idx, uint32_t seconds, const char *why)
+{
+    if (idx < 0 || seconds == 0) {
+        return;
+    }
+    const gw_device_info_t *dev = gw_registry_get((size_t)idx);
+    const int64_t until = live_deadline(seconds);
+    if (s_live_idx == idx) {
+        if (until > s_live_until_us) {
+            s_live_until_us = until;   /* đang xem: chỉ gia hạn, không mở lại kết nối */
+        }
+        if (seconds > s_live_seconds) {
+            s_live_seconds = seconds;
+        }
+        live_ui_update();
+        return;
+    }
+    if (gw_camera_live_start((size_t)idx) != ESP_OK) {
+        ESP_LOGW(TAG, "live view of %s unavailable", dev->device_id);
+        return;
+    }
+    s_live_idx = idx;
+    s_live_until_us = until;
+    s_live_seconds = seconds;
+    s_live_counting = false;
+    s_live_ui = GW_UI_LIVE_CONNECTING;
+    if (seconds == LIVE_FOREVER_S) {
+        ESP_LOGI(TAG, "live view %s, no time limit (%s)", dev->device_id, why);
+    } else {
+        ESP_LOGI(TAG, "live view %s for %u s (%s)", dev->device_id, (unsigned)seconds, why);
+    }
+    live_ui_update();
+}
+
+static void live_close(const char *why)
+{
+    if (s_live_idx < 0) {
+        return;
+    }
+    ESP_LOGI(TAG, "live view closed (%s)", why);
+    gw_camera_live_stop();
+    s_live_idx = -1;
+    live_ui_update();
+}
+
+/* Hướng dẫn trên dòng trạng thái khi không mở được luồng (bất biến 10: không hiện mã thô). */
+static void live_show_failure(gw_live_err_t err, int http_status)
+{
+    char msg[STATUS_MAX];
+    switch (err) {
+    case GW_LIVE_ERR_NOT_ON_AP:
+        strlcpy(msg, "Camera chua vao Local AP: kiem tra nguon va wifi/ssid, password cua camera", sizeof(msg));
+        break;
+    case GW_LIVE_ERR_NO_TIME:
+        strlcpy(msg, "Gateway chua co gio (NTP/RTC) nen chua mo duoc luong camera", sizeof(msg));
+        break;
+    case GW_LIVE_ERR_AUTH:
+        strlcpy(msg, "Camera tu choi chu ky: secret camera trong NVS Gateway (nodes) khong khop", sizeof(msg));
+        break;
+    case GW_LIVE_ERR_BUSY:
+        strlcpy(msg, "Camera dang phat cho ket noi khac - thu lai sau it giay", sizeof(msg));
+        break;
+    case GW_LIVE_ERR_CAM_NO_TIME:
+        strlcpy(msg, "Camera chua co gio: kiem tra ghep noi ESP-NOW (gateway_mac, LMK)", sizeof(msg));
+        break;
+    case GW_LIVE_ERR_HTTP:
+        snprintf(msg, sizeof(msg), "Camera tra loi HTTP %d khi mo luong truc tiep", http_status);
+        break;
+    default:
+        strlcpy(msg, "Mat ket noi camera - kiem tra nguon va song WiFi cua camera", sizeof(msg));
+        break;
+    }
+    ESP_LOGW(TAG, "live view failed: %s", msg);
+    gw_ui_set_status(msg, true);
+    s_status_by_live = true;
+}
+
+static void handle_live_state(const app_event_t *ev)
+{
+    if ((int)ev->lst.idx != s_live_idx) {
+        return;   /* sự kiện của lần xem trước / camera khác */
+    }
+    switch (ev->lst.state) {
+    case GW_LIVE_CONNECTING:
+        s_live_ui = GW_UI_LIVE_CONNECTING;
+        break;
+    case GW_LIVE_STREAMING:
+        s_live_ui = GW_UI_LIVE_PLAYING;
+        s_live_failures = 0;
+        if (!s_live_counting) {
+            /* Khung đầu tiên của lần mở này: đếm thời gian xem từ đây, không tính lúc kết nối. */
+            s_live_counting = true;
+            const int64_t from_first_frame = live_deadline(s_live_seconds);
+            if (from_first_frame > s_live_until_us) {
+                s_live_until_us = from_first_frame;
+            }
+        }
+        if (s_status_by_live) {
+            gw_ui_set_status(s_ready_status, s_ready_status_error);
+            s_status_by_live = false;
+        }
+        break;
+    case GW_LIVE_RETRYING:
+        s_live_ui = GW_UI_LIVE_RETRY;
+        break;
+    case GW_LIVE_FAILED: {
+        live_show_failure(ev->lst.err, ev->lst.http_status);
+        s_live_idx = -1;   /* service đã tự dừng */
+        /* Luôn hiện: thử mở lại sau 5, 10, 20… tối đa 60 s (không nháy màn hình liên tục khi lỗi cấu hình). */
+        int64_t wait_us = LIVE_REOPEN_MIN_US << (s_live_failures < 4 ? s_live_failures : 4);
+        if (wait_us > LIVE_REOPEN_MAX_US) {
+            wait_us = LIVE_REOPEN_MAX_US;
+        }
+        s_live_failures++;
+        s_live_reopen_at_us = esp_timer_get_time() + wait_us;
+        break;
+    }
+    case GW_LIVE_STOPPED:
+        return;   /* do chính gw_app dừng — đã cập nhật màn hình */
+    }
+    live_ui_update();
+}
+
+static void handle_live_ui(const app_event_t *ev)
+{
+    if (!ev->lui.open) {
+        live_close("closed on screen");
+        if (LIVE_ALWAYS) {
+            /* Người dùng chủ động đóng: chế độ luôn hiện chờ LIVE_MANUAL_S rồi mới tự mở lại. */
+            s_live_reopen_at_us = esp_timer_get_time() + (int64_t)LIVE_MANUAL_S * 1000000;
+        }
+        return;
+    }
+    int cam = first_camera();
+    if (cam < 0) {
+        gw_ui_set_status("Chua ghep camera nao: them nodes/<i>_kind = camera vao NVS (README)", true);
+        return;
+    }
+    live_open(cam, live_seconds(LIVE_MANUAL_S), "opened on screen");
+}
+
+/* Camera đã vào Local AP và Gateway ký được yêu cầu (có giờ) → mở luồng mới có nghĩa. */
+static int camera_reachable(void)
+{
+    int cam = first_camera();
+    esp_ip4_addr_t ip;
+    if (cam < 0 || !gw_time_is_synced() || !gw_wifi_ap_client_ip(gw_registry_get((size_t)cam)->mac, &ip)) {
+        return -1;
+    }
+    return cam;
+}
+
+/* 1 lần sau khởi động: camera vừa vào Local AP → mở xem thử để thấy ngay đường hình (Kconfig). */
+static void live_boot_check(void)
+{
+    if (s_live_boot_done) {
+        return;
+    }
+    if (LIVE_ALWAYS || CONFIG_GW_CAMERA_LIVE_ON_BOOT_S == 0 || first_camera() < 0) {
+        s_live_boot_done = true;   /* chế độ luôn hiện đã lo việc này */
+        return;
+    }
+    int cam = camera_reachable();
+    if (cam < 0) {
+        return;   /* chưa ký được / camera chưa vào Local AP — thử lại ở lần sau */
+    }
+    s_live_boot_done = true;
+    live_open(cam, CONFIG_GW_CAMERA_LIVE_ON_BOOT_S, "camera joined local AP");
+}
+
+/* Chế độ luôn hiện: camera trực tuyến là mở; luồng hỏng hẳn thì thử lại theo s_live_reopen_at_us. */
+static void live_always_check(void)
+{
+    if (!LIVE_ALWAYS || s_live_idx >= 0 || esp_timer_get_time() < s_live_reopen_at_us) {
+        return;
+    }
+    int cam = camera_reachable();
+    if (cam >= 0) {
+        live_open(cam, LIVE_FOREVER_S, "always on");
+    }
+}
+
 static void handle_telemetry(const app_event_t *ev)
 {
     const gw_device_info_t *dev = gw_registry_get(ev->tel.idx);
@@ -280,6 +559,9 @@ static void handle_node_event(const app_event_t *ev)
     if (dev->kind == GW_DEV_CAMERA && strcmp(ev->nev.event, "motion") == 0) {
         s_motion[ev->nev.idx] = (motion_t){.active = true, .ts = ev->nev.ts, .since_us = esp_timer_get_time()};
         gw_ui_set_motion(dev->device_id, ev->nev.ts);
+        if (CONFIG_GW_CAMERA_LIVE_ON_MOTION_S > 0) {
+            live_open((int)ev->nev.idx, live_seconds(CONFIG_GW_CAMERA_LIVE_ON_MOTION_S), "motion");
+        }
         return;
     }
     ESP_LOGI(TAG, "event %s from %s — not forwarded yet", ev->nev.event, dev->device_id);
@@ -305,7 +587,7 @@ static void handle_snapshot(const app_event_t *ev)
     gw_snapshot_t snap = ev->snap;
     const gw_device_info_t *dev = gw_registry_get(snap.camera_idx);
     gw_ui_set_snapshot(dev->device_id, snap.len, snap.ts, false);
-    /* TODO: giải nén JPEG (esp_new_jpeg) để hiện ảnh lên màn hình Camera (IOT_NODE_NETWORK §5.4). */
+    gw_ui_set_snapshot_image(snap.jpeg, snap.len);   /* giải nén thu nhỏ ở đây, trước khi giao ảnh cho uplink */
 
     bool with_event = snap.trigger == GW_SNAP_MOTION;
     int64_t event_ts = snap.ts;
@@ -343,7 +625,8 @@ static void handle_device_cmd(const app_event_t *ev)
         return;
     }
     if (gw_registry_get((size_t)idx)->kind == GW_DEV_CAMERA && strcmp(action, "snapshot") != 0) {
-        /* live_start / live_stop: Gateway kéo GET /stream của camera — chưa làm (IOT_NODE_NETWORK §5.4, §5.5) */
+        /* live_start / live_stop từ Server = xem từ xa trên Mobile (IOT_NODE_NETWORK §5.5): cần chuyển tiếp khung
+         * lên Backend — chưa làm. Xem trên màn hình Gateway thì gw_camera_live đã kéo GET /stream (§5.4). */
         ESP_LOGW(TAG, "command %s: camera action %s not supported yet", cmd, action);
         publish_ack(home, dev_id, cmd, false, -1);
         return;
@@ -471,9 +754,17 @@ static void tick(void)
             publish_camera_event(s_home_id, gw_registry_get(i)->device_id, m->ts, NULL);
         }
     }
+    if (s_live_idx >= 0 && now_us >= s_live_until_us) {
+        live_close("time is up");
+    }
     if (now_us - last_net >= NET_REFRESH_US) {
         last_net = now_us;
         refresh_network_ui();
+        live_boot_check();
+        live_always_check();
+        if (s_live_idx >= 0) {
+            live_ui_update();   /* đếm ngược "tu dong dong sau N s" */
+        }
     }
     if (now_us - last_dev >= DEVICES_REFRESH_US) {
         last_dev = now_us;
@@ -508,6 +799,12 @@ static void app_task(void *arg)
                 break;
             case EV_GATEWAY_CMD:
                 handle_gateway_cmd(&ev);
+                break;
+            case EV_LIVE_UI:
+                handle_live_ui(&ev);
+                break;
+            case EV_LIVE_STATE:
+                handle_live_state(&ev);
                 break;
             }
         }
@@ -611,6 +908,16 @@ esp_err_t gw_app_start(void)
     if (gw_local_http_start(on_snapshot, NULL) != ESP_OK) {
         gw_ui_set_status("Khong mo duoc cong nhan anh camera - kiem tra log", true);
     }
+    const gw_camera_live_callbacks_t lcb = {.on_frame = on_live_frame, .on_state = on_live_state};
+    if (gw_camera_live_init(&lcb) != ESP_OK) {
+        gw_ui_set_status("Thieu bo nho cho luong camera - kiem tra log", true);
+    }
+    gw_ui_set_live_handler(on_ui_live, NULL);
+    if (!gw_display_touch_enabled()) {
+        gw_ui_set_live_hint(LIVE_ALWAYS                         ? "Xem truc tiep: tu mo\nkhi camera truc tuyen"
+                            : CONFIG_GW_CAMERA_LIVE_ON_MOTION_S > 0 ? "Xem truc tiep: tu mo\nkhi co chuyen dong"
+                                                                    : "Bat cam ung de\nxem truc tiep");
+    }
 
     s_api_ok = gw_api_init(s_cfg.api_url) == ESP_OK;
     bool mqtt_ok = false;
@@ -627,17 +934,20 @@ esp_err_t gw_app_start(void)
     /* Khởi tạo xong → xác nhận bản firmware này để bootloader không rollback. */
     esp_ota_mark_app_valid_cancel_rollback();
 
-    char status[96];
     if (!s_cfg.has_wifi) {
-        snprintf(status, sizeof(status), "Chua co WiFi router (NVS wifi/ssid): chi chay Local AP, %u thiet bi",
-                 (unsigned)gw_registry_count());
-        gw_ui_set_status(status, true);
+        snprintf(s_ready_status, sizeof(s_ready_status),
+                 "Chua co WiFi router (NVS wifi/ssid): chi chay Local AP, %u thiet bi", (unsigned)gw_registry_count());
+        s_ready_status_error = true;
     } else if (!mqtt_ok) {
-        gw_ui_set_status("Khong ket noi duoc Server: thieu certs/mqtt_ca.crt hoac sai cloud/mqtt_uri", true);
+        strlcpy(s_ready_status, "Khong ket noi duoc Server: thieu certs/mqtt_ca.crt hoac sai cloud/mqtt_uri",
+                sizeof(s_ready_status));
+        s_ready_status_error = true;
     } else {
-        snprintf(status, sizeof(status), "San sang - %u thiet bi da ghep", (unsigned)gw_registry_count());
-        gw_ui_set_status(status, false);
+        snprintf(s_ready_status, sizeof(s_ready_status), "San sang - %u thiet bi da ghep",
+                 (unsigned)gw_registry_count());
+        s_ready_status_error = false;
     }
+    gw_ui_set_status(s_ready_status, s_ready_status_error);
     ESP_LOGI(TAG, "gateway started");
     return ESP_OK;
 }

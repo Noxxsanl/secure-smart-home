@@ -9,6 +9,7 @@
 #include "cam_camera.h"
 #include "cam_config.h"
 #include "cam_espnow.h"
+#include "cam_led.h"
 #include "cam_pir.h"
 #include "cam_snapshot.h"
 #include "cam_stream.h"
@@ -67,6 +68,14 @@ static esp_err_t init_nvs(void)
 esp_err_t cam_app_start(void)
 {
     ESP_LOGI(TAG, "ESP32-CAM firmware %s", esp_app_get_description()->version);
+
+#if CONFIG_CAM_LED_BLINK
+    /* Bật đầu tiên: kể cả khi thiếu NVS/camera hỏng, đèn vẫn nháy cho biết board đang chạy. */
+    if (cam_led_blink_start(CONFIG_CAM_LED_BLINK_PERIOD_MS, CONFIG_CAM_LED_BLINK_ON_MS,
+                            CONFIG_CAM_LED_BRIGHTNESS_PCT) != ESP_OK) {
+        ESP_LOGW(TAG, "flash LED blink unavailable");
+    }
+#endif
 
     esp_err_t err = init_nvs();
     if (err != ESP_OK) {

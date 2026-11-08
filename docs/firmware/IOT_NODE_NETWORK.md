@@ -292,7 +292,7 @@ X-Signature: HMAC-SHA256(secret_camera, "<device_id>:<unix_ts>")
 | Bộ đệm camera | `fb_count = 2`, `grab_mode = CAMERA_GRAB_LATEST` | Luôn gửi khung mới nhất, bỏ khung cũ khi mạng chậm thay vì dồn trễ |
 
 **Phía Gateway hiển thị:**
-- ESP32-S3 **không có bộ giải mã JPEG phần cứng**, nên giải nén bằng phần mềm. Dùng component `esp_new_jpeg` của Espressif (tối ưu cho S3) hoặc `esp_jpeg`, xuất RGB565 rồi đưa vào `lv_image`/canvas của LVGL.
+- ESP32-S3 **không có bộ giải mã JPEG phần cứng**, nên giải nén bằng phần mềm, xuất RGB565 rồi đưa vào `lv_image`/canvas của LVGL. Bản đầu dùng TJpgDec có sẵn trong ROM S3 (bộ mà `esp_jpeg`/`esp32-camera` dùng, không thêm thư viện); nếu đo trên board không đạt số khung/giây thì chuyển sang `esp_new_jpeg` (tối ưu SIMD cho S3).
 - Hai bộ đệm RGB565 640×480 (~600 KB mỗi bộ) trong PSRAM: giải nén vào bộ này trong khi LVGL vẽ bộ kia. Tổng PSRAM cho luồng + framebuffer LCD khoảng 3 MB / 8 MB.
 - Giải nén chạy ở task riêng trên nhân 1. Nếu giải nén không kịp, bỏ khung — không xếp hàng.
 
@@ -425,7 +425,7 @@ Khi mất Internet:
 
 | Project | Thư mục | Target | Thành phần chính |
 |---|---|---|---|
-| Gateway | `firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting` (dựng trên ví dụ LVGL của Waveshare; bản sơ bộ, xem README trong thư mục) | `esp32s3` | WiFi STA + SoftAP, ESP-NOW, esp-mqtt TLS, HTTP server cục bộ (nhận ảnh), HTTP client kéo luồng MJPEG, giải nén JPEG (`esp_new_jpeg`), HTTPS/WebSocket client, LVGL + driver LCD RGB/cảm ứng/CH422G/RTC/TF |
+| Gateway | `firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting` (dựng trên ví dụ LVGL của Waveshare; bản sơ bộ, xem README trong thư mục) | `esp32s3` | WiFi STA + SoftAP, ESP-NOW, esp-mqtt TLS, HTTP server cục bộ (nhận ảnh), HTTP client kéo luồng MJPEG, giải nén JPEG (TJpgDec trong ROM; `esp_new_jpeg` nếu cần nhanh hơn), HTTPS/WebSocket client, LVGL + driver LCD RGB/cảm ứng/CH422G/RTC/TF |
 | Camera | `firmware/esp32_cam` | `esp32` | `esp32-camera`, ESP-NOW, WiFi STA, HTTP client (gửi ảnh), HTTP server `/stream` (MJPEG, 1 kết nối), driver PIR |
 | Node phòng khách | `firmware/esp32_s3_firmware_node` | `esp32s3` | ESP-NOW, driver cảm biến/relay (chờ mục 4.3) |
 

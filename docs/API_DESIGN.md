@@ -381,7 +381,7 @@ Chỉ mở khi Gateway ở chế độ provisioning; đóng sau khi xong hoặc 
 
 | Method | Path | Header | Phản hồi |
 |---|---|---|---|
-| GET | `/stream?fs=vga\|qvga&q=10..30` | `X-Device-Id`, `X-Timestamp`, `X-Signature` (Gateway ký bằng secret camera) | `200 multipart/x-mixed-replace`, mỗi phần 1 khung JPEG; `401` sai HMAC; `409` đã có 1 luồng đang mở |
+| GET | `/stream?fs=vga\|qvga&q=10..30` | `X-Device-Id`, `X-Timestamp`, `X-Signature` (Gateway ký bằng secret camera) | `200 multipart/x-mixed-replace`, mỗi phần 1 khung JPEG có `Content-Length`; `400` tham số sai; `401` sai HMAC; `409` đã có 1 luồng đang mở; `503` camera chưa có giờ |
 
 Chi tiết thông số luồng: [IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.4.
 
@@ -418,7 +418,7 @@ Chi tiết thông số luồng: [IoT Node Network](firmware/IOT_NODE_NETWORK.md)
 | Bật/tắt thiết bị | `POST /devices/:id/commands` → MQTT `.../command` → ESP-NOW `CMD` → `CMD_ACK` → MQTT `.../command/ack` → HTTP 200 + WS `device_state` | Backend đã có; firmware dự kiến |
 | Thao tác trên màn hình Gateway | ESP-NOW `CMD`/`CMD_ACK` → MQTT `.../status` (`source: gateway_local`) → WS `device_state` | Dự kiến |
 | Chuyển động → ảnh | ESP-NOW `EVENT` → `POST /local/camera/snapshot` → `POST /api/device/camera/snapshot` → MQTT `camera/event` → WS `camera_event` | Dự kiến |
-| Xem trực tiếp trên Gateway | `GET /stream` (Camera) → hiển thị LCD | Dự kiến |
+| Xem trực tiếp trên Gateway | `GET /stream` (Camera) → hiển thị LCD | Firmware Gateway + Camera đã viết, chưa chạy trên board |
 | Xem trực tiếp trên Mobile | WS `/api/mobile/cameras/:id/live` → MQTT `command {live_start}` → `GET /stream` → WS `/api/device/camera/live` → Mobile | Dự kiến, tuỳ chọn |
 | Đưa Gateway lên mạng | `POST /api/mobile/provision/start` → BLE/SoftAP `/local/gateway/*` → MQTT `provision/wifi_status` | Dự kiến |
 | OTA | Dashboard `POST /firmware` → `POST /ota/deployments` → MQTT `ota/command` → `ota/progress`, `ota/result` | Backend đã có phần phát lệnh; firmware dự kiến |

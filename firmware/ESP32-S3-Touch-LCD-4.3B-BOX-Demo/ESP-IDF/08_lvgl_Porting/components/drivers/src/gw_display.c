@@ -44,3 +44,8 @@ esp_err_t gw_display_backlight(bool on)
 {
     return on ? wavesahre_rgb_lcd_bl_on() : wavesahre_rgb_lcd_bl_off();
 }
+
+bool gw_display_touch_enabled(void)
+{
+    return CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911 != 0;
+}

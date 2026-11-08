@@ -70,3 +70,6 @@ CONFIG_LWIP_MAX_SOCKETS=16
 
 # Bảo mật nhẹ, không đốt eFuse (README, mục Bảo mật): phát hiện tràn stack bằng canary
 CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
+
+# Demo: chưa bật cảm ứng (không có nút "Xem truc tiep") → luôn hiện hình camera cửa khi camera trực tuyến
+CONFIG_GW_CAMERA_LIVE_ALWAYS=y

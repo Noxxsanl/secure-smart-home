@@ -181,6 +181,32 @@ bool gw_wifi_ap_ip(esp_ip4_addr_t *out)
     return true;
 }
 
+bool gw_wifi_ap_client_ip(const uint8_t mac[6], esp_ip4_addr_t *out)
+{
+    if (s_ap_netif == NULL || mac == NULL || out == NULL) {
+        return false;
+    }
+    /* Lease DHCP còn giữ sau khi thiết bị rời AP → chỉ tin khi thiết bị đang kết nối. */
+    wifi_sta_list_t list;
+    if (esp_wifi_ap_get_sta_list(&list) != ESP_OK) {
+        return false;
+    }
+    bool associated = false;
+    for (int i = 0; i < list.num && !associated; i++) {
+        associated = memcmp(list.sta[i].mac, mac, 6) == 0;
+    }
+    if (!associated) {
+        return false;
+    }
+    esp_netif_pair_mac_ip_t pair = {0};
+    memcpy(pair.mac, mac, sizeof(pair.mac));
+    if (esp_netif_dhcps_get_clients_by_mac(s_ap_netif, 1, &pair) != ESP_OK || pair.ip.addr == 0) {
+        return false;
+    }
+    *out = pair.ip;
+    return true;
+}
+
 bool gw_wifi_rssi(int *rssi)
 {
     wifi_ap_record_t ap;

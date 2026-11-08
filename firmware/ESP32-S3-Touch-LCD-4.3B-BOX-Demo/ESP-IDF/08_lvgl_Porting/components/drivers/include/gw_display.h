@@ -27,6 +27,9 @@ void gw_display_unlock(void);
 /** Đèn nền qua bộ mở rộng CH422G (I2C). */
 esp_err_t gw_display_backlight(bool on);
 
+/** true nếu bật cảm ứng GT911 (CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911 trong src/lcd/lvgl_port.h). */
+bool gw_display_touch_enabled(void);
+
 #ifdef __cplusplus
 }
 #endif

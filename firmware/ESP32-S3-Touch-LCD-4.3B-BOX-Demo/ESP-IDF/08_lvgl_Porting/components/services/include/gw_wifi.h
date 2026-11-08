@@ -35,6 +35,12 @@ bool gw_wifi_sta_ip(char *buf, size_t cap);
 /** IP của Gateway trên Local AP (thường 192.168.4.1). */
 bool gw_wifi_ap_ip(esp_ip4_addr_t *out);
 
+/**
+ * IP mà DHCP của Local AP đã cấp cho thiết bị có MAC này (Camera, MAC Station trong gw_registry).
+ * false nếu thiết bị chưa vào Local AP hoặc chưa nhận IP.
+ */
+bool gw_wifi_ap_client_ip(const uint8_t mac[6], esp_ip4_addr_t *out);
+
 bool gw_wifi_rssi(int *rssi);
 uint8_t gw_wifi_channel(void);
 

@@ -26,4 +26,39 @@ menu "ESP32-CAM: drivers"
         help
             HC-SR501 báo nhầm trong khoảng 30-60 giây đầu sau khi cấp nguồn.
 
+    config CAM_LED_BLINK
+        bool "Nháy đèn flash theo chu kỳ"
+        default y
+        help
+            Đèn flash LED trắng (GPIO4 trên AI-Thinker) sáng ngắn rồi tắt, lặp lại theo chu kỳ — báo board đang chạy.
+            Đèn ở cạnh ống kính: lúc sáng thì khung hình sáng hơn.
+
+    config CAM_LED_GPIO
+        int "GPIO đèn flash"
+        depends on CAM_LED_BLINK
+        range 0 33
+        default 4
+        help
+            AI-Thinker: GPIO4 (dùng chung DATA1 của thẻ SD — dự án không dùng thẻ SD ở chế độ 4-bit).
+
+    config CAM_LED_BLINK_PERIOD_MS
+        int "Chu kỳ nháy (ms)"
+        depends on CAM_LED_BLINK
+        range 200 10000
+        default 1000
+
+    config CAM_LED_BLINK_ON_MS
+        int "Thời gian sáng mỗi lần nháy (ms, nhỏ hơn chu kỳ)"
+        depends on CAM_LED_BLINK
+        range 10 9990
+        default 100
+
+    config CAM_LED_BRIGHTNESS_PCT
+        int "Độ sáng đèn khi nháy (%)"
+        depends on CAM_LED_BLINK
+        range 1 100
+        default 20
+        help
+            PWM 5 kHz. Đèn flash rất sáng và hút dòng lớn: 100 % cùng lúc WiFi phát dễ gây brownout khi nguồn 5 V yếu.
+
 endmenu
