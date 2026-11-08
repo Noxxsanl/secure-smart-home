@@ -20,6 +20,10 @@ firmware/**/build_*/
 firmware/**/sdkconfig
 firmware/**/sdkconfig.old
 firmware/**/managed_components/
+# Node: thư viện registry đặt sẵn trong components/ như Gateway (components/lvgl__lvgl, ~99 MB, tải lại được).
+# Lock khi đó trỏ tới components/*__* bằng đường dẫn tuyệt đối của từng máy → sinh lại khi build, không commit.
+firmware/esp32_s3_firmware_node/components/*__*/
+firmware/esp32_s3_firmware_node/dependencies.lock
 firmware/**/certs/
 firmware/**/nvs_*.csv
 firmware/**/nvs_*.bin

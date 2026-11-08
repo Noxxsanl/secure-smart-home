@@ -427,7 +427,7 @@ Khi mất Internet:
 |---|---|---|---|
 | Gateway | `firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting` (dựng trên ví dụ LVGL của Waveshare; bản sơ bộ, xem README trong thư mục) | `esp32s3` | WiFi STA + SoftAP, ESP-NOW, esp-mqtt TLS, HTTP server cục bộ (nhận ảnh), HTTP client kéo luồng MJPEG, giải nén JPEG (TJpgDec trong ROM; `esp_new_jpeg` nếu cần nhanh hơn), HTTPS/WebSocket client, LVGL + driver LCD RGB/cảm ứng/CH422G/RTC/TF |
 | Camera | `firmware/esp32_cam` | `esp32` | `esp32-camera`, ESP-NOW, WiFi STA, HTTP client (gửi ảnh), HTTP server `/stream` (MJPEG, 1 kết nối), driver PIR |
-| Node phòng khách | `firmware/esp32_s3_firmware_node` | `esp32s3` | ESP-NOW, driver cảm biến/relay (chờ mục 4.3) |
+| Node phòng khách | `firmware/esp32_s3_firmware_node` | `esp32s3` | ESP-NOW, driver cảm biến/relay (chờ mục 4.3), TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 + LVGL 8.4 (cùng bản Gateway) |
 
 - **Framework:** ESP-IDF cho cả ba (đúng hướng [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md) §3). Có thể build qua PlatformIO với `framework = espidf` để CI hiện tại (`pio run`) vẫn chạy. Waveshare cung cấp ví dụ ESP-IDF và Arduino cho board Gateway.
 - **Mã dùng chung:** HMAC, khung tin ESP-NOW, định dạng `sensor_payload` đặt trong một thư mục chung (VD `firmware/common/`) để cả ba project cùng dùng. Đây là bài học từ 2 bản `hmac_util` khác nhau ở [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md) §1.2.

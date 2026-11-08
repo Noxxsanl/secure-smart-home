@@ -1,5 +1,5 @@
-# Chưa khai báo REQUIRES: khi đó ESP-IDF cho main phụ thuộc MỌI component của project, nên `idf.py build`
-# vẫn biên dịch toàn bộ drivers/services dù app_main chưa gọi tới.
-# Khi chốt GPIO và nối vào main: đổi thành PRIV_REQUIRES board application (xem README, mục "Khi chốt GPIO").
+# main chỉ khởi động màn hình (board + ui). Khi chốt GPIO, đổi thành PRIV_REQUIRES application như Gateway
+# (README, mục "Khi chốt GPIO"). Mọi component trong components/ vẫn được biên dịch dù main không REQUIRES tới.
 idf_component_register(SRCS "app_main.c"
-                       INCLUDE_DIRS ".")
+                       INCLUDE_DIRS "."
+                       PRIV_REQUIRES board ui)

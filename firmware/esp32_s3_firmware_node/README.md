@@ -4,7 +4,7 @@ Firmware ESP-IDF v5.4.4 cho Node phòng khách: cảm biến I2C, mic INMP441, l
 
 Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.1, §4.3, §5.1, §6.1, §6.3, §7. Hợp đồng ESP-NOW: [API_DESIGN](../../docs/API_DESIGN.md) §11. Lệnh build/nạp chung: [ESP_IDF_BUILD](../../docs/guides/ESP_IDF_BUILD.md).
 
-> **Trạng thái:** mới có **thư viện** (`components/drivers`, `components/services`). `app_main()` chưa gọi gì, đợi chốt sơ đồ chân GPIO (mục [Khi chốt GPIO](#khi-chốt-gpio)). Đã biên dịch bằng ESP-IDF 5.4.4 (0 warning) và kiểm link đủ 67 hàm public (ép linker giữ bằng `-Wl,-u`, vì `app_main` chưa gọi tới). **Chưa chạy trên board**. Gateway S3 chưa có phía ESP-NOW nên chưa thử được luồng đầu-cuối.
+> **Trạng thái:** đã có **thư viện** (`components/drivers`, `components/services`) và **màn hình chạy từ `app_main`**: TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 + LVGL 8.4.0 (cùng bản Gateway), hiện màn hình kiểm tra tiếng Việt (mục [Màn hình](#màn-hình)). Chân màn hình chỉnh trong menuconfig. Cảm biến, relay, IR, âm thanh, ESP-NOW chưa khởi động, đợi chốt sơ đồ chân (mục [Khi chốt GPIO](#khi-chốt-gpio)). Đã biên dịch bằng ESP-IDF 5.4.4 (0 warning); thư viện chưa gọi tới đã kiểm link bằng `-Wl,-u` (67 hàm services/drivers). **Chưa chạy trên board**. Gateway S3 chưa có phía ESP-NOW nên chưa thử được luồng đầu-cuối.
 
 ## Cấu trúc
 
@@ -12,27 +12,39 @@ Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.1,
 esp32_s3_firmware_node/
 ├── CMakeLists.txt               # project; trỏ thêm ../common bằng EXTRA_COMPONENT_DIRS
 ├── sdkconfig.defaults           # commit; KHÔNG chứa secret. sdkconfig sinh từ file này (gitignore)
+├── dependencies.lock            # gitignore (như Gateway): sinh lại khi build, trỏ tới components/lvgl__lvgl theo máy
 ├── partitions_node.csv          # nvs 64K, otadata, phy, ota_0/ota_1 3M, log 64K
 ├── nvs_dev.csv.example          # mẫu identity + ghép nối; bản thật nvs_dev.csv bị gitignore
 ├── main/
 │   ├── CMakeLists.txt
-│   └── app_main.c               # rỗng — chờ chốt GPIO
+│   └── app_main.c               # board_display_init → node_ui_start → bật đèn nền
 └── components/
+    ├── board/                   # chỗ DUY NHẤT có số chân GPIO
+    │   ├── Kconfig.projbuild    # menu "Node S3: màn hình": chân, hướng, xung nhịp, hiệu chuẩn cảm ứng
+    │   ├── include/board_display.h
+    │   └── src/board_display.c  # SPI2 → ILI9488 → LVGL → XPT2046 (như gw_display của Gateway)
     ├── drivers/                 # phần cứng, chia theo THIẾT BỊ; chân GPIO truyền qua *_config_t
+    │   ├── idf_component.yml    # lvgl/lvgl ~8.4.0 từ ESP Registry (cùng bản Gateway)
     │   ├── include/             # drv_bus.h, drv_sht3x.h, drv_aht20.h, drv_bh1750.h, drv_mic.h,
-    │   │                        # drv_speaker.h, drv_ir_nec.h, drv_ir_tx.h, drv_ir_rx.h, drv_relay.h, drv_ili9488.h
-    │   └── src/{bus,sensors,audio,ir,relay,lcd}/
-    └── services/                # NVS, đồng hồ, ESP-NOW, telemetry có HMAC, kho mã IR
-        ├── Kconfig.projbuild    # menu "Node S3: services"
-        ├── include/             # node_config.h, node_time.h, node_link.h, node_telemetry.h, node_ir_store.h
-        └── src/
+    │   │                        # drv_speaker.h, drv_ir_nec.h, drv_ir_tx.h, drv_ir_rx.h, drv_relay.h, drv_ili9488.h,
+    │   │                        # drv_xpt2046.h (cảm ứng), drv_display.h (LVGL)
+    │   └── src/{bus,sensors,audio,ir,relay,lcd,touch}/
+    ├── lvgl__lvgl/              # LVGL 8.4.0 đặt sẵn như Gateway — gitignore (~99 MB), xem mục LVGL
+    ├── services/                # NVS, đồng hồ, ESP-NOW, telemetry có HMAC, kho mã IR
+    │   ├── Kconfig.projbuild    # menu "Node S3: services"
+    │   ├── include/             # node_config.h, node_time.h, node_link.h, node_telemetry.h, node_ir_store.h
+    │   └── src/
+    └── ui/                      # giao diện LVGL (như components/ui của Gateway)
+        ├── include/node_ui.h
+        ├── src/node_ui.c        # màn hình kiểm tra: chấm theo ngón tay + toạ độ, nút bấm thử
+        └── fonts/               # node_font_vi_16/24.c (tiếng Việt có dấu) + gen_fonts.sh
 
 ../common/                       # dùng chung với Gateway/Camera
 ├── security_manager/            # HMAC thiết bị (sign, verify thời gian hằng, cửa sổ ±300 s)
 └── espnow_proto/                # khung ESP-NOW {ver, type, seq, body JSON} ≤ 250 byte
 ```
 
-Sau khi chốt GPIO sẽ thêm `components/board/` và `components/application/` (mục [Khi chốt GPIO](#khi-chốt-gpio)).
+`board` hiện mới có màn hình. Sau khi chốt GPIO sẽ thêm chân các thiết bị còn lại vào `board` và tạo `components/application/` (mục [Khi chốt GPIO](#khi-chốt-gpio)).
 
 ### Khác với cấu trúc đề xuất ban đầu, và lý do
 
@@ -49,13 +61,17 @@ Sau khi chốt GPIO sẽ thêm `components/board/` và `components/application/`
 
 ```
 main ──► application ──► services ──► common/security_manager, common/espnow_proto
-   └──► board ──────────► drivers ──► esp_driver_i2c/spi/i2s/rmt/gpio/ledc, esp_lcd
-        (application dùng handle từ board)
+   ├──► board ──────────► drivers ──► esp_driver_i2c/spi/i2s/rmt/gpio/ledc, esp_lcd, lvgl__lvgl
+   └──► ui ─────────────► drivers (chỉ drv_display: khoá LVGL)
+        (application dùng handle từ board, đẩy dữ liệu vào ui)
 ```
 
+Hiện chưa có `application`: `main` gọi thẳng `board` + `ui` để bật màn hình.
+
 - `drivers` không biết `services`/`application`; `services` không biết `drivers`. `application` là chỗ duy nhất nối hai bên (VD đổi mã IR đã học trong `node_ir_store` thành lời gọi `drv_ir_tx_send_raw`).
+- `ui` không biết `board`/`services`, như `ui` của Gateway: chỉ vẽ, dữ liệu do tầng trên đẩy vào.
 - Ép bằng `REQUIRES`/`PRIV_REQUIRES` trong `CMakeLists.txt`: include sai tầng sẽ báo `No such file`.
-- Không có chân GPIO cứng trong thư viện. Chân chỉ nằm ở `board` (sau khi chốt).
+- Không có chân GPIO cứng trong thư viện. Chân chỉ nằm ở `board` (màn hình: Kconfig của `board`).
 - Tiền tố: `drv_` cho drivers, `node_` cho services, để không đụng tên component của ESP Registry (`bh1750_*`, `esp_lcd_ili9488_*`) nếu sau này thêm.
 
 ## Thư viện đã có
@@ -74,7 +90,9 @@ main ──► application ──► services ──► common/security_manager,
 | `drv_ir_rx` | VS1838B (RMT RX) | `drv_ir_rx_receive` → chuỗi mark/space µs | 192 ký hiệu không DMA, bật `use_dma` để học mã điều hoà dài |
 | `drv_ir_nec` | Giao thức NEC | `drv_ir_nec_encode`, `drv_ir_nec_decode` | Cùng định dạng mark/space với TX/RX |
 | `drv_relay` | HF46F (1–8 kênh) | `drv_relay_set/toggle/get/all_off` | Tắt hết khi init, chặn đổi trạng thái nhanh hơn 200 ms |
-| `drv_ili9488` | TFT 3.5" 320×480 SPI | `drv_ili9488_init`, `_panel` (esp_lcd), `_fill`, `_set_rotation`, `_set_backlight` | Cài theo `esp_lcd_panel_t`, tự đổi RGB565 → RGB666 (ILI9488 qua SPI không nhận 16 bit). Dùng được với LVGL sau này |
+| `drv_ili9488` | TFT 3.5" 320×480 SPI | `drv_ili9488_init`, `_panel` (esp_lcd), `_fill`, `_set_rotation`, `_set_backlight` | Cài theo `esp_lcd_panel_t`, tự đổi RGB565 → RGB666 (ILI9488 qua SPI không nhận 16 bit) |
+| `drv_xpt2046` | Cảm ứng điện trở XPT2046 (SPI) | `drv_xpt2046_init`, `_read` (điểm ảnh), `_read_raw` (số thô 12 bit) | Chung bus SPI với LCD, 2 MHz. Áp lực Z để nhận chạm, trung vị 5 lần đo, bỏ qua SPI khi T_IRQ cao. Hiệu chuẩn bằng số thô tại 4 mép + `swap_xy` |
+| `drv_display` | LVGL 8.4 trên `drv_ili9488` | `drv_display_init(lcd, cfg, &disp)`, `drv_display_add_touch`, `drv_display_lock(ms)`, `drv_display_unlock` | Cùng bản LVGL với Gateway. Tick 2 ms (esp_timer), task `lvgl` ở nhân 1, khoá đệ quy, bộ đệm vẽ 40 dòng trong SRAM (~25 KB dọc / ~38 KB ngang, đổi được sang PSRAM). Cảm ứng đọc trong task LVGL |
 
 ### services
 
@@ -109,6 +127,65 @@ main ──► application ──► services ──► common/security_manager,
 
 **Chưa bật (cho bản production, đốt eFuse không đảo ngược được, làm khi đã ổn định):** Flash Encryption + Secure Boot v2, NVS Encryption (S3 dùng khoá HMAC trong eFuse), tắt JTAG và chế độ tải UART. Theo [Firmware](../../docs/firmware/EMBEDDED_ARCHITECTURE_ESP_IDF.md) và [Bảo mật](../../docs/SECURITY_ARCHITECTURE.md). Chưa có: ghép nối ECDH (`PAIR_*`), PMK chung, ký nội dung `data`.
 
+## Màn hình
+
+> Chi tiết cách LVGL và màn hình được ghép, cách **thay màn hình khác hoặc đổi bản LVGL**: [MAN_HINH_NODE](../../docs/guides/MAN_HINH_NODE.md).
+
+Module **TFT 3.5" ILI9488 SPI, cảm ứng điện trở XPT2046** (320×480, thường kèm khe thẻ SD). LCD và cảm ứng đi **chung bus SPI2**, mỗi chip một chân CS. Code: `board_display` (khởi tạo) → `drv_ili9488` + `drv_xpt2046` + `drv_display` (LVGL) → `node_ui` (giao diện). Cách ghép giống Gateway (`gw_display` → `lvgl_port` + GT911 → `gw_ui`), khác ở chỗ màn hình Node là SPI và cảm ứng điện trở nên phải hiệu chuẩn.
+
+### Đấu dây (chân mặc định, đổi được trong menuconfig)
+
+| Chân module | ESP32-S3 | Ghi chú |
+|---|---|---|
+| VCC | 3V3 (hoặc 5V nếu module có ổn áp, xem mạch in) | Logic 3,3 V |
+| GND | GND | |
+| CS | GPIO10 | |
+| RESET | GPIO8 | `-1` nếu nối RESET lên 3V3 |
+| DC/RS | GPIO9 | |
+| SDI (MOSI) | GPIO11 | chung với T_DIN |
+| SCK | GPIO12 | chung với T_CLK |
+| LED | GPIO7 | PWM đèn nền; `-1` nếu nối thẳng 3V3 |
+| SDO (MISO) | **để trống** | ILI9488 không thả trở kháng cao, nối vào bus làm sai số đọc cảm ứng |
+| T_CLK | GPIO12 | nối chung SCK |
+| T_CS | GPIO14 | |
+| T_DIN | GPIO11 | nối chung SDI |
+| T_DO | GPIO13 | MISO của bus |
+| T_IRQ | GPIO15 | `-1` nếu không nối (vẫn chạy, chỉ đọc SPI liên tục hơn) |
+| SD_* | để trống | Chưa dùng thẻ SD |
+
+GPIO10–13 là chân IOMUX của SPI2, LCD chạy 40 MHz ổn định nhất trên các chân này.
+
+### Cấu hình
+
+`idf.py menuconfig` → **Node S3: màn hình (ILI9488 + cảm ứng XPT2046)**:
+
+- *Chân GPIO*: như bảng trên.
+- *LCD*: hướng (mặc định **ngang 480×320**), xung nhịp SPI (40 MHz; ảnh có sọc thì hạ 26/20), BGR, đảo màu, độ sáng đèn nền.
+- *Cảm ứng*: bật/tắt, đổi trục X/Y, 4 số hiệu chuẩn, ngưỡng áp lực, log số đo thô.
+
+Sau khi nạp, màn hình hiện **màn hình kiểm tra**: tiêu đề "Node phòng khách", nút "Bấm thử" có đếm, thanh dưới hiện toạ độ chạm, chấm xanh chạy theo ngón tay.
+
+### Hiệu chuẩn cảm ứng (lần đầu lắp)
+
+Cảm ứng điện trở mỗi tấm lệch một ít, số mặc định chỉ là điểm bắt đầu.
+
+1. Để `Log số đo thô` bật (mặc định), nạp rồi mở `idf.py -p COMx monitor`.
+2. Lấy đầu bút/móng tay chạm **sát mép trái** màn hình, đọc dòng `drv_xpt2046: raw X=.. Y=.. Z=..`. Lặp lại với mép phải, trên, dưới.
+3. Kéo tay từ trái sang phải: nếu số **Y** thay đổi (X gần như đứng yên) thì bật *Đổi trục X/Y*, ngược lại thì tắt. Khi bật, mép trái/phải lấy số Y, mép trên/dưới lấy số X.
+4. Điền 4 số vào *Số đo thô ở mép TRÁI/PHẢI/TRÊN/DƯỚI* (trái lớn hơn phải là bình thường, driver tự hiểu trục ngược). Build, nạp lại, kiểm chấm xanh nằm đúng dưới ngón tay.
+5. Xong thì tắt `Log số đo thô`.
+
+Không chạm mà vẫn có toạ độ ("chạm ma") thì tăng *Ngưỡng áp lực*; phải ấn mạnh mới nhận thì giảm. Đổi *Hướng màn hình* thì phải hiệu chuẩn lại.
+
+| Hiện tượng | Kiểm |
+|---|---|
+| Màn hình trắng, không có gì | Dây CS/DC/SCK/SDI, RESET; hạ xung nhịp xuống 20 MHz |
+| Màu đỏ ↔ xanh dương bị đảo | Đổi *Thứ tự màu BGR* |
+| Nền đen thành trắng, màu âm bản | Bật *Đảo màu* |
+| Ảnh có sọc, nhiễu | Dây ngắn lại, hạ xung nhịp |
+| Không nhận chạm | Dây T_CS/T_DO/T_IRQ; log có `touch disabled`? SDO của LCD có lỡ nối vào MISO không |
+| Chạm bị lệch/ngược | Hiệu chuẩn lại như trên |
+
 ## Ràng buộc chân ESP32-S3 (để chốt GPIO)
 
 | Chân | Ràng buộc | Gợi ý |
@@ -119,7 +196,8 @@ main ──► application ──► services ──► common/security_manager,
 | GPIO33–37 | Module PSRAM **Octal** (N8R8, N16R8) chiếm 35–37 | Kiểm tên module trước khi dùng |
 | GPIO43, 44 | UART0 TX/RX (log) | Giữ nếu nạp/xem log qua UART |
 | GPIO39–42 | JTAG | Dùng được nếu không gỡ lỗi JTAG |
-| GPIO10–13 | Chân IOMUX của SPI2 (CS 10, MOSI 11, SCLK 12, MISO 13) | Ưu tiên cho LCD: chạy 40 MHz ổn định hơn qua ma trận GPIO |
+| GPIO10–13 | Chân IOMUX của SPI2 (CS 10, MOSI 11, SCLK 12, MISO 13) | Đang dùng cho LCD + cảm ứng: chạy 40 MHz ổn định hơn qua ma trận GPIO |
+| GPIO7–15 | **Đã dùng cho màn hình** (mặc định menuconfig, mục [Màn hình](#màn-hình)) | Chọn chân thiết bị khác ngoài dải này, hoặc đổi chân màn hình trong menuconfig |
 
 Tài nguyên ngoại vi (mọi tín hiệu đều đi qua ma trận GPIO, nên chọn chân tự do):
 
@@ -131,9 +209,9 @@ Tài nguyên ngoại vi (mọi tín hiệu đều đi qua ma trận GPIO, nên c
 | LED IR | RMT TX | 1 |
 | VS1838B | RMT RX | 1 |
 | Relay | GPIO | 1 mỗi kênh |
-| LCD ILI9488 | SPI2 + LEDC | SCLK, MOSI, CS, DC, (RST), (BL) |
+| LCD ILI9488 + cảm ứng XPT2046 | SPI2 + LEDC (timer 0, kênh 0) | SCLK, MOSI, MISO, CS, DC, RST, BL, T_CS, T_IRQ — đã chốt (GPIO7–15) |
 
-Tổng khoảng 16–18 chân.
+Tổng khoảng 19–21 chân.
 
 ## Ghi chú phần cứng
 
@@ -144,17 +222,17 @@ Tổng khoảng 16–18 chân.
 | VS1838B | Cấp **3,3 V** (cấp 5 V thì ngõ ra lên 5 V, quá áp chân S3). RC 100 Ω + 4,7 µF ở chân nguồn |
 | INMP441 | 3,3 V; L/R nối GND → kênh trái (mặc định driver) |
 | Ampli I2S | MAX98357A cấp 5 V cho công suất lớn hơn; chân GAIN chọn mức khuếch đại |
-| ILI9488 | Không nối MISO (SDO) vào bus. Đèn nền 60–100 mA: kích qua transistor nếu module không có |
+| ILI9488 + XPT2046 | Không nối SDO của LCD vào bus; MISO chỉ nối T_DO. Đèn nền 60–100 mA: module thường có sẵn transistor ở chân LED, nếu không thì tự kích qua transistor |
 | I2C | Trở kéo lên 4,7 kΩ (module cảm biến thường có sẵn — nhiều module cùng bus thì trở song song, kiểm lại) |
 
 ## Khi chốt GPIO
 
-1. Tạo `components/board/`: `include/board_pins.h` (bảng chân) + `board.c` khởi tạo mọi driver, trả các handle. Đây là chỗ **duy nhất** có số chân.
+1. Thêm vào `components/board/` (đã có phần màn hình): chân cảm biến, relay, IR, âm thanh vào `Kconfig.projbuild` (hoặc `board_pins.h`) + hàm khởi tạo driver, trả các handle. Đây là chỗ **duy nhất** có số chân.
 2. Tạo `components/application/`: luồng nghiệp vụ.
    - Task cảm biến: đọc 30–60 s/lần → `node_telemetry_send` (`temperature`, `humidity`, `light`).
    - `on_cmd`: `turn_on`/`turn_off` → `drv_relay_set` → `node_link_send_cmd_ack(..., power)`; `ir_send` → `node_ir_store_load` → `drv_ir_tx_send_raw`; `ir_learn` → `drv_ir_rx_receive` → `node_ir_store_save`.
-   - LCD: nhiệt độ, độ ẩm, trạng thái relay, trạng thái kết nối Gateway (`on_state`).
-3. `main/CMakeLists.txt`: `PRIV_REQUIRES board application`; `app_main` chỉ gọi `nvs_flash_init` → `board_init` → `node_app_start`.
+   - Màn hình: thay màn hình kiểm tra trong `node_ui` bằng màn hình thật (nhiệt độ, độ ẩm, trạng thái relay, kết nối Gateway qua `on_state`), dữ liệu đẩy vào qua `node_ui_set_*` như `gw_ui`. Nút trên màn hình gọi ngược lên application (callback), `ui` không gọi thẳng driver relay.
+3. `main/CMakeLists.txt`: `PRIV_REQUIRES application`; `app_main` chỉ gọi `node_app_start` (bên trong: `nvs_flash_init` → `board_display_init` + board còn lại → `node_ui_start` → services), như Gateway.
 
 Phác thảo nối thư viện (chân là chỗ giữ chỗ `BOARD_*`):
 
@@ -184,6 +262,15 @@ node_metric_t m[] = {{"temperature", t, 1}, {"humidity", h, 1}, {"light", lux, 0
 node_telemetry_send(&cfg, m, 3);
 ```
 
+Màn hình đã nối sẵn: xem `components/board/src/board_display.c` (SPI → ILI9488 → LVGL → XPT2046) và `main/app_main.c`. Mọi lời gọi `lv_*` ngoài task LVGL phải nằm giữa `drv_display_lock(-1)` / `drv_display_unlock()`.
+
+### LVGL
+
+- Bản **8.4.0**, cùng Gateway (`08_lvgl_Porting` khoá 8.4.0) để code giao diện viết một kiểu cho cả hai màn hình. Khai báo ở `components/drivers/idf_component.yml` (`~8.4.0`: nhận bản vá 8.4.x, không lên 8.5/9).
+- Mã nguồn đặt ở `components/lvgl__lvgl/` giống Gateway: component manager thấy component cùng tên trong `components/` thì dùng bản này (build không cần mạng, sửa/đọc được mã LVGL tại chỗ). Thư mục này và `dependencies.lock` bị gitignore. Máy mới clone về không có thư mục này nên lần build đầu cần Internet: component manager tải LVGL theo `idf_component.yml` vào `managed_components/`. Muốn đặt lại vào `components/` thì chuyển `managed_components/lvgl__lvgl` sang `components/lvgl__lvgl`.
+- Cấu hình LVGL nằm cuối `sdkconfig.defaults` (Kconfig, không dùng `lv_conf.h`). Không bật `LV_COLOR_16_SWAP`: `drv_ili9488` nhận RGB565 theo thứ tự byte CPU rồi tự đổi sang RGB666. Bật nhầm thì `drv_display.c` báo lỗi lúc build.
+- Font Montserrat có sẵn của LVGL chỉ có ASCII. Giao diện tiếng Việt có dấu (bất biến 10) dùng `components/ui/fonts/node_font_vi_16/24.c`: chép từ `gw_font_vi_16/24.c` của Gateway, chỉ đổi tên symbol (cùng tham số lv_font_conv, font nén RLE nên cần `LV_USE_FONT_COMPRESSED`). Cần cỡ chữ/ký tự khác thì sửa và chạy `components/ui/fonts/gen_fonts.sh` (cần Node.js, `npx` tải lv_font_conv). Có `LV_SYMBOL_` HOME, OK, WIFI, WARNING, LIST, VIDEO, UPLOAD; biểu tượng khác phải thêm vào script.
+
 ## Build
 
 Mở **ESP-IDF 5.4 PowerShell** (ESP_IDF_BUILD §1.2):
@@ -197,7 +284,9 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
-Đổi tuỳ chọn không bí mật: `idf.py menuconfig` → *Node S3: services*.
+Có sẵn `components/lvgl__lvgl/` thì build không cần mạng. Chưa có (máy mới clone) thì lần build đầu cần Internet để tải LVGL (mục [LVGL](#lvgl)).
+
+Đổi tuỳ chọn không bí mật: `idf.py menuconfig` → *Node S3: services*; chân/hiệu chuẩn màn hình ở *Node S3: màn hình*; LVGL ở *Component config → LVGL configuration*.
 
 ## Nạp identity vào NVS (giai đoạn dev)
 

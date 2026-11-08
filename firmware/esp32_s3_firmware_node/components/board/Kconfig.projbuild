@@ -1,0 +1,149 @@
+# Màn hình TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 — chân GPIO, hướng, hiệu chuẩn (README, mục Màn hình).
+# Mặc định: SPI2 trên chân IOMUX (SCK 12, MOSI 11, MISO 13, CS 10) để LCD chạy 40 MHz ổn định.
+menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
+
+    menu "Chân GPIO"
+        config NODE_LCD_PIN_SCLK
+            int "SCK (LCD SCK + cảm ứng T_CLK)"
+            range 0 48
+            default 12
+
+        config NODE_LCD_PIN_MOSI
+            int "MOSI (LCD SDI + cảm ứng T_DIN)"
+            range 0 48
+            default 11
+
+        config NODE_LCD_PIN_MISO
+            int "MISO (CHỈ cảm ứng T_DO; KHÔNG nối SDO của LCD)"
+            range -1 48
+            default 13
+            help
+                SDO của ILI9488 không thả trở kháng cao, nối chung bus làm sai số đọc cảm ứng: để trống chân SDO
+                của LCD. -1 khi không dùng cảm ứng.
+
+        config NODE_LCD_PIN_CS
+            int "LCD CS"
+            range 0 48
+            default 10
+
+        config NODE_LCD_PIN_DC
+            int "LCD DC/RS"
+            range 0 48
+            default 9
+
+        config NODE_LCD_PIN_RST
+            int "LCD RESET (-1 = nối RESET lên 3V3, reset bằng lệnh)"
+            range -1 48
+            default 8
+
+        config NODE_LCD_PIN_BL
+            int "LCD LED / đèn nền (-1 = nối thẳng 3V3, không chỉnh độ sáng)"
+            range -1 48
+            default 7
+
+        config NODE_TOUCH_PIN_CS
+            int "Cảm ứng T_CS"
+            range 0 48
+            default 14
+
+        config NODE_TOUCH_PIN_IRQ
+            int "Cảm ứng T_IRQ (-1 = không nối)"
+            range -1 48
+            default 15
+            help
+                Nối T_IRQ thì khi không chạm, task LVGL không đọc cảm ứng qua SPI (bus rảnh cho LCD).
+    endmenu
+
+    menu "LCD"
+        choice NODE_LCD_ROTATION
+            prompt "Hướng màn hình"
+            default NODE_LCD_ROTATION_90
+            config NODE_LCD_ROTATION_0
+                bool "Dọc 320x480"
+            config NODE_LCD_ROTATION_90
+                bool "Ngang 480x320"
+            config NODE_LCD_ROTATION_180
+                bool "Dọc 320x480, lật 180°"
+            config NODE_LCD_ROTATION_270
+                bool "Ngang 480x320, lật 180°"
+        endchoice
+
+        config NODE_LCD_PCLK_MHZ
+            int "Xung nhịp SPI của LCD (MHz)"
+            range 10 80
+            default 40
+            help
+                Ảnh có sọc/nhiễu (dây dupont dài) thì hạ xuống 26 hoặc 20.
+
+        config NODE_LCD_BGR
+            bool "Thứ tự màu BGR (đỏ và xanh dương bị đảo thì đổi)"
+            default y
+
+        config NODE_LCD_INVERT_COLOR
+            bool "Đảo màu (nền trắng thành đen thì đổi)"
+            default n
+
+        config NODE_LCD_BACKLIGHT_PERCENT
+            int "Độ sáng đèn nền khi bật (%)"
+            range 1 100
+            default 80
+    endmenu
+
+    menu "Cảm ứng"
+        config NODE_TOUCH_ENABLE
+            bool "Dùng cảm ứng XPT2046"
+            default y
+
+        config NODE_TOUCH_SWAP_XY
+            bool "Đổi trục X/Y"
+            depends on NODE_TOUCH_ENABLE
+            default y if NODE_LCD_ROTATION_90 || NODE_LCD_ROTATION_270
+            default n
+            help
+                Trục X của màn hình lấy từ kênh Y của chip. Màn hình ngang thường cần bật. Kéo tay trái → phải mà
+                log "raw" chỉ đổi Y thì bật, chỉ đổi X thì tắt.
+
+        config NODE_TOUCH_RAW_LEFT
+            int "Số đo thô ở mép TRÁI"
+            depends on NODE_TOUCH_ENABLE
+            range 0 4095
+            default 3800
+            help
+                Hiệu chuẩn: bật "Log số đo thô", chạm sát từng mép màn hình, ghi số "raw" của trục tương ứng.
+                Trái lớn hơn phải là bình thường (trục ngược).
+
+        config NODE_TOUCH_RAW_RIGHT
+            int "Số đo thô ở mép PHẢI"
+            depends on NODE_TOUCH_ENABLE
+            range 0 4095
+            default 300
+
+        config NODE_TOUCH_RAW_TOP
+            int "Số đo thô ở mép TRÊN"
+            depends on NODE_TOUCH_ENABLE
+            range 0 4095
+            default 300
+
+        config NODE_TOUCH_RAW_BOTTOM
+            int "Số đo thô ở mép DƯỚI"
+            depends on NODE_TOUCH_ENABLE
+            range 0 4095
+            default 3800
+
+        config NODE_TOUCH_Z_THRESHOLD
+            int "Ngưỡng áp lực nhận là chạm"
+            depends on NODE_TOUCH_ENABLE
+            range 50 3000
+            default 300
+            help
+                Có chạm "ma" khi không chạm thì tăng; phải ấn mạnh mới nhận thì giảm.
+
+        config NODE_TOUCH_LOG_RAW
+            bool "Log số đo thô khi chạm (để hiệu chuẩn)"
+            depends on NODE_TOUCH_ENABLE
+            default y
+            help
+                In "raw X=.. Y=.. Z=.. -> (x, y)" tối đa 5 dòng/giây khi đang chạm. Tắt khi đã hiệu chuẩn xong.
+    endmenu
+
+endmenu

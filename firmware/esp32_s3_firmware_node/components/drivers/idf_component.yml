@@ -1,0 +1,7 @@
+## Thư viện từ ESP Component Registry — commit file này và dependencies.lock, không commit managed_components/.
+dependencies:
+  idf: ">=5.1.0"
+  # Cùng bản với Gateway (08_lvgl_Porting đang khoá 8.4.0): code giao diện viết một kiểu cho cả hai màn hình.
+  lvgl/lvgl:
+    version: "~8.4.0"
+    require: public   # drv_display.h trả lv_disp_t; tầng ui gọi lv_* trực tiếp

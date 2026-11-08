@@ -434,8 +434,10 @@ project(camera)
 idf.py add-dependency "espressif/esp32-camera^2.0.0"     # Camera
 idf.py add-dependency "espressif/esp_new_jpeg"           # Gateway: giải nén JPEG cho LCD
 idf.py add-dependency "espressif/esp_lcd_touch_gt911^1"  # Gateway: cảm ứng (như mẫu Waveshare)
-idf.py add-dependency "lvgl/lvgl>8.3.9,<9"               # Gateway: LVGL 8 (như mẫu Waveshare)
+idf.py add-dependency "lvgl/lvgl>8.3.9,<9"               # Gateway: LVGL 8 (như mẫu Waveshare), lock đang ở 8.4.0
 ```
+
+Node phòng khách khai báo `lvgl/lvgl: "~8.4.0"` trong `components/drivers/idf_component.yml` (cùng bản Gateway, port ở `drv_display`). Giống Gateway, mã LVGL đặt sẵn ở `components/lvgl__lvgl/` (component manager ưu tiên component cùng tên trong `components/`); thư mục đó và `dependencies.lock` của hai project này bị gitignore vì lock trỏ đường dẫn tuyệt đối theo máy.
 
 Lệnh ghi vào `main/idf_component.yml`. Lần `build` tiếp theo, component được tải vào `managed_components/` và phiên bản cụ thể được ghi vào `dependencies.lock`.
 

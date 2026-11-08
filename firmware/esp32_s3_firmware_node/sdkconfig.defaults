@@ -30,3 +30,17 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
 # - driver WiFi không lưu cấu hình xuống NVS (node không giữ WiFi, chỉ dùng radio cho ESP-NOW)
 CONFIG_ESP_WIFI_NVS_ENABLED=n
+
+# ---- LVGL 8.4 (cùng bản Gateway; components/drivers/idf_component.yml, drv_display) ----------------------------
+# RGB565 theo thứ tự byte CPU: drv_ili9488 tự đổi sang RGB666. Bật đảo byte thì sai màu (drv_display.c chặn lúc build)
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_COLOR_16_SWAP=n
+# Bộ nhớ LVGL lấy từ heap (malloc), khối lớn tự vào PSRAM — như Gateway
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_MEMCPY_MEMSET_STD=y
+CONFIG_LV_USE_LOG=y
+CONFIG_LV_LOG_PRINTF=y
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+# Font Montserrat có sẵn chỉ có ASCII. Font tiếng Việt sinh bằng lv_font_conv (như ui/fonts/gen_fonts.sh của Gateway)
+# là font nén RLE → cần tuỳ chọn này
+CONFIG_LV_USE_FONT_COMPRESSED=y
