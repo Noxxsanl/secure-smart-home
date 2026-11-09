@@ -1,0 +1,13 @@
+# Chỉ tuỳ chọn KHÔNG bí mật. device_id, secret, MAC Gateway, LMK nằm trong NVS (README, mục Ghép nối Gateway).
+menu "Node S3: ứng dụng"
+
+    config NODE_APP_TELEMETRY_INTERVAL_S
+        int "Chu kỳ gửi nhiệt độ, độ ẩm về Gateway (giây)"
+        range 5 3600
+        default 10
+        help
+            Màn hình Node vẫn cập nhật 2 giây/lần; đây chỉ là chu kỳ gửi ESP-NOW TELEMETRY (Gateway chuyển tiếp lên
+            Server, mỗi gói là 1 dòng sensor_data). 10 giây cho demo; chạy lâu dài nên 30–60 giây. Gói đầu tiên gửi
+            ngay khi đã nối Gateway và có giờ.
+
+endmenu

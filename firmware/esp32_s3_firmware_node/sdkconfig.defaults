@@ -11,10 +11,14 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 
-# PSRAM: giữ Quad như sdkconfig hiện tại. Nếu module là N16R8 / N8R8 (PSRAM Octal) thì đổi thành
-# CONFIG_SPIRAM_MODE_OCT=y và KHÔNG dùng GPIO35–37 (README, mục "Ràng buộc chân").
+# PSRAM Octal: PCB dùng ESP32-S3-WROOM-1 N16R8 (esptool: "Embedded PSRAM 8MB (AP_3v3)"). Để Quad thì boot lỗi PSRAM.
+# PSRAM Octal chiếm GPIO33–37: không dùng các chân này (README, mục "Ràng buộc chân").
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_MODE_OCT=y
+
+# PCB nạp và xem log qua USB native (GPIO19/20, USB-Serial-JTAG), không có chip USB-UART → console chính là USB,
+# để log của bootloader và panic cũng hiện trên cổng COM đó
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # Bảng phân vùng riêng: 2 slot OTA + log (ESP_IDF_BUILD §4)
 CONFIG_PARTITION_TABLE_CUSTOM=y
@@ -47,3 +51,5 @@ CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
 # Font Montserrat có sẵn chỉ có ASCII. Font tiếng Việt sinh bằng lv_font_conv (như ui/fonts/gen_fonts.sh của Gateway)
 # là font nén RLE → cần tuỳ chọn này
 CONFIG_LV_USE_FONT_COMPRESSED=y
+# Số lớn của ô nhiệt độ/độ ẩm (node_ui FONT_BIG), như Gateway
+CONFIG_LV_FONT_MONTSERRAT_40=y

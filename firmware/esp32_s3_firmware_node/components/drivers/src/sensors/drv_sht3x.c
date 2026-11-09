@@ -12,6 +12,11 @@ static const char *TAG = "drv_sht3x";
 #define SHT3X_SCL_HZ 100000
 #define SHT3X_TIMEOUT_MS 50
 #define SHT3X_MEAS_WAIT_MS 16   /* tối đa 15,5 ms ở độ lặp lại cao */
+#define SHT3X_RESET_WAIT_MS 2   /* tối đa 1,5 ms sau soft reset */
+
+/* pdMS_TO_TICKS làm tròn XUỐNG và vTaskDelay(n) chỉ chờ (n-1, n] tick: cộng 1 tick để luôn chờ đủ ms, kể cả
+ * khi tick 10 ms (CONFIG_FREERTOS_HZ=100: 16 ms thành 1 tick = có thể chỉ 0 ms, đọc bị NACK). */
+#define WAIT_TICKS(ms) (pdMS_TO_TICKS(ms) + 1)
 
 struct drv_sht3x {
     i2c_master_dev_handle_t dev;
@@ -45,7 +50,7 @@ esp_err_t drv_sht3x_init(i2c_master_bus_handle_t bus, uint8_t addr, drv_sht3x_ha
         free(h);
         return err;
     }
-    vTaskDelay(pdMS_TO_TICKS(2));
+    vTaskDelay(WAIT_TICKS(SHT3X_RESET_WAIT_MS));
     *out = h;
     ESP_LOGI(TAG, "SHT3x ready at 0x%02x", addr);
     return ESP_OK;
@@ -57,7 +62,7 @@ esp_err_t drv_sht3x_read(drv_sht3x_handle_t h, float *temperature_c, float *humi
 
     ESP_RETURN_ON_ERROR(i2c_master_transmit(h->dev, CMD_MEAS_HIGH_NOSTRETCH, 2, SHT3X_TIMEOUT_MS), TAG,
                         "start measurement failed");
-    vTaskDelay(pdMS_TO_TICKS(SHT3X_MEAS_WAIT_MS));
+    vTaskDelay(WAIT_TICKS(SHT3X_MEAS_WAIT_MS));
 
     uint8_t b[6];
     ESP_RETURN_ON_ERROR(i2c_master_receive(h->dev, b, sizeof(b), SHT3X_TIMEOUT_MS), TAG, "read failed");

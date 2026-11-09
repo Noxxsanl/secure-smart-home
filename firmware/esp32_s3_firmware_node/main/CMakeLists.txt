@@ -1,5 +1,4 @@
-# main chỉ khởi động màn hình (board + ui). Khi chốt GPIO, đổi thành PRIV_REQUIRES application như Gateway
-# (README, mục "Khi chốt GPIO"). Mọi component trong components/ vẫn được biên dịch dù main không REQUIRES tới.
+# main chỉ gọi node_app_start() (components/application), như Gateway.
 idf_component_register(SRCS "app_main.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES board ui)
+                       PRIV_REQUIRES application)

@@ -28,6 +28,7 @@ struct drv_xpt2046 {
     spi_device_handle_t dev;
     drv_xpt2046_config_t cfg;
     int64_t last_log_us;
+    bool warned_stuck;
 };
 
 /* 1 lệnh + 16 xung đọc: bit bận, 12 bit kết quả (MSB trước), 3 bit 0. */
@@ -96,9 +97,14 @@ esp_err_t drv_xpt2046_read_raw(drv_xpt2046_handle_t h, uint16_t *x, uint16_t *y,
     }
     int pressure = 0;
     if (err == ESP_OK) {
-        pressure = (int)z1 + 4095 - (int)z2;
-        if (pressure < 0) {
-            pressure = 0;
+        /* Chạm thật thì Z1 > 0 và Z2 > Z1 (R_touch = R_x * X/4096 * (Z2/Z1 - 1) > 0). MISO kẹt mức 0 (Z1 = Z2 = 0)
+         * hoặc mức 1 (Z1 = Z2 = 4095) không phải chạm — trước đây bị tính áp lực 4095 = ấn liên tục. */
+        if (z1 > 0 && z2 > z1) {
+            pressure = (int)z1 + 4095 - (int)z2;
+        } else if (z1 == z2 && (z1 == 0 || z1 == 4095) && !h->warned_stuck) {
+            h->warned_stuck = true;
+            ESP_LOGW(TAG, "T_DO reads all %s: check T_DO -> MISO wiring and T_CS; LCD SDO must not share MISO",
+                     z1 == 0 ? "0" : "1");
         }
     }
     if (err == ESP_OK && pressure >= h->cfg.z_threshold) {

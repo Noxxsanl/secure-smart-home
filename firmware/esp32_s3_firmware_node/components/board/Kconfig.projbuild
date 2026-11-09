@@ -1,22 +1,23 @@
 # Màn hình TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 — chân GPIO, hướng, hiệu chuẩn (README, mục Màn hình).
-# Mặc định: SPI2 trên chân IOMUX (SCK 12, MOSI 11, MISO 13, CS 10) để LCD chạy 40 MHz ổn định.
+# Mặc định = PCB Node phòng khách (module ESP32-S3-WROOM-1 N16R8): SCK 21, MOSI 13, MISO 12, CS 38, RESET 39,
+# DC 48, LED 47, T_CS 14, T_IRQ không nối. Không phải chân IOMUX của SPI2 → tín hiệu qua ma trận GPIO, tối đa 40 MHz.
 menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
 
     menu "Chân GPIO"
         config NODE_LCD_PIN_SCLK
             int "SCK (LCD SCK + cảm ứng T_CLK)"
             range 0 48
-            default 12
+            default 21
 
         config NODE_LCD_PIN_MOSI
             int "MOSI (LCD SDI + cảm ứng T_DIN)"
             range 0 48
-            default 11
+            default 13
 
         config NODE_LCD_PIN_MISO
             int "MISO (CHỈ cảm ứng T_DO; KHÔNG nối SDO của LCD)"
             range -1 48
-            default 13
+            default 12
             help
                 SDO của ILI9488 không thả trở kháng cao, nối chung bus làm sai số đọc cảm ứng: để trống chân SDO
                 của LCD. -1 khi không dùng cảm ứng.
@@ -24,22 +25,22 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
         config NODE_LCD_PIN_CS
             int "LCD CS"
             range 0 48
-            default 10
+            default 38
 
         config NODE_LCD_PIN_DC
             int "LCD DC/RS"
             range 0 48
-            default 9
+            default 48
 
         config NODE_LCD_PIN_RST
             int "LCD RESET (-1 = nối RESET lên 3V3, reset bằng lệnh)"
             range -1 48
-            default 8
+            default 39
 
         config NODE_LCD_PIN_BL
             int "LCD LED / đèn nền (-1 = nối thẳng 3V3, không chỉnh độ sáng)"
             range -1 48
-            default 7
+            default 47
 
         config NODE_TOUCH_PIN_CS
             int "Cảm ứng T_CS"
@@ -49,7 +50,7 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
         config NODE_TOUCH_PIN_IRQ
             int "Cảm ứng T_IRQ (-1 = không nối)"
             range -1 48
-            default 15
+            default -1
             help
                 Nối T_IRQ thì khi không chạm, task LVGL không đọc cảm ứng qua SPI (bus rảnh cho LCD).
     endmenu
@@ -73,7 +74,8 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
             range 10 80
             default 40
             help
-                Ảnh có sọc/nhiễu (dây dupont dài) thì hạ xuống 26 hoặc 20.
+                Ảnh có sọc/nhiễu (dây dupont dài) thì hạ xuống 26 hoặc 20. Chân SPI đi qua ma trận GPIO (không
+                phải chân IOMUX 10–13) thì 40 MHz là mức tối đa.
 
         config NODE_LCD_BGR
             bool "Thứ tự màu BGR (đỏ và xanh dương bị đảo thì đổi)"
@@ -146,4 +148,24 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
                 In "raw X=.. Y=.. Z=.. -> (x, y)" tối đa 5 dòng/giây khi đang chạm. Tắt khi đã hiệu chuẩn xong.
     endmenu
 
+endmenu
+
+# Bus I2C cảm biến — hiện có SHT31 (nhiệt độ, độ ẩm). Chân mặc định = PCB Node phòng khách.
+menu "Node S3: cảm biến I2C (SHT31)"
+    config NODE_I2C_PIN_SDA
+        int "SDA"
+        range 0 48
+        default 15
+
+    config NODE_I2C_PIN_SCL
+        int "SCL"
+        range 0 48
+        default 7
+
+    config NODE_I2C_INTERNAL_PULLUP
+        bool "Bật trở kéo lên trong chip cho SDA/SCL"
+        default y
+        help
+            Trở trong (~45 kΩ) chỉ đủ khi module cảm biến không có trở kéo lên. Module SHT31 bán sẵn thường đã có
+            trở 4,7–10 kΩ; để bật cũng không sao.
 endmenu
