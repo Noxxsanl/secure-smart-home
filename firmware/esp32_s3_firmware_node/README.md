@@ -4,7 +4,7 @@ Firmware ESP-IDF v5.4.4 cho Node phòng khách: cảm biến I2C, mic INMP441, l
 
 Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.1, §4.3, §5.1, §6.1, §6.3, §7. Hợp đồng ESP-NOW: [API_DESIGN](../../docs/API_DESIGN.md) §11. Lệnh build/nạp chung: [ESP_IDF_BUILD](../../docs/guides/ESP_IDF_BUILD.md).
 
-> **Trạng thái:** đã có **thư viện** (`components/drivers`, `components/services`) và **luồng chính `components/application` (`node_app`)**: TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 + LVGL 8.4.0 (cùng bản Gateway), hiện 2 ô **nhiệt độ / độ ẩm từ SHT31** (mục [Cảm biến nhiệt độ, độ ẩm](#cảm-biến-nhiệt-độ-độ-ẩm-sht31)) cùng phần kiểm tra cảm ứng, tiếng Việt (mục [Màn hình](#màn-hình)). Nhiệt độ/độ ẩm gửi về Gateway qua **ESP-NOW** (TELEMETRY có HMAC, mục [Ghép nối Gateway](#ghép-nối-gateway-nạp-nvs-giai-đoạn-dev)), Gateway hiện ở trang Phòng khách. Chân màn hình và I2C chỉnh trong menuconfig, mặc định theo PCB. Relay, IR, âm thanh, cảm biến khác chưa khởi động, đợi chốt sơ đồ chân (mục [Khi chốt GPIO](#khi-chốt-gpio)). Đã biên dịch bằng ESP-IDF 5.4.4 (0 warning); thư viện chưa gọi tới đã kiểm link bằng `-Wl,-u` (67 hàm services/drivers). **Đã chạy trên PCB** (2026-11-09, COM8): màn hình, SHT31 OK; **đầu-cuối Node → Gateway đã chạy** (Gateway log `TELEMETRY node-living-01 verified` mỗi 10 s, hiện ở trang Phòng khách); cảm ứng chưa đọc được (T_DO luôn 0, xem bảng lỗi Màn hình). Gateway chưa chuyển tiếp được lên Server (thiếu CA, `node-living-01` chưa có trên backend).
+> **Trạng thái:** đã có **thư viện** (`components/drivers`, `components/services`) và **luồng chính `components/application` (`node_app`)**: TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 + LVGL 8.4.0 (cùng bản Gateway), hiện 2 ô **nhiệt độ / độ ẩm từ SHT31** (mục [Cảm biến nhiệt độ, độ ẩm](#cảm-biến-nhiệt-độ-độ-ẩm-sht31)) cùng phần kiểm tra cảm ứng, tiếng Việt (mục [Màn hình](#màn-hình)). Nhiệt độ/độ ẩm gửi về Gateway qua **ESP-NOW** (TELEMETRY có HMAC, mục [Ghép nối Gateway](#ghép-nối-gateway-nạp-nvs-giai-đoạn-dev)), Gateway hiện ở trang Phòng khách. Chân màn hình và I2C chỉnh trong menuconfig, mặc định theo PCB. Relay, IR, âm thanh, cảm biến khác chưa khởi động, đợi chốt sơ đồ chân (mục [Khi chốt GPIO](#khi-chốt-gpio)). Đã biên dịch bằng ESP-IDF 5.4.4 (0 warning); thư viện chưa gọi tới đã kiểm link bằng `-Wl,-u` (67 hàm services/drivers). **Đã chạy trên PCB** (2026-11-09, COM8): màn hình, SHT31 OK; **đầu-cuối Node → Gateway đã chạy** (Gateway log `TELEMETRY node-living-01 verified` mỗi 10 s, hiện ở trang Phòng khách); cảm ứng chưa đọc được (T_DO luôn 0 khi SDO của LCD còn nối chung GPIO12; nay SDO để trống, GPIO12 chỉ nối T_DO — chưa thử lại trên board). Gateway chưa chuyển tiếp được lên Server (thiếu CA, `node-living-01` chưa có trên backend).
 
 ## Cấu trúc
 
@@ -149,11 +149,11 @@ PCB dùng module **ESP32-S3-WROOM-1 N16R8** (flash 16 MB, PSRAM Octal 8 MB), n�
 | SDI (MOSI) | GPIO13 | 21 | chung với T_DIN |
 | SCK | GPIO21 | 23 | chung với T_CLK |
 | LED | GPIO47 | 24 | PWM đèn nền; `-1` nếu nối thẳng 3V3 |
-| SDO (MISO) | **nên để trống** | | ILI9488 không thả trở kháng cao, nối vào net MISO (GPIO12) có thể làm sai số đọc cảm ứng |
-| T_CLK | GPIO21 | 23 | nối chung SCK |
+| SDO (MISO) | **để trống** | | LCD chỉ ghi, không cần MISO. ILI9488 không thả SDO về trở kháng cao: nối chung GPIO12 với T_DO thì cảm ứng đọc ra toàn 0 |
+| T_CLK | GPIO21 | 23 | **bắt buộc nối**: chân riêng trên module, không nối sẵn với SCK — đi dây chung GPIO21 |
 | T_CS | GPIO14 | 22 | |
-| T_DIN | GPIO13 | 21 | nối chung SDI |
-| T_DO | GPIO12 | 20 | MISO của bus |
+| T_DIN | GPIO13 | 21 | **bắt buộc nối**: chân riêng trên module, không nối sẵn với SDI — đi dây chung GPIO13 |
+| T_DO | GPIO12 | 20 | MISO duy nhất của bus, chỉ nối T_DO (menuconfig *Cảm ứng T_DO*) |
 | T_IRQ | không nối (`-1`) | | Vẫn chạy, chỉ đọc cảm ứng qua SPI liên tục hơn |
 | SD_* | để trống | | Chưa dùng thẻ SD |
 
@@ -187,7 +187,7 @@ Không chạm mà vẫn có toạ độ ("chạm ma") thì tăng *Ngưỡng áp 
 | Màu đỏ ↔ xanh dương bị đảo | Đổi *Thứ tự màu BGR* |
 | Nền đen thành trắng, màu âm bản | Bật *Đảo màu* |
 | Ảnh có sọc, nhiễu | Dây ngắn lại, hạ xung nhịp |
-| Không nhận chạm | Dây T_CS/T_DO/T_IRQ; log có `touch disabled`? SDO của LCD có lỡ nối vào MISO không |
+| Không nhận chạm, T_DO đọc toàn 0 | Đủ 4 dây cảm ứng chưa: T_CLK → GPIO21, T_DIN → GPIO13, T_CS → GPIO14, T_DO → GPIO12 (thiếu T_CLK/T_DIN thì XPT2046 không nhận lệnh). Log `drv_xpt2046: self-test` lúc khởi động chỉ ra lỗi; SDO của LCD phải để trống |
 | Chạm bị lệch/ngược | Hiệu chuẩn lại như trên |
 
 ## Cảm biến nhiệt độ, độ ẩm (SHT31)
@@ -239,7 +239,7 @@ Tài nguyên ngoại vi (mọi tín hiệu đều đi qua ma trận GPIO, nên c
 | LED IR | RMT TX | 1 |
 | VS1838B | RMT RX | 1 |
 | Relay | GPIO | 1 mỗi kênh |
-| LCD ILI9488 + cảm ứng XPT2046 | SPI2 + LEDC (timer 0, kênh 0) | SCLK, MOSI, MISO, CS, DC, RST, BL, T_CS — đã chốt theo PCB (T_IRQ không nối) |
+| LCD ILI9488 + cảm ứng XPT2046 | SPI2 + LEDC (timer 0, kênh 0) | SCLK, MOSI, CS, DC, RST, BL, T_CS, T_DO (= MISO của bus) — đã chốt theo PCB (SDO của LCD, T_IRQ không nối) |
 
 Tổng khoảng 19–21 chân.
 

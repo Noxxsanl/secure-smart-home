@@ -114,7 +114,7 @@ File: `components/drivers/include/drv_display.h`, `components/drivers/src/lcd/dr
 
 ### 4.3. `board_display` + `Kconfig.projbuild`
 
-- Nơi duy nhất có số chân. Menu *Node S3: màn hình (ILI9488 + cảm ứng XPT2046)*: chân (mặc định = PCB: SCK 21, MOSI 13, MISO 12, CS 38, RESET 39, DC 48, LED 47, T_CS 14, T_IRQ không nối — qua ma trận GPIO, tối đa 40 MHz), hướng (mặc định ngang 480×320), xung nhịp LCD (40 MHz), BGR, đảo màu, độ sáng, bật/tắt cảm ứng, hiệu chuẩn, ngưỡng áp lực, log thô.
+- Nơi duy nhất có số chân. Menu *Node S3: màn hình (ILI9488 + cảm ứng XPT2046)*: chân (mặc định = PCB: SCK 21, MOSI 13, CS 38, RESET 39, DC 48, LED 47, T_CS 14, T_DO 12 = MISO duy nhất của bus (SDO của LCD để trống, tắt cảm ứng thì bus không có MISO), T_IRQ không nối — qua ma trận GPIO, tối đa 40 MHz), hướng (mặc định ngang 480×320), xung nhịp LCD (40 MHz), BGR, đảo màu, độ sáng, bật/tắt cảm ứng, hiệu chuẩn, ngưỡng áp lực, log thô.
 - Thứ tự trong `board_display_init()`: bus SPI → panel → xoay → `drv_display_init` → cảm ứng. Cảm ứng lỗi chỉ cảnh báo, màn hình vẫn chạy.
 - Đèn nền để tắt lúc init, `app_main` bật sau khi `node_ui_start()` đã dựng màn hình, tránh lộ nội dung rác trong RAM màn hình.
 

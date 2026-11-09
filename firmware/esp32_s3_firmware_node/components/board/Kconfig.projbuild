@@ -1,6 +1,7 @@
 # Màn hình TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 — chân GPIO, hướng, hiệu chuẩn (README, mục Màn hình).
-# Mặc định = PCB Node phòng khách (module ESP32-S3-WROOM-1 N16R8): SCK 21, MOSI 13, MISO 12, CS 38, RESET 39,
-# DC 48, LED 47, T_CS 14, T_IRQ không nối. Không phải chân IOMUX của SPI2 → tín hiệu qua ma trận GPIO, tối đa 40 MHz.
+# Mặc định = PCB Node phòng khách (module ESP32-S3-WROOM-1 N16R8): SCK 21, MOSI 13, CS 38, RESET 39, DC 48, LED 47,
+# T_CS 14, T_DO 12, T_IRQ không nối. LCD không có MISO (chân SDO để trống), MISO của bus chỉ là T_DO.
+# Không phải chân IOMUX của SPI2 → tín hiệu qua ma trận GPIO, tối đa 40 MHz.
 menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
 
     menu "Chân GPIO"
@@ -13,14 +14,6 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
             int "MOSI (LCD SDI + cảm ứng T_DIN)"
             range 0 48
             default 13
-
-        config NODE_LCD_PIN_MISO
-            int "MISO (CHỈ cảm ứng T_DO; KHÔNG nối SDO của LCD)"
-            range -1 48
-            default 12
-            help
-                SDO của ILI9488 không thả trở kháng cao, nối chung bus làm sai số đọc cảm ứng: để trống chân SDO
-                của LCD. -1 khi không dùng cảm ứng.
 
         config NODE_LCD_PIN_CS
             int "LCD CS"
@@ -46,6 +39,16 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
             int "Cảm ứng T_CS"
             range 0 48
             default 14
+
+        config NODE_TOUCH_PIN_DO
+            int "Cảm ứng T_DO (MISO duy nhất của bus SPI)"
+            depends on NODE_TOUCH_ENABLE
+            range 0 48
+            default 12
+            help
+                Chân này chỉ nối T_DO. Để trống chân SDO (MISO) của LCD: ILI9488 không thả SDO về trở kháng cao,
+                nối chung với T_DO thì số đọc cảm ứng ra toàn 0. LCD chỉ ghi nên không cần MISO; tắt cảm ứng thì
+                bus SPI không có MISO.
 
         config NODE_TOUCH_PIN_IRQ
             int "Cảm ứng T_IRQ (-1 = không nối)"

@@ -49,6 +49,15 @@ esp_err_t drv_xpt2046_read_raw(drv_xpt2046_handle_t h, uint16_t *x, uint16_t *y,
 /** Toạ độ điểm ảnh đã hiệu chuẩn, kẹp trong [0, width) × [0, height). */
 esp_err_t drv_xpt2046_read(drv_xpt2046_handle_t h, int *x, int *y, bool *pressed);
 
+/**
+ * Tự chẩn đoán đấu dây (gọi 1 lần sau init, lúc không chạm), in kết luận ra log:
+ *  - miso_gpio >= 0: bật trở kéo lên trong chip ở MISO rồi đọc mức khi KHÔNG chọn chip nào. Mức 0 = có chip khác
+ *    (thường là SDO của LCD) đang kéo MISO xuống → đọc cảm ứng ra toàn 0.
+ *  - Đo Z1/Z2/X/Y 1 lần: toàn 0 hoặc toàn 4095 = XPT2046 không trả lời (T_CS, T_DO, nguồn).
+ * ESP_OK = dây ổn; ESP_ERR_INVALID_STATE = MISO bị kéo xuống; ESP_ERR_NOT_FOUND = chip không trả lời.
+ */
+esp_err_t drv_xpt2046_self_test(drv_xpt2046_handle_t h, int miso_gpio);
+
 esp_err_t drv_xpt2046_del(drv_xpt2046_handle_t h);
 
 #ifdef __cplusplus

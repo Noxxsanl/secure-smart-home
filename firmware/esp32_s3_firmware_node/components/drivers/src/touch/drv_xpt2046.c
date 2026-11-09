@@ -4,6 +4,7 @@
 
 #include "driver/gpio.h"
 #include "esp_check.h"
+#include "esp_rom_sys.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -206,6 +207,54 @@ err:
     }
     free(h);
     return ret;
+}
+
+esp_err_t drv_xpt2046_self_test(drv_xpt2046_handle_t h, int miso_gpio)
+{
+    ESP_RETURN_ON_FALSE(h, ESP_ERR_INVALID_ARG, TAG, "null arg");
+
+    /* 1. MISO lúc rảnh (mọi CS cao): XPT2046 thả T_DO về trở kháng cao → trở kéo lên cho mức 1. */
+    int idle = -1;
+    if (miso_gpio >= 0) {
+        gpio_pullup_en(miso_gpio);
+        esp_rom_delay_us(50);
+        idle = gpio_get_level(miso_gpio);
+    }
+
+    /* 2. Đo thử 1 lần mỗi kênh. Không chạm: Z1 ~ 0, Z2 ~ 4095; X/Y tuỳ ý. */
+    uint16_t z1 = 0;
+    uint16_t z2 = 0;
+    uint16_t x = 0;
+    uint16_t y = 0;
+    esp_err_t err = measure(h, CMD_Z1 | PD_ADC_ON, &z1);
+    if (err == ESP_OK) {
+        err = measure(h, CMD_Z2 | PD_ADC_ON, &z2);
+    }
+    if (err == ESP_OK) {
+        err = measure(h, CMD_X | PD_ADC_ON, &x);
+    }
+    if (err == ESP_OK) {
+        err = measure(h, CMD_Y | PD_ADC_ON, &y);
+    }
+    power_down(h);
+    ESP_RETURN_ON_ERROR(err, TAG, "self-test spi");
+
+    ESP_LOGI(TAG, "self-test: MISO idle=%d (pull-up), Z1=%u Z2=%u X=%u Y=%u", idle, z1, z2, x, y);
+    if (idle == 0) {
+        ESP_LOGE(TAG, "MISO (GPIO%d) is held LOW while no chip is selected: another chip drives it - usually the "
+                      "LCD SDO pin. Disconnect LCD SDO (bend/cut that header pin); keep only T_DO on GPIO%d",
+                 miso_gpio, miso_gpio);
+        return ESP_ERR_INVALID_STATE;
+    }
+    bool all0 = (z1 | z2 | x | y) == 0;
+    bool all1 = (z1 & z2 & x & y) == 0x0FFF;
+    if (all0 || all1) {
+        ESP_LOGE(TAG, "XPT2046 does not answer (all %s): check T_CS -> GPIO%d, T_DO -> MISO, T_CLK/T_DIN, module power",
+                 all0 ? "0" : "1", h->cfg.cs_gpio);
+        return ESP_ERR_NOT_FOUND;
+    }
+    ESP_LOGI(TAG, "self-test OK: XPT2046 answers on MISO");
+    return ESP_OK;
 }
 
 esp_err_t drv_xpt2046_del(drv_xpt2046_handle_t h)

@@ -14,6 +14,13 @@ static const char *TAG = "board_display";
 #define LCD_BL_LEDC_TIMER 0
 #define LCD_BL_LEDC_CHANNEL 0
 
+/* LCD chỉ ghi, chân SDO (MISO) của LCD để trống: MISO của bus chỉ là T_DO của cảm ứng. */
+#if CONFIG_NODE_TOUCH_ENABLE
+#define SPI_PIN_MISO CONFIG_NODE_TOUCH_PIN_DO
+#else
+#define SPI_PIN_MISO (-1)
+#endif
+
 #if CONFIG_NODE_LCD_ROTATION_90
 #define LCD_ROTATION DRV_ILI9488_ROT_90
 #elif CONFIG_NODE_LCD_ROTATION_180
@@ -48,9 +55,9 @@ static esp_err_t touch_init(int width, int height)
         .log_raw = true,
 #endif
     };
-    ESP_RETURN_ON_FALSE(CONFIG_NODE_LCD_PIN_MISO >= 0, ESP_ERR_INVALID_ARG, TAG, "touch needs MISO (T_DO) pin");
     drv_xpt2046_handle_t tp;
     ESP_RETURN_ON_ERROR(drv_xpt2046_init(&tc, &tp), TAG, "XPT2046");
+    drv_xpt2046_self_test(tp, SPI_PIN_MISO);   /* chỉ in chẩn đoán đấu dây, lỗi vẫn gắn cảm ứng */
     esp_err_t err = drv_display_add_touch(tp, NULL);
     if (err != ESP_OK) {
         drv_xpt2046_del(tp);
@@ -67,7 +74,7 @@ esp_err_t board_display_init(void)
         .host = LCD_SPI_HOST,
         .sclk_gpio = CONFIG_NODE_LCD_PIN_SCLK,
         .mosi_gpio = CONFIG_NODE_LCD_PIN_MOSI,
-        .miso_gpio = CONFIG_NODE_LCD_PIN_MISO,
+        .miso_gpio = SPI_PIN_MISO,
     };
     esp_err_t err = drv_spi_bus_init(&bus);
     ESP_RETURN_ON_FALSE(err == ESP_OK || err == ESP_ERR_INVALID_STATE, err, TAG, "SPI bus");
