@@ -46,6 +46,9 @@ CONFIG_LV_USE_DEMO_WIDGETS=y
 # Bỏ so với ví dụ: CONFIG_LV_USE_PERF_MONITOR (ô FPS trên màn hình), demo benchmark/stress/music.
 
 # ---- Gateway ------------------------------------------------------------------------------------------------
+# Tối ưu kích thước (-Os). sdkconfig cũ còn -Og thì firmware/cmake/fw_build.cmake vẫn ép -Os
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
 # Bảng phân vùng riêng: 2 slot OTA 6 MB + storage + log (IOT_NODE_NETWORK §3.4)
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_gateway.csv"

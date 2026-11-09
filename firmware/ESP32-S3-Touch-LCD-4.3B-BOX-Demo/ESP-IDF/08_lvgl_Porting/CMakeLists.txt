@@ -9,3 +9,8 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../../common")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 add_compile_options("-Wno-attributes")   # như ví dụ Waveshare (LVGL 8 + GCC 13)
 project(gateway_s3)
+
+# -Os cho toàn bộ app + bảng dung lượng sau mỗi lần link (docs/guides/ESP_IDF_BUILD.md §5)
+include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/fw_build.cmake)
+fw_optimize_size()
+fw_size_report()

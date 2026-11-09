@@ -565,6 +565,27 @@ idf.py fullclean          # xoá sạch build/ (khi đổi target, đổi cấu 
 idf.py update-dependencies   # cập nhật managed component theo idf_component.yml
 ```
 
+### Tối ưu kích thước (-Os) và bảng tài nguyên sau build
+
+Ba project (`esp32_cam`, `esp32_s3_firmware_node`, gateway `08_lvgl_Porting`) gọi [`firmware/cmake/fw_build.cmake`](../../firmware/cmake/fw_build.cmake) ở cuối `CMakeLists.txt`:
+
+- `fw_optimize_size()` — biên dịch toàn bộ app với `-Os` (mặc định của ESP-IDF là `-Og`). `sdkconfig.defaults` đã đặt `CONFIG_COMPILER_OPTIMIZATION_SIZE=y`, nhưng defaults không ghi đè `sdkconfig` đã có trên máy; khi đó hàm thêm `-Os` vào sau `-Og` của mọi target và log CMake báo `Optimization: -Os forced on N targets`. Đồng bộ sdkconfig: `idf.py menuconfig` → *Compiler options → Optimization Level → Optimize for size (-Os)*. Bootloader vốn đã `-Os`.
+- `fw_size_report()` — mỗi lần `idf.py build` (kể cả khi không có gì đổi) và trước khi nạp (`idf.py flash`, `idf.py app-flash`) in bảng *Memory Type Usage Summary*, giống `idf.py size`.
+
+Tắt (lưu trong CMakeCache của thư mục build, bật lại bằng `=ON`): `idf.py -DFW_OPT_SIZE=OFF build` dùng mức tối ưu trong menuconfig (vd. *Debug (-Og)* để bước từng dòng bằng GDB); `idf.py -DFW_SIZE_REPORT=OFF build` không in bảng.
+
+Đọc bảng:
+
+| Dòng | Ý nghĩa |
+|---|---|
+| Flash Code / Flash Data | `.text` / `.rodata` chạy và đọc thẳng từ flash. So tổng ảnh app với slot OTA ở dòng `<app>.bin binary size … (xx%) free` cuối build |
+| DIRAM (ESP32-S3: Node, Gateway) | SRAM nội dùng chung cho code IRAM tràn sang, `.data`, `.bss` — chỉ số cần canh nhất; phần còn trống là heap nội lúc chạy |
+| IRAM (ESP32-S3) | Vùng nhỏ chỉ chứa code; ESP-IDF xếp code IRAM vào đây trước rồi tràn sang DIRAM, nên gần 100% là bình thường |
+| IRAM / DRAM (ESP32: camera) | 2 vùng riêng: IRAM chứa code chạy trong RAM (ISR, `IRAM_ATTR`), DRAM chứa `.data` + `.bss`. IRAM đầy thì lỗi link |
+| RTC SLOW / RTC FAST | Dữ liệu giữ qua deep sleep |
+
+PSRAM cấp phát lúc chạy (LVGL, khung ảnh camera, TLS) nên không có trong bảng — xem trên board bằng `heap_caps_get_free_size(MALLOC_CAP_SPIRAM)`.
+
 ---
 
 ## 6. Nạp firmware và xem log
@@ -760,7 +781,7 @@ Cách 1 gọn hơn vì không phải duy trì hai hệ build song song.
 | Cấu hình | `idf.py menuconfig` → `idf.py save-defconfig` |
 | Xem bảng phân vùng | `idf.py partition-table` |
 | Build | `idf.py build` |
-| Xem dung lượng | `idf.py size` / `idf.py size-components` |
+| Xem dung lượng | Tự in sau mỗi `idf.py build` / trước `idf.py flash` (mục 5); chi tiết: `idf.py size-components` / `idf.py size-files` |
 | Nạp + log | `idf.py -p COM5 flash monitor` (thoát: `Ctrl+]`) |
 | Chỉ nạp app | `idf.py -p COM5 app-flash` |
 | Nạp bằng esptool | `cd build; python -m esptool --chip esp32s3 -p COM5 write_flash '@flash_args'` |

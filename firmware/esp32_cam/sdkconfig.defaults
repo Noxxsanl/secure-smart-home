@@ -5,6 +5,9 @@ CONFIG_IDF_TARGET="esp32"
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 
+# Tối ưu kích thước (-Os). sdkconfig cũ còn -Og thì firmware/cmake/fw_build.cmake vẫn ép -Os
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
 # PSRAM 4 MB chứa khung hình JPEG (fb_count = 2) và bộ đệm ảnh gửi Gateway
 CONFIG_SPIRAM=y
 
