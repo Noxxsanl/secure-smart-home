@@ -584,8 +584,8 @@ static void build_screen(void)
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Header (giữ nguyên) */
-    make_label(scr, FONT_TITLE, 16, 12, "GATEWAY NHÀ THÔNG MINH", COLOR_TEXT);
+    /* Header */
+    make_label(scr, FONT_TITLE, 16, 12, "Gateway Smart Home", COLOR_TEXT);
     s_lbl_wifi = make_label(scr, FONT_TEXT, 360, 14, LV_SYMBOL_WIFI " ...", COLOR_TEXT);
     s_lbl_server = make_label(scr, FONT_TEXT, 560, 14, LV_SYMBOL_UPLOAD " Máy chủ ...", COLOR_TEXT);
     s_lbl_clock = make_label(scr, FONT_TITLE, 700, 12, "--:--:--", COLOR_TEXT);
