@@ -5,7 +5,7 @@
 //   /health                     – liveness (không auth)
 //   /auth, /devices, /audit-log, /users, /notifications
 //                               – legacy Prototype (cookie `token`) — tests/security/attack_demo*.sh còn dùng
-//   /device/**                  – firmware (HMAC, không phiên): /device/data, /device/sensors
+//   /device/**                  – firmware (HMAC, không phiên): /device/data, /device/sensors, /device/camera/snapshot
 //   /dashboard/auth/**          – login, logout, me của ADMIN/OPERATOR (KHÔNG cần phiên, trừ /me)
 //   /dashboard/**               – sau requireDashboard("admin", "operator") (cookie sh_admin | sh_operator + X-Portal)
 //   /portal/auth/**, /portal/** – khách hàng web (cookie sh_user + X-Portal: user), cùng handler với /mobile
@@ -15,6 +15,7 @@ import { Router } from "express";
 import healthRoutes from "./core/health/health.routes";
 import { auditModule } from "./modules/audit";
 import { automationModule } from "./modules/automation";
+import { cameraModule } from "./modules/camera";
 import { controlModule } from "./modules/control";
 import { devicesModule } from "./modules/devices";
 import { homesModule } from "./modules/homes";
@@ -44,6 +45,7 @@ export const APP_MODULES: readonly AppModule[] = [
   homesModule,
   devicesModule,
   telemetryModule,
+  cameraModule,
   controlModule,
   automationModule,
   recommendationsModule,

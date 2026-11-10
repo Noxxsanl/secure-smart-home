@@ -5,13 +5,15 @@
 #  Dùng:  bash infra/pki/gen_mqtt_certs.sh [IP_LAN|hostname ...]
 #  VD:    bash infra/pki/gen_mqtt_certs.sh 192.168.1.100
 #
-#  - Truyền IP LAN của máy chạy broker — đúng giá trị MQTT_BROKER2_HOST trong
-#    firmware/gateway-node/include/config_gw.h. Gateway kiểm tra tên này trong cert.
+#  - Truyền IP LAN của máy chạy broker — đúng host trong NVS cloud/mqtt_uri và
+#    cloud/api_url của gateway. Gateway kiểm tra tên này trong cert.
+#  - Cùng server cert dùng cho Broker 2 (8883) và nginx HTTPS (443, gateway gửi
+#    ảnh camera / fallback /api/device/data).
 #  - SAN luôn có sẵn: localhost, 127.0.0.1, mqtt-broker-2 (tên service Docker).
 #  - CA chỉ tạo 1 lần rồi dùng lại: đổi IP LAN thì chạy lại script để cấp lại
 #    server cert, KHÔNG phải nạp lại firmware. Muốn thay CA: xoá
-#    infra/mosquitto/certs/ca.* rồi chạy lại (khi đó phải nạp lại gateway).
-#  - Sinh firmware/gateway-node/include/mqtt_ca_cert.h từ ca.crt.
+#    infra/mosquitto/certs/ca.* rồi chạy lại (khi đó phải build + nạp lại gateway).
+#  - Chép ca.crt vào certs/mqtt_ca.crt của project gateway ESP-IDF (gitignore).
 #
 #  Yêu cầu: openssl
 # =============================================================================
@@ -19,7 +21,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CERT_DIR="$ROOT/infra/mosquitto/certs"
-FW_HEADER="$ROOT/firmware/gateway-node/include/mqtt_ca_cert.h"
+GW_CA_FILE="$ROOT/firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/certs/mqtt_ca.crt"
 CA_DAYS=3650
 SERVER_DAYS=825
 
@@ -113,17 +115,10 @@ echo "[server] Đã cấp server.crt (hạn $SERVER_DAYS ngày)"
 echo "         SAN DNS: ${SAN_DNS[*]}"
 echo "         SAN IP : ${SAN_IP[*]}"
 
-# ── 3. Header CA cho firmware gateway ─────────────────────────────────────────
-{
-  echo "// Tự sinh bởi infra/pki/gen_mqtt_certs.sh — không sửa tay, không commit."
-  echo "// CA nội bộ để gateway xác thực chứng chỉ Mosquitto Broker 2 (MQTT TLS)."
-  echo "#pragma once"
-  echo ""
-  echo 'static const char MQTT_BROKER2_CA_CERT[] = R"PEM('
-  tr -d '\r' < ca.crt
-  echo ')PEM";'
-} > "$FW_HEADER"
-echo "[fw]     Đã ghi ${FW_HEADER#"$ROOT"/}"
+# ── 3. CA cho firmware gateway (ESP-IDF nhúng certs/mqtt_ca.crt lúc build) ───
+mkdir -p "$(dirname "$GW_CA_FILE")"
+tr -d '\r' < ca.crt > "$GW_CA_FILE"
+echo "[fw]     Đã chép CA vào ${GW_CA_FILE#"$ROOT"/} — build lại gateway nếu CA mới"
 
 if [[ $# -eq 0 ]]; then
   echo
@@ -131,4 +126,4 @@ if [[ $# -eq 0 ]]; then
   echo "           Chạy lại: bash infra/pki/gen_mqtt_certs.sh <IP máy chạy broker>"
 fi
 echo
-echo "Tiếp theo: docker compose up -d --force-recreate mqtt-broker-2 backend"
+echo "Tiếp theo: docker compose up -d --force-recreate mqtt-broker-2 nginx backend"

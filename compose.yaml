@@ -68,8 +68,13 @@ services:
     container_name: iot-nginx
     ports:
       - "80:80"
+      # HTTPS cho gateway (ảnh camera, fallback /api/device/data) — cert của infra/pki/gen_mqtt_certs.sh
+      - "443:443"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Chỉ cert + khoá server (không mount ca.key)
+      - ./infra/mosquitto/certs/server.crt:/etc/nginx/certs/server.crt:ro
+      - ./infra/mosquitto/certs/server.key:/etc/nginx/certs/server.key:ro
     depends_on:
       - backend
       - frontend-admin

@@ -121,7 +121,7 @@ function Overview({ myHome, renderDevices }: { myHome: MyHome } & HomeOverviewPa
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatsCard
-          title="Thiết bị đang bật" value={`${onCount}/${relays.length}`} subtitle="Relay đèn, quạt…"
+          title="Thiết bị đang bật" value={`${onCount}/${relays.length}`} subtitle="Đèn, quạt, rèm, điều hòa…"
           icon={<Lightbulb className="h-4 w-4 text-brand" />} accent="bg-brand-soft text-brand"
         />
         <StatsCard

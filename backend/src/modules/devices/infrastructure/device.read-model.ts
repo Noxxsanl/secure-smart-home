@@ -62,6 +62,20 @@ export async function listDeviceRowsByIds(ids: readonly number[], db: Queryable 
   return queryRows<DeviceRow>(`${DEVICE_SELECT_SQL} WHERE d.id IN (${placeholders(ids.length)}) ORDER BY d.id`, [...ids], db);
 }
 
+/** Thiết bị con của một gateway theo danh sách UID (heartbeat gateway báo node nào còn sống). */
+export async function listGatewayChildrenByUids(
+  gatewayDbId: number,
+  uids: readonly string[],
+  db: Queryable = pool
+): Promise<DeviceRow[]> {
+  if (uids.length === 0) return [];
+  return queryRows<DeviceRow>(
+    `${DEVICE_SELECT_SQL} WHERE d.gateway_device_id = ? AND d.device_id IN (${placeholders(uids.length)}) ORDER BY d.id`,
+    [gatewayDbId, ...uids],
+    db
+  );
+}
+
 /** Mọi thiết bị của một nhà; gateway đứng đầu, rồi theo thứ tự phòng. */
 export async function listHomeDeviceRows(
   homeId: number,

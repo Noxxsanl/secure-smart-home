@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -69,6 +70,14 @@ class _FakeDevices implements DeviceRepository {
 
   @override
   Future<TelemetrySeries> telemetry(int deviceId, TelemetryRange range) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<CameraSnapshot>> listSnapshots(int deviceId, {int limit = 20}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Uint8List> snapshotImage(int snapshotId) =>
       throw UnimplementedError();
 }
 

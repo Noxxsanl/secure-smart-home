@@ -51,6 +51,19 @@ class NotificationEvent extends RealtimeEvent {
   final AppNotification notification;
 }
 
+/// `{"type":"camera_snapshot","home_id","device_id","snapshot":{id,trigger,size_bytes,captured_at}}`
+/// — a new camera picture; the camera page reloads its list.
+class CameraSnapshotEvent extends RealtimeEvent {
+  const CameraSnapshotEvent({
+    required int homeId,
+    required this.deviceId,
+    required this.snapshot,
+  }) : super(homeId);
+
+  final int deviceId;
+  final CameraSnapshot snapshot;
+}
+
 /// `{"type":"home_changed","home_id"}` — membership/role/rename/rooms/claim:
 /// refetch homes and the overview.
 class HomeChangedEvent extends RealtimeEvent {

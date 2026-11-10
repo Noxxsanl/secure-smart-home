@@ -5,16 +5,21 @@ import '../../../core/network/error_messages.dart';
 import '../../../core/utils/date_format.dart';
 import '../../../core/widgets/app_feedback.dart';
 import '../../homes/homes.dart';
+import '../domain/appliance.dart';
 import '../domain/device.dart';
 
-/// Icon for a device: lights, fans, sensors, door contacts, cameras.
+/// Icon for a device: lights, fans, curtains, air conditioners, sensors, door
+/// contacts, cameras.
 IconData deviceIcon(CustomerDevice device) {
   switch (device.category) {
     case DeviceCategory.relay:
-      final name = device.name.toLowerCase();
-      if (name.contains('quạt')) return Icons.air;
-      if (name.contains('đèn')) return Icons.lightbulb_outline;
-      return Icons.power_settings_new;
+      return switch (ApplianceKind.of(device)) {
+        ApplianceKind.lamp => Icons.lightbulb_outline,
+        ApplianceKind.fan => Icons.air,
+        ApplianceKind.curtain => Icons.curtains_outlined,
+        ApplianceKind.airConditioner => Icons.ac_unit,
+        _ => Icons.power_settings_new,
+      };
     case DeviceCategory.sensor:
       return Icons.thermostat_outlined;
     case DeviceCategory.doorContact:
@@ -34,12 +39,19 @@ String deviceCategoryLabel(DeviceCategory category) => switch (category) {
   DeviceCategory.gateway => 'Gateway',
 };
 
+/// Device type for the detail page: the appliance for relays, else the
+/// category.
+String deviceTypeLabel(CustomerDevice device) =>
+    ApplianceKind.of(device)?.label ?? deviceCategoryLabel(device.category);
+
 /// One-line state shown on tiles and rows.
 String deviceSubtitle(CustomerDevice device) {
   switch (device.category) {
     case DeviceCategory.relay:
       if (!device.online) return 'Ngoại tuyến';
-      return device.isOn ? 'Đang bật' : 'Đang tắt';
+      return (ApplianceKind.of(device) ?? ApplianceKind.plainSwitch).stateOf(
+        device.isOn,
+      );
     case DeviceCategory.sensor:
       final reading = device.latest;
       if (reading == null || !reading.hasClimate) {
@@ -52,7 +64,7 @@ String deviceSubtitle(CustomerDevice device) {
       if (open == null) return device.online ? 'Chưa có số liệu' : 'Ngoại tuyến';
       return open ? 'Đang mở' : 'Đang đóng';
     case DeviceCategory.camera:
-      return 'Chưa hỗ trợ xem trực tiếp';
+      return device.online ? 'Xem trực tiếp · ảnh chụp' : 'Ngoại tuyến';
     case DeviceCategory.gateway:
       return device.online ? 'Online' : 'Ngoại tuyến';
   }

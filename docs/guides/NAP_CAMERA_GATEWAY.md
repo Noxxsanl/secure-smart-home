@@ -279,14 +279,7 @@ Thử nhận ảnh khi chưa có camera (laptop nối Local AP, gửi JPEG có c
 
 ## 8. Khi muốn lên Server
 
-Đường Camera → Gateway không cần Server. Muốn Gateway gửi telemetry/ảnh lên Server thì thêm:
-
-1. Tạo thiết bị gateway và camera trên backend, thay ID/secret tự đặt bằng giá trị backend trả (secret chỉ trả **1 lần**, bất biến 1). Camera phải được gán vào gateway này.
-2. Chép CA của Broker 2: `infra\mosquitto\certs\ca.crt` → `08_lvgl_Porting\certs\mqtt_ca.crt` (thư mục `certs/` đã bị gitignore), build và nạp lại Gateway ([MQTT_TLS](MQTT_TLS.md), [ESP_IDF_BUILD](ESP_IDF_BUILD.md) §7.2).
-3. Sửa `cloud/mqtt_uri`, `cloud/api_url` theo IP máy chủ. Host trong `mqtt_uri` phải nằm trong SAN của chứng chỉ broker.
-4. Sinh lại và ghi NVS cho **cả hai** board (mục 4–6).
-
-Hiện backend **chưa có** `POST /api/device/camera/snapshot` và chưa subscribe `camera/event`, nên ảnh chỉ hiện trên Gateway, chưa lên Mobile/Dashboard ([README Gateway](../../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/README.md), mục *Hợp đồng với Server*).
+Đường Camera → Gateway không cần Server. Muốn Gateway gửi nhiệt/ẩm và ảnh lên Server rồi xem trên web khách/Mobile: làm theo [LEN_SERVER](LEN_SERVER.md) — sinh cert theo IP máy chủ (script tự chép CA vào `08_lvgl_Porting/certs/`), `npm run hw:register` để backend nhận đúng ID/secret đã nạp, sửa `cloud/mqtt_uri`, `cloud/api_url`, `cloud/home_id` rồi build + nạp lại **chỉ Gateway** (Camera và Node giữ nguyên NVS).
 
 ---
 

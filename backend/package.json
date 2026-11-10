@@ -8,6 +8,7 @@
     "start": "node dist/main.js",
     "seed": "node dist/scripts/seed.js",
     "seed:dev": "tsc && node dist/scripts/seed.js",
+    "hw:register": "tsc && node dist/scripts/register-hardware.js",
     "check:arch": "node tools/check-architecture.mjs"
   },
   "keywords": [],

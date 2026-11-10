@@ -10,9 +10,11 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "gw_config.h"
+#include "gw_local_http.h"   /* GW_COMMAND_ID_MAX */
 #include "gw_time.h"
 #include "gw_tls.h"
 #include "mbedtls/platform_util.h"
+#include "mbedtls/sha256.h"
 
 static const char *TAG = "gw_api";
 
@@ -122,9 +124,22 @@ esp_err_t gw_api_post_snapshot(const char *camera_id, const char *trigger, const
     int64_t ts;
     ESP_RETURN_ON_FALSE(gw_time_now(&ts), ESP_ERR_INVALID_STATE, TAG, "clock not synced");
     char ts_str[24];
-    char sig[SM_HMAC_HEX_LEN + 1];
     snprintf(ts_str, sizeof(ts_str), "%" PRId64, ts);
-    ESP_RETURN_ON_ERROR(gw_config_sign_ts(ts, sig), TAG, "sign");
+
+    /* Chữ ký phủ cả camera, trigger, lệnh và SHA-256 của ảnh (API_DESIGN §8) — khác miền với "<gw>:<ts>". */
+    uint8_t digest[32];
+    ESP_RETURN_ON_FALSE(mbedtls_sha256(jpeg, len, digest, 0) == 0, ESP_FAIL, TAG, "sha256");
+    char digest_hex[sizeof(digest) * 2 + 1];
+    for (size_t i = 0; i < sizeof(digest); i++) {
+        snprintf(&digest_hex[i * 2], 3, "%02x", digest[i]);
+    }
+    const char *cmd = command_id != NULL ? command_id : "";
+    char msg[GW_ID_MAX + 24 + GW_ID_MAX + 16 + GW_COMMAND_ID_MAX + sizeof(digest_hex) + 8];
+    int n = snprintf(msg, sizeof(msg), "%s:%s:%s:%s:%s:%s", gw_config_gateway_id(), ts_str, camera_id, trigger, cmd,
+                     digest_hex);
+    ESP_RETURN_ON_FALSE(n > 0 && (size_t)n < sizeof(msg), ESP_ERR_INVALID_SIZE, TAG, "signature message too long");
+    char sig[SM_HMAC_HEX_LEN + 1];
+    ESP_RETURN_ON_ERROR(gw_config_sign(msg, sig), TAG, "sign");
 
     esp_http_client_handle_t c = open_client("/api/device/camera/snapshot", SNAPSHOT_TIMEOUT_MS);
     if (c == NULL) {
@@ -147,7 +162,10 @@ esp_err_t gw_api_post_snapshot(const char *camera_id, const char *trigger, const
     esp_http_client_cleanup(c);
     if (status != 201 && status != 200) {
         ESP_LOGW(TAG, "POST /api/device/camera/snapshot failed: %s %d%s", status < 0 ? "network" : "HTTP", status,
-                 status == 404 ? " (endpoint not implemented on backend yet)" : "");
+                 status == 401   ? " (signature/secret mismatch — npm run hw:register)"
+                 : status == 404 ? " (camera not registered under this gateway)"
+                 : status == 409 ? " (camera not assigned to a home)"
+                                 : "");
         return ESP_FAIL;
     }
     parse_snapshot_id(resp, snapshot_id);

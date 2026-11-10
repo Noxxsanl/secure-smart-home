@@ -1,9 +1,9 @@
-import { CameraOff, DoorClosed, DoorOpen, Droplets, Thermometer } from "lucide-react";
+import { Camera, DoorClosed, DoorOpen, Droplets, Thermometer } from "lucide-react";
 import type { CustomerDevice } from "@shh/api-client/portal";
 import { formatHumidity, formatTemperature } from "@shh/utils";
 
 // Giá trị hiện tại của thiết bị không phải relay: cảm biến nhiệt/ẩm, cảm biến
-// cửa (mở/đóng từ latest.door_open), camera (chưa hỗ trợ xem trực tiếp).
+// cửa (mở/đóng từ latest.door_open), camera (ảnh chụp; xem trực tiếp chưa có trên web).
 export default function DeviceReading({ device, size = "sm" }: { device: CustomerDevice; size?: "sm" | "lg" }) {
   const text = size === "lg" ? "text-base" : "text-xs";
   const icon = size === "lg" ? "h-5 w-5" : "h-3.5 w-3.5";
@@ -42,7 +42,7 @@ export default function DeviceReading({ device, size = "sm" }: { device: Custome
   if (device.category === "camera") {
     return (
       <span className={`inline-flex items-center gap-1 text-gray-400 dark:text-slate-500 ${text}`}>
-        <CameraOff className={icon} /> Chưa hỗ trợ xem trực tiếp
+        <Camera className={icon} /> Ảnh chụp khi có chuyển động
       </span>
     );
   }

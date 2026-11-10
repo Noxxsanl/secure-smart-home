@@ -7,6 +7,7 @@ import '../core/realtime/realtime_source.dart';
 import '../core/widgets/app_feedback.dart';
 import '../modules/auth/auth.dart';
 import '../modules/automation/automation.dart';
+import '../modules/devices/devices.dart';
 import '../modules/homes/homes.dart';
 import '../modules/notifications/notifications.dart';
 import '../modules/realtime/realtime.dart';
@@ -103,6 +104,9 @@ class RealtimeController extends Notifier<RealtimeStatus> {
         _overview(event.homeId)?.applyDeviceState(event);
       case TelemetryEvent():
         _overview(event.homeId)?.applyTelemetry(event);
+      case CameraSnapshotEvent():
+        // Only reload a list that is on screen (autoDispose provider).
+        ref.invalidate(cameraSnapshotsProvider(event.deviceId));
       case NotificationEvent():
         _onNotification(event);
       case HomeChangedEvent():

@@ -146,9 +146,14 @@ Mọi chữ ký: `HMAC-SHA256(secret, message)` xuất **hex thường**, so sá
 | Lệnh gateway | Backend | secret gateway | `<command_id>:<gateway_id>:<action>:<ts>` | Đã có |
 | Ack lệnh | Gateway | secret gateway | `<command_id>:<status>:<ts>` | Đã có |
 | Lệnh OTA | Backend | secret gateway | `<job_id>:<version>:<ts>` | Đã có |
+| Ảnh camera lên Server (`POST /api/device/camera/snapshot`) | Gateway | secret gateway | `<gateway_id>:<ts>:<device_id>:<trigger>:<command_id>:<sha256_hex(body)>` — gắn chữ ký với nội dung ảnh; `<command_id>` rỗng khi không có `X-Command-Id` (hai dấu `:` liền nhau); `sha256_hex` = sha256 hex thường của đúng các byte body | Đã có |
+| Heartbeat gateway | Gateway | secret gateway | `<gateway_id>:<ts>` | Đã có |
+| Sự kiện camera (`camera/event`) | Gateway | secret gateway | `<device_id>:motion:<ts>` | Đã có |
 | Ảnh camera gửi Gateway, mở luồng camera | Camera / Gateway | secret camera | `<device_id>:<unix_ts>` | Dự kiến |
 
-Hai dòng đầu là bất biến 5 — backend, gateway và node phải khớp từng byte. Chữ ký telemetry **không ký nội dung** `data`; tính toàn vẹn nội dung dựa vào TLS (Gateway → Server) và mã hoá ESP-NOW (Node → Gateway).
+Hai dòng đầu là bất biến 5 — backend, gateway và node phải khớp từng byte. Chữ ký telemetry **không ký nội dung** `data`; tính toàn vẹn nội dung dựa vào TLS (Gateway → Server) và mã hoá ESP-NOW (Node → Gateway). Riêng ảnh camera **có ký nội dung** (sha256 của body nằm trong chuỗi ký).
+
+Ghi chú rủi ro tạm chấp nhận: heartbeat gateway và `camera/event` vẫn ký chuỗi ngắn (`<gateway_id>:<ts>`, `<device_id>:motion:<ts>`) nên có thể bị phát lại trong cửa sổ ±300 giây, và `nodes[]`/`ip` của heartbeat **không được ký**. Chấp nhận cho tới khi Broker 2 có ACL theo gateway (FR-12.4) — khi đó chỉ gateway sở hữu topic mới publish được.
 
 ---
 
@@ -190,6 +195,8 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 | Thiết bị | GET | `/devices/:deviceId` | `view` | Chi tiết thiết bị |
 | | PATCH | `/devices/:deviceId` | `rename` | Đổi tên thiết bị |
 | | GET | `/devices/:deviceId/telemetry` | `view` | Chuỗi số liệu `24h` / `7d` |
+| Camera | GET | `/devices/:deviceId/snapshots?limit=` | `view` | Ảnh gần đây của camera (`limit` 1–50, mặc định 20; mới nhất trước): `{device_id, items: [{id, trigger: "motion"\|"request", size_bytes, captured_at}]}`. Thiết bị không phải camera → 404. Chỉ liệt kê ảnh chụp khi camera đang ở nhà hiện tại (`home_id` ảnh = `home_id` camera) |
+| | GET | `/snapshots/:snapshotId/image` | `view` | Tải ảnh JPEG (`Cache-Control: private, max-age=86400, immutable`); không tồn tại / không có quyền / file mất / ảnh chụp ở nhà khác với nhà hiện tại của camera → 404 (ảnh chỉ thuộc về nhà lúc chụp). Web dùng thẳng `/api/portal/snapshots/<id>/image` trong `<img src>` (cookie `sh_user`), mobile gửi `Authorization: Bearer` |
 | | POST | `/devices/:deviceId/commands` | `control_device` | Bật/tắt (`turn_on` / `turn_off`), chờ ack ≤ 5 giây |
 | Tự động hoá | GET | `/homes/:homeId/automations` | `view_automation` | Danh sách luật |
 | | POST | `/homes/:homeId/automations` | `create_automation` | Tạo luật IF/THEN |
@@ -215,9 +222,7 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 
 | Nhóm | Method | Path | Quyền | Mô tả | Nguồn thiết kế |
 |---|---|---|---|---|---|
-| Camera | GET | `/devices/:deviceId/snapshots?limit=` | `view` | Danh sách ảnh gần đây (URL có kiểm quyền) | [IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.3 |
-| | GET | `/snapshots/:snapshotId` | `view` | Tải ảnh JPEG | như trên |
-| | POST | `/devices/:deviceId/commands` với `action: "snapshot"` | `control_device` | Yêu cầu chụp ngay (mở rộng `DeviceAction`) | §6.3 của tài liệu đó |
+| Camera | POST | `/devices/:deviceId/commands` với `action: "snapshot"` | `control_device` | Yêu cầu chụp ngay (mở rộng `DeviceAction`) | §6.3 của tài liệu đó |
 | | WS | `/cameras/:deviceId/live` | `view`, role ≠ GUEST | Xem trực tiếp, khung JPEG nhị phân, gia hạn 30 giây | §5.5 của tài liệu đó (tuỳ chọn) |
 | Provisioning | POST | `/provision/start` | OWNER | Bắt đầu phiên đưa Gateway lên mạng | [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) §15.2 |
 | | GET | `/provision/status` | OWNER | Trạng thái phiên | như trên |
@@ -243,10 +248,11 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 | `device_state` | `home_id`, `device` (trạng thái sau lệnh) | Lệnh được ack, simulator đổi trạng thái |
 | `notification` | `home_id`, `notification` | Có thông báo cho người dùng |
 | `home_changed` | `home_id` | Đổi thành viên, role, tên, phòng, trạng thái nhà — client tải lại |
+| `camera_snapshot` | `home_id`, `device_id`, `snapshot: {id, trigger, size_bytes, captured_at}` | Camera vừa gửi ảnh lên (GUEST chỉ nhận khi camera nằm trong thiết bị được cấp); ảnh lấy bằng `GET /snapshots/:id/image` |
 
 Khung tối đa 4 KB. Server ping định kỳ; client không phản hồi pong bị đóng. Mất kết nối → client thử lại 1, 2, 4, 8, 16 giây rồi 30 giây, trong lúc đó poll REST.
 
-**Dự kiến:** sự kiện `camera_event` (`home_id`, `device_id`, `snapshot_id`) khi có chuyển động. Live video **không** đi qua kênh này (mục 5.2).
+Thông báo chuyển động đi qua tin `notification` (`type: "CAMERA_MOTION"`). Live video **không** đi qua kênh này (mục 5.2).
 
 ---
 
@@ -315,7 +321,7 @@ Tiền tố `/api/device`. Gateway gọi qua HTTPS, kiểm chứng chứng chỉ
 |---|---|---|---|---|
 | POST | `/device/data` | HMAC 2 lớp trong body | `{gateway_id, gw_timestamp, gw_hmac, sensor_payload: {sensor_id, sn_timestamp, sn_hmac, data}}` — **cùng payload với MQTT** `gateway/+/data`, dùng làm đường dự phòng khi MQTT lỗi | Đã có (`modules/telemetry/features/ingest-http/`) |
 | GET | `/device/sensors` | HMAC gateway trên query `gateway_id, gw_timestamp, gw_hmac` | Trả danh sách sensor **kèm secret** để gateway kiểm HMAC lớp 1 | Đã có — **lỗ hổng đã biết** ([Bảo mật](SECURITY_ARCHITECTURE.md) §2). Thay bằng cấp secret lúc ghép nối (mục 14, Q1) |
-| POST | `/device/camera/snapshot` | Header `X-Gateway-Id`, `X-Timestamp`, `X-Signature` (HMAC gateway) | Body `image/jpeg` ≤ 200 KB; header `X-Device-Id` (camera), `X-Trigger: motion\|request`, `X-Command-Id?`. Trả `201 {snapshot_id}` | Dự kiến |
+| POST | `/device/camera/snapshot` | Header `X-Gateway-Id`, `X-Timestamp`, `X-Signature` = `HMAC-SHA256(secret gateway, "<gateway_id>:<ts>:<device_id>:<trigger>:<command_id>:<sha256_hex(body)>")` hex thường (`<command_id>` rỗng nếu không có `X-Command-Id`) | Body `image/jpeg` ≤ 200 KB; header `X-Device-Id` (camera), `X-Trigger: motion\|request`, `X-Command-Id?`; `X-Gateway-Id`/`X-Device-Id`/`X-Command-Id` khớp `^[A-Za-z0-9_.:-]{1,64}$`. Thứ tự kiểm: header → gateway tồn tại → `ts` ±300 s → gateway đúng loại + active → camera thuộc gateway + active → đọc body (≤ 200 KB) → HMAC → JPEG hợp lệ → camera đã gán nhà. Trả `201 {snapshot_id}` (chuỗi). Lỗi: `400 MISSING_GATEWAY_FIELDS`/`MISSING_FIELDS`/`INVALID_INPUT`/`INVALID_IMAGE`, `401 GATEWAY_AUTH_FAIL {reason: NOT_FOUND\|TIMESTAMP_EXPIRED\|HMAC_MISMATCH}`, `403 INVALID_DEVICE_TYPE`/`DEVICE_BLOCKED`/`DEVICE_NOT_ACTIVE`/`DEVICE_INACTIVE`, `404 CAMERA_NOT_FOUND`, `409 CAMERA_NOT_ASSIGNED` (camera chưa gán nhà, không lưu), `413 PAYLOAD_TOO_LARGE`; giới hạn 30 yêu cầu/phút | Đã có (`modules/camera/features/ingest-snapshot/`) |
 | WS | `/device/camera/live` | HMAC gateway khi mở kết nối | Tin nhị phân = 1 khung JPEG; tin văn bản `{type:"end"}` khi dừng | Dự kiến, tuỳ chọn |
 
 `modules/telemetry/features/ingest-http/` (HTTP) và `modules/telemetry/features/ingest-mqtt/` (MQTT) phải giữ **cùng logic xác thực** (bất biến 4): cả hai gọi chung hàm HMAC của `modules/devices` và `telemetry/domain/ingest-common.ts`.
@@ -335,6 +341,8 @@ Broker 2 (`mosquitto`, cổng 8883 TLS; 1883 chỉ cho môi trường dev). Gate
 | `home/<home_id>/gateway/<gw>/device/<dev>/command/ack` | GW → Server | 1 | `{command_id, status: "ok"\|"error", power?, ts, hmac}`; Server chờ 5 giây | như trên |
 | `home/<home_id>/gateway/<gw>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {restart, factory_reset}` | như trên |
 | `home/<home_id>/gateway/<gw>/ota/command` | Server → GW | 1 | `{job_id, version, target_type, checksum_sha256, ts, hmac}` | như trên |
+| `home/<home_id>/gateway/<gw>/heartbeat` | GW → Server | 0/1 | `{uptime, rssi, ip, fw_version, nodes: [{device_id, online, rssi, last_seen, fw_version}], ts, hmac}` mỗi ~30 giây; `hmac` = HMAC(secret gateway, `<gateway_id>:<ts>`). Kiểm: gateway active, `home_id` topic = nhà của gateway, `ts` ±300 giây. Hợp lệ → `last_seen` gateway + node `online: true`; thiết bị vừa online → WS `device_state` | `modules/devices/features/gateway-heartbeat/` |
+| `home/<home_id>/gateway/<gw>/device/<dev>/camera/event` | GW → Server | 1 | `{type: "motion", ts, snapshot_id?, hmac}`; `hmac` = HMAC(secret gateway, `<dev>:motion:<ts>`). Hợp lệ → thông báo `CAMERA_MOTION` (OWNER/CONTROLLER/VIEWER, chống lặp 60 giây/camera) | `modules/camera/features/camera-event/` |
 
 Ghi chú: firmware Gateway S3 bản sơ bộ (`firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting`, **chưa chạy trên board**) đã publish `gateway/+/data`, subscribe `.../device/+/command`, `.../command`, `.../ota/command` (wildcard `home/+`), kiểm HMAC + ts, chuyển lệnh xuống node qua ESP-NOW và gửi `.../command/ack`; `ota/command` mới kiểm chữ ký rồi log, `factory_reset` chưa làm. Firmware Arduino cũ `firmware/gateway-node` đã gỡ.
 
@@ -344,9 +352,7 @@ Theo [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) §10.2, rút gọn ch
 
 | Topic | Chiều | QoS / Retain | Payload |
 |---|---|---|---|
-| `home/<h>/gateway/<gw>/heartbeat` | GW → Server | 0 | `{ts, uptime, rssi, ip, fw_version, nodes: [{device_id, rssi, battery?, last_seen, fw_version}], hmac}` — mỗi 30 giây |
 | `home/<h>/gateway/<gw>/device/<dev>/status` | GW → Server | 1, **retain** | `{power?, online, source: "gateway_local"\|"node"\|"command", ts, hmac}` — trạng thái cuối, gồm cả thao tác trên màn hình Gateway |
-| `home/<h>/gateway/<gw>/device/<dev>/camera/event` | GW → Server | 1 | `{type: "motion", ts, snapshot_id?, hmac}` |
 | `home/<h>/gateway/<gw>/device/<dev>/command` mở rộng | Server → GW | 1 | Thêm `action ∈ {snapshot, live_start, live_stop}` cho camera |
 | `home/<h>/gateway/<gw>/ota/progress` · `ota/result` | GW → Server | 0 · 1 | `{job_id, percent}` · `{job_id, status, version, ts, hmac}` |
 | `home/<h>/gateway/<gw>/provision/<event>` | GW → Server | 1 | `event ∈ {wifi_status, node_pair_result}` |
@@ -417,7 +423,7 @@ Chi tiết thông số luồng: [IoT Node Network](firmware/IOT_NODE_NETWORK.md)
 | Telemetry | Node ESP-NOW `TELEMETRY` → MQTT `gateway/+/data` (hoặc `POST /api/device/data`) → WS `telemetry` | Backend đã có; ESP-NOW dự kiến |
 | Bật/tắt thiết bị | `POST /devices/:id/commands` → MQTT `.../command` → ESP-NOW `CMD` → `CMD_ACK` → MQTT `.../command/ack` → HTTP 200 + WS `device_state` | Backend đã có; firmware dự kiến |
 | Thao tác trên màn hình Gateway | ESP-NOW `CMD`/`CMD_ACK` → MQTT `.../status` (`source: gateway_local`) → WS `device_state` | Dự kiến |
-| Chuyển động → ảnh | ESP-NOW `EVENT` → `POST /local/camera/snapshot` → `POST /api/device/camera/snapshot` → MQTT `camera/event` → WS `camera_event` | Dự kiến |
+| Chuyển động → ảnh | ESP-NOW `EVENT` → `POST /local/camera/snapshot` → `POST /api/device/camera/snapshot` → MQTT `camera/event` → thông báo `CAMERA_MOTION` + WS `camera_snapshot` | Backend đã có (module `camera`); firmware Gateway đã gửi |
 | Xem trực tiếp trên Gateway | `GET /stream` (Camera) → hiển thị LCD | Firmware Gateway + Camera đã viết, chưa chạy trên board |
 | Xem trực tiếp trên Mobile | WS `/api/mobile/cameras/:id/live` → MQTT `command {live_start}` → `GET /stream` → WS `/api/device/camera/live` → Mobile | Dự kiến, tuỳ chọn |
 | Đưa Gateway lên mạng | `POST /api/mobile/provision/start` → BLE/SoftAP `/local/gateway/*` → MQTT `provision/wifi_status` | Dự kiến |

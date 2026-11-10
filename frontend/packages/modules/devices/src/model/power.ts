@@ -9,4 +9,6 @@ export type DevicePowerControl = {
   /** Lý do không bật/tắt được (để hiện gợi ý), null nếu điều khiển được. */
   blockReason: (device: CustomerDevice) => string | null;
   toggle: (device: CustomerDevice) => Promise<void>;
+  /** Đặt hẳn bật/tắt (nút Mở/Đóng của rèm); trùng trạng thái hiện tại thì không gửi lệnh. */
+  setPower: (device: CustomerDevice, on: boolean) => Promise<void>;
 };

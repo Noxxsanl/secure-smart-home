@@ -23,6 +23,7 @@ export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
   garage: "Gara",
   garden: "Sân vườn",
   door: "Cửa",
+  camera: "Camera",
 };
 
 export const HOME_STATUS_LABELS: Record<HomeStatus, string> = {

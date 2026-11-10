@@ -12,9 +12,10 @@ ENV NODE_ENV=production
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./
-# Firmware upload ghi vào FIRMWARE_STORAGE_DIR (mặc định storage/firmware) — compose.prod mount volume
-# vào đây; tạo sẵn và giao cho user `node` để volume mới khởi tạo đúng quyền. Không chạy bằng root.
-RUN mkdir -p storage/firmware && chown -R node:node storage
+# Firmware upload ghi vào FIRMWARE_STORAGE_DIR (mặc định storage/firmware), ảnh camera vào SNAPSHOT_STORAGE_DIR
+# (mặc định storage/snapshots) — compose.prod mount volume vào đây; tạo sẵn và giao cho user `node` để volume
+# mới khởi tạo đúng quyền. Không chạy bằng root.
+RUN mkdir -p storage/firmware storage/snapshots && chown -R node:node storage
 USER node
 EXPOSE 5000
 # Gọi node trực tiếp (không qua npm) để tiến trình nhận SIGTERM khi `docker stop`.

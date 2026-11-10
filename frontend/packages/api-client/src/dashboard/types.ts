@@ -17,7 +17,7 @@ export type DeviceStatus = "active" | "inactive" | "blocked";
 export type Severity = "critical" | "warning" | "info" | "success";
 export type RoomType =
   | "living_room" | "bedroom" | "kitchen" | "bathroom"
-  | "office" | "garage" | "garden" | "door";
+  | "office" | "garage" | "garden" | "door" | "camera";
 export type StaffRole = "admin" | "operator";
 
 export type LogCategory =

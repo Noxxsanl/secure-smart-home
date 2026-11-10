@@ -9,6 +9,7 @@
 import { Router } from "express";
 import type { AppModule } from "../../shared/module";
 import { getConsoleDeviceDetailController } from "./features/get-console-device-detail/get-console-device-detail.controller";
+import { startGatewayHeartbeat } from "./features/gateway-heartbeat/gateway-heartbeat.consumer";
 import { getDeviceDetailController } from "./features/get-device-detail/get-device-detail.controller";
 import { getGatewayDetailController } from "./features/get-gateway-detail/get-gateway-detail.controller";
 import { listConsoleDevicesController } from "./features/list-console-devices/list-console-devices.controller";
@@ -48,6 +49,7 @@ export const devicesModule: AppModule = {
   },
   workers: [
     { name: "deviceMonitor", start: startDeviceMonitor }, // online/offline thiết bị, tick 15 s (features/presence-monitor)
+    { name: "gatewayHeartbeat", start: startGatewayHeartbeat }, // home/+/gateway/+/heartbeat (Broker 2, TLS)
     { name: "mqttTracker", start: startMqttTracker }, // theo dõi log $SYS broker để cập nhật IP thiết bị
   ],
 };

@@ -39,8 +39,11 @@ export function useDevicePower({ homeSuspended = false }: Options = {}): DeviceP
   const canToggle = (device: CustomerDevice) => blockReason(device) === null && !isPending(device);
 
   async function toggle(device: CustomerDevice) {
-    if (!canToggle(device)) return;
-    const next = !powerOf(device);
+    await setPower(device, !powerOf(device));
+  }
+
+  async function setPower(device: CustomerDevice, next: boolean) {
+    if (!canToggle(device) || powerOf(device) === next) return;
     setOptimistic((prev) => ({ ...prev, [device.id]: next }));
 
     const controller = new AbortController();
@@ -67,5 +70,5 @@ export function useDevicePower({ homeSuspended = false }: Options = {}): DeviceP
     }
   }
 
-  return { powerOf, isPending, canToggle, blockReason, toggle };
+  return { powerOf, isPending, canToggle, blockReason, toggle, setPower };
 }

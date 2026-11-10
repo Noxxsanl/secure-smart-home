@@ -1,25 +1,31 @@
 import {
-  Camera, Cpu, DoorClosed, DoorOpen, Fan, Lightbulb, Power, Router, Snowflake, Thermometer,
+  Blinds, Camera, Cpu, DoorClosed, DoorOpen, Fan, Lightbulb, Power, Router, Snowflake, Thermometer,
 } from "lucide-react";
 import type { CustomerDevice } from "@shh/api-client/portal";
+import { applianceKind } from "../model/appliance";
 
 type DeviceIconProps = {
   device: Pick<CustomerDevice, "category" | "device_name" | "latest">;
   className?: string;
 };
 
-// Relay chỉ biết là "công tắc" — đoán đồ vật theo tên do kit đặt sẵn
-// ("Đèn phòng khách", "Quạt phòng ngủ") để icon dễ nhận ra hơn. Mỗi nhánh trả về
-// JSX tĩnh (không tạo component trong lúc render — React Compiler yêu cầu vậy).
+// Relay: icon theo đồ vật đoán từ tên (model/appliance). Mỗi nhánh trả về JSX tĩnh
+// (không tạo component trong lúc render — React Compiler yêu cầu vậy).
 export default function DeviceIcon({ device, className }: DeviceIconProps) {
   switch (device.category) {
-    case "relay": {
-      const name = device.device_name;
-      if (/đèn|light|lamp/i.test(name)) return <Lightbulb className={className} />;
-      if (/quạt|fan/i.test(name)) return <Fan className={className} />;
-      if (/điều hoà|điều hòa|máy lạnh|air/i.test(name)) return <Snowflake className={className} />;
-      return <Power className={className} />;
-    }
+    case "relay":
+      switch (applianceKind(device)) {
+        case "lamp":
+          return <Lightbulb className={className} />;
+        case "fan":
+          return <Fan className={className} />;
+        case "curtain":
+          return <Blinds className={className} />;
+        case "ac":
+          return <Snowflake className={className} />;
+        default:
+          return <Power className={className} />;
+      }
     case "sensor":
       return <Thermometer className={className} />;
     case "door_contact":

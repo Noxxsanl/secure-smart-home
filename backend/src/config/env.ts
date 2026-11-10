@@ -117,6 +117,10 @@ export interface AppEnv {
   firmwareStorageDir: string;
   /** Số ngày giữ sensor_data (job retention hằng giờ). */
   telemetryRetentionDays: number;
+  /** Thư mục lưu ảnh chụp camera (tương đối theo thư mục chạy backend; cùng kiểu với firmwareStorageDir). */
+  snapshotStorageDir: string;
+  /** Số ngày giữ ảnh chụp camera (job purge-old-snapshots hằng giờ; thêm trần 500 ảnh / camera). */
+  cameraSnapshotRetentionDays: number;
 }
 
 export const env: Readonly<AppEnv> = Object.freeze({
@@ -132,4 +136,6 @@ export const env: Readonly<AppEnv> = Object.freeze({
   activationCodeTtlDays: readInt("ACTIVATION_CODE_TTL_DAYS", 180, 1, 3650),
   firmwareStorageDir: process.env.FIRMWARE_STORAGE_DIR?.trim() || "storage/firmware",
   telemetryRetentionDays: readInt("TELEMETRY_RETENTION_DAYS", 8, 1, 3650),
+  snapshotStorageDir: process.env.SNAPSHOT_STORAGE_DIR?.trim() || "storage/snapshots",
+  cameraSnapshotRetentionDays: readInt("CAMERA_SNAPSHOT_RETENTION_DAYS", 7, 1, 3650),
 });

@@ -50,7 +50,7 @@ modules/<m>/
 |---|---|---|---|
 | `auth` | `@shh/auth` / `identity` | `splash`, `login`, `register`, `profile` (gồm sửa hồ sơ, đổi mật khẩu, giới thiệu) | — |
 | `homes` | `@shh/homes` / `homes` | `onboarding`, `home_dashboard` (gồm sheet đổi nhà), `room_list`, `room_detail`, `members` (gồm mời thành viên), `my_invitations`, `claim` (gồm quét QR) | `RoomCard`, `roomIcon`, mapper nhà/phòng |
-| `devices` | `@shh/devices` + `@shh/telemetry` / `devices` + `telemetry` + `control` | `device_detail` (gồm biểu đồ telemetry) | `DeviceTile`, `DeviceRow`, nhãn/biểu tượng thiết bị, `togglePower`, mapper thiết bị |
+| `devices` | `@shh/devices` + `@shh/telemetry` / `devices` + `telemetry` + `control` | `device_detail` (gồm biểu đồ telemetry, khối "Ảnh camera" cho `category == camera`: ảnh mới nhất 4:3 + dải thumbnail, tải qua `ApiClient.getBytes` có Bearer, làm mới khi WS `camera_snapshot`) | `DeviceTile`, `DeviceRow`, nhãn/biểu tượng thiết bị, `togglePower`, mapper thiết bị |
 | `automation` | `@shh/automation` / `automation` + `recommendations` | `rules` (danh sách + tạo quy tắc + lịch sử) | `SuggestionCard` (dùng ở trang chủ) |
 | `notifications` | `@shh/notifications` / `notifications` | `notification_center` | mapper thông báo |
 | `realtime` | — / `realtime` | — (chỉ nguồn WS/mock + kiểu sự kiện `RealtimeEvent`) | `realtimeSourceProvider`, `parseRealtimeEvent` |
@@ -121,7 +121,7 @@ cd mobile
 flutter pub get
 flutter analyze
 dart run tool/check_architecture.dart
-flutter test                                  # 48 test (đơn vị + widget, chạy trên backend giả)
+flutter test                                  # 57 test (đơn vị + widget, chạy trên backend giả)
 flutter run --dart-define=USE_MOCK=true       # không cần backend
 flutter run --dart-define=API_BASE_URL=http://<LAN-IP>:5000   # backend thật, origin không kèm /api
 ```

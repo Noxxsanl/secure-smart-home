@@ -170,6 +170,21 @@ function attachBusListeners(): void {
     }
   });
 
+  eventBus.on("camera_snapshot", (event) => {
+    // Cùng bộ lọc với telemetry: GUEST chỉ nhận khi camera nằm trong thiết bị được cấp
+    for (const conn of authedConnections()) {
+      const scope = conn.homes.get(event.home_id);
+      if (scope && canSeeDevice(scope, event.device_id)) {
+        send(conn, {
+          type: "camera_snapshot",
+          home_id: event.home_id,
+          device_id: event.device_id,
+          snapshot: event.snapshot,
+        });
+      }
+    }
+  });
+
   eventBus.on("notification", (event) => {
     // Thông báo là của riêng từng người nhận → chỉ gửi đúng user_id, không phụ thuộc tập nhà
     for (const conn of authedConnections()) {

@@ -834,6 +834,19 @@ class MockBackend {
       HomeStatus.unclaimed,
       gatewayOnline: false,
     );
+    // Mock-only, added last so the ids above stay as in contract §8: the
+    // layout `npm run hw:register` gives the demo hardware (living room with
+    // lamp / fan / curtain / air conditioner + a camera room).
+    final home6 = _addHome(
+      'Nhà demo phần cứng',
+      'KIT_B',
+      HomeStatus.active,
+      owner: accounts.firstWhere((a) => a.id == 7),
+      gatewayOnline: true,
+      seen: ago(const Duration(seconds: 8)),
+      claimedAt: ago(const Duration(days: 3)),
+      hardwareDemo: true,
+    );
 
     codes.addAll([
       MockActivationCode(
@@ -890,6 +903,7 @@ class MockBackend {
     }
 
     member(home1, 7, HomeRole.owner, 'Nguyễn Hoàng Đạt');
+    member(home6, 7, HomeRole.owner, 'Nguyễn Hoàng Đạt');
     member(home1, 8, HomeRole.controller, 'Trần Thị Lan', invitedBy: 7);
     member(home1, 9, HomeRole.viewer, 'Phạm Thị Hoa', invitedBy: 7);
     final livingLight = devices.firstWhere(
@@ -1083,6 +1097,7 @@ class MockBackend {
     required bool gatewayOnline,
     DateTime? seen,
     DateTime? claimedAt,
+    bool hardwareDemo = false,
   }) {
     final homeId = nextId('home');
     final gatewayDeviceId = nextId('device');
@@ -1158,6 +1173,28 @@ class MockBackend {
           latest: latest,
         ),
       );
+    }
+
+    if (hardwareDemo) {
+      final living = addRoom('Phòng khách', 'living_room', 0);
+      addDevice(
+        living,
+        'Phòng khách',
+        'Cảm biến nhiệt/ẩm phòng khách',
+        DeviceCategory.sensor,
+        climate: (temperature: 28.4, humidity: 70.0),
+      );
+      for (final name in const [
+        'Đèn phòng khách',
+        'Quạt phòng khách',
+        'Rèm cửa phòng khách',
+        'Điều hòa phòng khách',
+      ]) {
+        addDevice(living, 'Phòng khách', name, DeviceCategory.relay);
+      }
+      final camera = addRoom('Camera', 'camera', 1);
+      addDevice(camera, 'Camera', 'Camera', DeviceCategory.camera);
+      return homeId;
     }
 
     final door = addRoom('Cửa chính', 'door', 0);

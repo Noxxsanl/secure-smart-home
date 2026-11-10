@@ -10,6 +10,7 @@ import { markProvisioned, updatePowerState } from "./infrastructure/device.repos
 export {
   buildReading,
   getDeviceRow,
+  getDeviceRowByUid,
   getGatewayCounts,
   latestReadings,
   listDeviceRowsByIds,
@@ -28,7 +29,14 @@ export { ensureHomeAccess, requireDevice, requireGateway } from "./domain/consol
 export { toCustomerDeviceOne, toCustomerDevices } from "./domain/device-view";
 
 // ── Xác thực HMAC thiết bị (dùng chung HTTP + MQTT — invariant 4) ───────────
-export { isSafeDeviceId, jsonHasNul, verifyDeviceHMAC, verifyGatewayHMAC } from "./domain/hmac.service";
+export {
+  isSafeDeviceId,
+  isTimestampValid,
+  isWellFormedUid,
+  jsonHasNul,
+  verifyDeviceHMAC,
+  verifyGatewayHMAC,
+} from "./domain/hmac.service";
 export type { HMACVerifyResult, VerifiedDevice } from "./domain/hmac.service";
 export { registerAuthFailure } from "./domain/auth-failure";
 export type { AuthFailureResult } from "./domain/auth-failure";

@@ -12,7 +12,7 @@ export type Severity = "critical" | "warning" | "info" | "success";
 export type PackageCode = "KIT_A" | "KIT_B";
 // Backend kiểm tra room_type trong tập này; giữ kiểu string để không vỡ khi có loại mới.
 export type RoomType =
-  | "living_room" | "bedroom" | "kitchen" | "bathroom" | "office" | "garage" | "garden" | "door";
+  | "living_room" | "bedroom" | "kitchen" | "bathroom" | "office" | "garage" | "garden" | "door" | "camera";
 
 export type Home = {
   id: number;
@@ -139,6 +139,22 @@ export type Telemetry = {
   bucket_seconds: number;
   points: TelemetryPoint[];
   latest: Reading | null;
+};
+
+export type CameraSnapshotTrigger = "motion" | "request";
+
+/** Một ảnh chụp của camera (GET /devices/:id/snapshots); ảnh JPEG lấy qua `snapshotImageUrl`. */
+export type CameraSnapshot = {
+  id: number;
+  trigger: CameraSnapshotTrigger;
+  size_bytes: number;
+  captured_at: string;
+};
+
+export type CameraSnapshotList = {
+  device_id: number;
+  /** Mới nhất trước. */
+  items: CameraSnapshot[];
 };
 
 export type CustomerNotification = {

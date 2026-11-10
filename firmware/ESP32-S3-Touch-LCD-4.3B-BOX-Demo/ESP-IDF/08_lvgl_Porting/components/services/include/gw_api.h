@@ -4,9 +4,11 @@
  *   POST /api/device/data            body = gw_envelope_telemetry (cùng payload MQTT) — đường dự phòng khi MQTT
  *                                    mất kết nối. ĐÃ CÓ ở backend (telemetry/features/ingest-http).
  *   POST /api/device/camera/snapshot body image/jpeg ≤ 200 KB; header X-Gateway-Id, X-Timestamp,
- *                                    X-Signature = HMAC(secret gw, "<gateway_id>:<ts>"), X-Device-Id (camera),
- *                                    X-Trigger, X-Command-Id?; trả 201 {snapshot_id}. ĐỀ XUẤT — backend chưa có
- *                                    (sẽ nhận 404 cho tới khi làm, IOT_NODE_NETWORK §5.3).
+ *                                    X-Device-Id (camera), X-Trigger, X-Command-Id?, X-Signature =
+ *                                    HMAC(secret gw, "<gateway_id>:<ts>:<device_id>:<trigger>:<command_id>:<sha256>")
+ *                                    — <command_id> rỗng khi không có, <sha256> = SHA-256 hex thường của thân ảnh:
+ *                                    chữ ký gắn với đúng ảnh + camera, không dùng lại được chữ ký "<gw>:<ts>" của
+ *                                    telemetry/heartbeat. Trả 201 {snapshot_id}. ĐÃ CÓ (backend module camera).
  *
  * https:// kiểm chứng chứng chỉ bằng CA nhúng (gw_tls); http:// chỉ khi bật [DEV].
  */

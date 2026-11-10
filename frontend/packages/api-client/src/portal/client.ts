@@ -1,8 +1,9 @@
 "use client";
 
 import useSWR, { useSWRConfig, type SWRConfiguration } from "swr";
-import { apiFetcher } from "../http";
+import { api, apiFetcher } from "../http";
 import { FetchError } from "../errors";
+import type { CameraSnapshotList } from "./types";
 
 // ---------------------------------------------------------------------------
 // Nền chung cho lớp API của cổng khách hàng. Trình duyệt gọi cùng origin
@@ -20,6 +21,12 @@ export const POLL_OVERVIEW_MS = 5_000;
 export const POLL_DETAIL_MS = 5_000;
 export const POLL_NOTIFICATIONS_MS = 15_000;
 export const POLL_TELEMETRY_MS = 60_000;
+export const POLL_SNAPSHOTS_MS = 15_000;
+
+/** GET /devices/:id/snapshots?limit= — ảnh chụp của camera, mới nhất trước (limit 1..50). */
+export function listDeviceSnapshots(deviceId: number, limit = 20) {
+  return api<CameraSnapshotList>(`${PORTAL_API}/devices/${deviceId}/snapshots`, { query: { limit } });
+}
 
 /** SWR với key = đường dẫn API; `null` để tạm không gọi. */
 export function useApi<T>(key: string | null, options?: SWRConfiguration<T, unknown>) {

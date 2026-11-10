@@ -19,10 +19,10 @@ backend/src/
 │   └── health/
 ├── shared/              # shared kernel: errors/http-error.ts, validation/validate.ts, types/domain.ts, crypto.ts,
 │                        # time.ts, privacy.ts, events/{event-bus, event-payloads}.ts, module.ts (interface AppModule)
-├── infrastructure/      # database/{pool, db, migrate, like-pattern}.ts, mqtt/broker.ts
+├── infrastructure/      # database/{pool, db, migrate, like-pattern}.ts, mqtt/broker.ts, storage/ (port SnapshotStore + adapter đĩa)
 ├── modules/<m>/         # xem §2
 ├── seed/demo-seed.ts    # dữ liệu demo (composition: được import index của mọi module)
-└── scripts/seed.ts      # npm run seed
+└── scripts/             # seed.ts (npm run seed), register-hardware.ts (npm run hw:register — đăng ký phần cứng thật, dev)
 ```
 
 Một module:
@@ -49,8 +49,9 @@ cùng handler, tham số `channel`), `api` (chỉ legacy), `workers`. Router `/a
 |---|---|---|---|
 | `identity` | users, customers, refresh_tokens | login, register, logout, refresh-session, get-me, get-profile, update-profile, change-password, list/create/update/delete-staff, search-customers, get-customer-detail · `guards/` (requireDashboard, requirePortalUser, requireMobileUser, csrfGuard) | refreshTokenRetention |
 | `homes` | smart_homes, rooms, smart_home_members, member_device_access, operator_home_access, activation_tokens, activation_logs | list-my-homes, get-home-overview, update-home, get-room, rename-room, list/invite/update/remove-member, leave-home, list/accept/decline-invitation, claim-home · list/create/get/update-smart-home, assign-owner, issue-activation-code, revoke-activation-codes, request-home-access, list/grant/revoke-operator-grant | — |
-| `devices` | devices, device_tokens | get-device-detail, rename-device, list-console-devices, get-console-device-detail, set-device-status, update-device, remove-device, list-gateways, get-gateway-detail, list-gateway-sensors, presence-monitor, track-device-ip | deviceMonitor, mqttTracker |
+| `devices` | devices, device_tokens | get-device-detail, rename-device, list-console-devices, get-console-device-detail, set-device-status, update-device, remove-device, list-gateways, get-gateway-detail, list-gateway-sensors, presence-monitor, track-device-ip, gateway-heartbeat (MQTT `home/+/gateway/+/heartbeat`) | deviceMonitor, gatewayHeartbeat, mqttTracker |
 | `telemetry` | sensor_data | ingest-http, ingest-mqtt, get-device-telemetry, purge-old-telemetry | mqttDataService, retentionJob |
+| `camera` | camera_snapshots | ingest-snapshot (`POST /api/device/camera/snapshot`), list-camera-snapshots, get-snapshot-image, camera-event (MQTT `…/camera/event` → thông báo `CAMERA_MOTION`), purge-old-snapshots | cameraEventConsumer, snapshotRetention |
 | `control` | device_commands, user_behavior_logs | send-device-command, send-gateway-command, publish-ota-command, command-ack | commandAckListener |
 | `automation` | automation_rules, automation_history | list/create/update/delete-automation, get-automation-history, list-console-automations, toggle-automation, run-automation-engine | automationEngine |
 | `recommendations` | recommendation_history, user_feedback | list-suggestions, accept-suggestion, dismiss-suggestion, run-habit-suggestions | habitSuggestionJob |
@@ -62,8 +63,8 @@ cùng handler, tham số `channel`), `api` (chỉ legacy), `workers`. Router `/a
 | `simulator` | — (miễn T1/T2) | get-simulator-status, simulate-device-power, simulate-door, simulator-engine | simulator |
 | `legacy` | — (miễn T1/T2) | route Prototype `/api/{auth,devices,audit-log,users,notifications}` giữ cho `tests/security/attack_demo*.sh`; không tách feature, không phát triển thêm | — |
 
-Camera (snapshot/live) chưa hiện thực — khi làm sẽ là module `camera` + port lưu ảnh ở `infrastructure/storage`
-(`docs/DESIGN_PATTERNS.md` §3.2c). `recommendations` là gợi ý thói quen thống kê, KHÔNG phải AI agent của
+Camera: ảnh chụp (snapshot) đã có ở module `camera` + port lưu ảnh `infrastructure/storage` (`docs/DESIGN_PATTERNS.md` §3.2c;
+thư mục `SNAPSHOT_STORAGE_DIR`); xem trực tiếp (live) chưa hiện thực. `recommendations` là gợi ý thói quen thống kê, KHÔNG phải AI agent của
 `docs/proposals/DE_XUAT_AI_AGENT.md` (draft).
 
 ## 3. Quy tắc phụ thuộc (`npm run check:arch`)
@@ -80,7 +81,7 @@ Camera (snapshot/live) chưa hiện thực — khi làm sẽ là module `camera`
 | C1 | Giá trị import từ module khác chỉ dùng trong thân hàm. Vòng import giữa module (vd homes ↔ devices) là hợp lệ nhờ live binding của CommonJS, nhưng ở top-level giá trị có thể còn `undefined`. |
 
 Phản ứng chéo module không đồng bộ đi qua `eventBus` (`shared/events/event-bus.ts`): `telemetry`, `device_state`,
-`notification`, `home_changed`; payload định nghĩa ở `shared/events/event-payloads.ts`. Listener lỗi bị bọc.
+`notification`, `home_changed`, `camera_snapshot`; payload định nghĩa ở `shared/events/event-payloads.ts`. Listener lỗi bị bọc.
 Gọi đồng bộ (kiểm quyền, ghi audit, gửi thông báo) đi qua facade.
 
 So với mẫu tham khảo NestJS: `app.module.ts` thay `@Module`, `AppModule` thay provider/controller decorator,

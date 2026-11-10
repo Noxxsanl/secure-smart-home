@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -175,6 +176,25 @@ class ApiClient {
   Future<Object?> delete(String path, {Duration? timeout}) =>
       _request('DELETE', path, timeout: timeout);
 
+  /// Downloads a binary body (e.g. a camera JPEG) with the same Bearer +
+  /// single refresh-and-retry handling as JSON calls, so the image URL needs no
+  /// token handling in the UI. Non-2xx → [ApiException].
+  Future<Uint8List> getBytes(
+    String path, {
+    Map<String, Object?>? query,
+    Duration? timeout,
+  }) async {
+    final response = await _execute(
+      'GET',
+      path,
+      query: query,
+      timeout: timeout,
+      accept: 'image/*',
+    );
+    _throwIfFailed(response);
+    return response.bodyBytes;
+  }
+
   Future<Object?> _request(
     String method,
     String path, {
@@ -182,6 +202,26 @@ class ApiClient {
     Map<String, Object?>? query,
     Duration? timeout,
     bool authenticated = true,
+  }) async {
+    final response = await _execute(
+      method,
+      path,
+      body: body,
+      query: query,
+      timeout: timeout,
+      authenticated: authenticated,
+    );
+    return _parse(response);
+  }
+
+  Future<http.Response> _execute(
+    String method,
+    String path, {
+    Object? body,
+    Map<String, Object?>? query,
+    Duration? timeout,
+    bool authenticated = true,
+    String accept = 'application/json',
   }) async {
     final tokens = authenticated ? await readSession() : null;
     var response = await _send(
@@ -191,6 +231,7 @@ class ApiClient {
       query: query,
       timeout: timeout,
       accessToken: tokens?.accessToken,
+      accept: accept,
     );
 
     if (authenticated &&
@@ -213,6 +254,7 @@ class ApiClient {
         query: query,
         timeout: timeout,
         accessToken: fresh?.accessToken,
+        accept: accept,
       );
       if (response.statusCode == 401 && _isTokenRejection(response)) {
         // A brand-new token was refused too: the account is gone/locked.
@@ -223,7 +265,7 @@ class ApiClient {
         );
       }
     }
-    return _parse(response);
+    return response;
   }
 
   Future<http.Response> _send(
@@ -233,10 +275,11 @@ class ApiClient {
     Map<String, Object?>? query,
     Duration? timeout,
     String? accessToken,
+    String accept = 'application/json',
   }) async {
     final uri = _uri(path, query);
     final headers = <String, String>{
-      'Accept': 'application/json',
+      'Accept': accept,
       if (body != null) 'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
     };
@@ -285,15 +328,17 @@ class ApiClient {
     }
   }
 
+  void _throwIfFailed(http.Response response) {
+    if (response.statusCode >= 200 && response.statusCode < 300) return;
+    throw ApiException.fromHttp(
+      response.statusCode,
+      _tryDecode(response),
+      retryAfterHeader: response.headers['retry-after'],
+    );
+  }
+
   Object? _parse(http.Response response) {
-    final body = _tryDecode(response);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw ApiException.fromHttp(
-        response.statusCode,
-        body,
-        retryAfterHeader: response.headers['retry-after'],
-      );
-    }
-    return body;
+    _throwIfFailed(response);
+    return _tryDecode(response);
   }
 }

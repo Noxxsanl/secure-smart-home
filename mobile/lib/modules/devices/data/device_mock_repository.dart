@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import '../../../mock/mock_backend.dart';
+import '../domain/camera_snapshot.dart';
 import '../domain/device.dart';
 import '../domain/device_repository.dart';
 
@@ -43,4 +46,17 @@ class MockDeviceRepository implements DeviceRepository {
   @override
   Future<TelemetrySeries> telemetry(int deviceId, TelemetryRange range) =>
       _backend.respond(() => _backend.telemetryFor(deviceId, range));
+
+  /// The mock has no pictures: the camera block shows its empty state.
+  @override
+  Future<List<CameraSnapshot>> listSnapshots(int deviceId, {int limit = 20}) {
+    return _backend.respond(() {
+      _backend.requireDevice(deviceId);
+      return const <CameraSnapshot>[];
+    });
+  }
+
+  @override
+  Future<Uint8List> snapshotImage(int snapshotId) =>
+      _backend.respond(() => _backend.notFound());
 }

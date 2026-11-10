@@ -31,3 +31,11 @@ export interface CustomerNotification {
   is_read: boolean;
   created_at: string;
 }
+
+/** Tóm tắt một ảnh chụp camera gửi qua bus/WebSocket `camera_snapshot` và API danh sách ảnh (không lộ khoá lưu trữ). */
+export interface CameraSnapshotSummary {
+  id: number;
+  trigger: "motion" | "request";
+  size_bytes: number;
+  captured_at: string;
+}

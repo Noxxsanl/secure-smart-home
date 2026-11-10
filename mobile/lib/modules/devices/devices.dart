@@ -6,6 +6,9 @@ library;
 export 'application/device_providers.dart';
 // Contract mapper: overview, room and realtime payloads embed devices.
 export 'data/device_mapper.dart';
+export 'domain/appliance.dart';
+export 'domain/camera_live.dart';
+export 'domain/camera_snapshot.dart';
 export 'domain/device.dart';
 export 'domain/device_repository.dart';
 export 'ui/device_presentation.dart';

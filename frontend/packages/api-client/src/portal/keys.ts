@@ -15,4 +15,8 @@ export const roomsPrefix = `${PORTAL_API}/rooms`;
 export const roomKey = (roomId: number) => `${PORTAL_API}/rooms/${roomId}`;
 export const devicesPrefix = `${PORTAL_API}/devices`;
 export const deviceKey = (deviceId: number) => `${PORTAL_API}/devices/${deviceId}`;
+export const deviceSnapshotsKey = (deviceId: number, limit: number) =>
+  `${PORTAL_API}/devices/${deviceId}/snapshots?limit=${limit}`;
+/** URL ảnh JPEG của snapshot — dùng thẳng trong `<img src>`: GET không cần X-Portal, cookie phiên tự gửi. */
+export const snapshotImageUrl = (snapshotId: number) => `${PORTAL_API}/snapshots/${snapshotId}/image`;
 export const notificationsPrefix = `${PORTAL_API}/notifications`;

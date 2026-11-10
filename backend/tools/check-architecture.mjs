@@ -33,6 +33,7 @@ const TABLE_OWNERS = {
     "activation_tokens", "activation_logs",
   ],
   devices: ["devices", "device_tokens"],
+  camera: ["camera_snapshots"],
   telemetry: ["sensor_data"],
   control: ["device_commands", "user_behavior_logs"],
   automation: ["automation_rules", "automation_history"],

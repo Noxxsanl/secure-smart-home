@@ -95,7 +95,7 @@ export default function Page() {
 }
 ```
 
-Các slot hiện có: thiết bị ← số đo (`renderTelemetry`, console + khách); gateway ← bảng log và Smart Home ← tab Log (`renderLogs`); Tổng quan/Phòng của khách ← `DeviceGrid` (`renderDevices`); Thành viên ← lời mời của tôi (`invitationsSlot`); màn hình "chưa có nhà" của `HomeGate` ← lời mời (`CurrentHomeProvider noHomeSlot`, ở `apps/user/src/app/(private)/layout.tsx`). Trang không cần ghép thì chỉ re-export: `export { DevicesPage as default } from "@shh/devices";`.
+Các slot hiện có: thiết bị ← số đo (`renderTelemetry`, console + khách); chi tiết thiết bị của khách ← ảnh camera (`renderCamera`, `HomeCameraSnapshots`); gateway ← bảng log và Smart Home ← tab Log (`renderLogs`); Tổng quan/Phòng của khách ← `DeviceGrid` (`renderDevices`); Thành viên ← lời mời của tôi (`invitationsSlot`); màn hình "chưa có nhà" của `HomeGate` ← lời mời (`CurrentHomeProvider noHomeSlot`, ở `apps/user/src/app/(private)/layout.tsx`). Trang không cần ghép thì chỉ re-export: `export { DevicesPage as default } from "@shh/devices";`.
 
 **Lựa chọn có chủ đích** (để giữ R3/R4 mà không chép code):
 

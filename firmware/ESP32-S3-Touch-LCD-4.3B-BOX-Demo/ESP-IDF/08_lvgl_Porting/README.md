@@ -22,12 +22,12 @@ Thiết kế: [IOT_NODE_NETWORK](../../../../docs/firmware/IOT_NODE_NETWORK.md) 
 | Nhận lệnh `home/+/gateway/<gw>/device/+/command`: kiểm HMAC + ts + chống phát lại → ESP-NOW `CMD` → `CMD_ACK` → `.../command/ack` | Có | `services/src/gw_mqtt.c`, `application/src/gw_app.c` |
 | Lệnh gateway `restart` | Có | `application/src/gw_app.c` |
 | Lệnh camera `snapshot` (camera tự chụp, gửi ảnh, `CMD_ACK`) | Có | như trên |
-| Heartbeat `home/<h>/gateway/<gw>/heartbeat`, sự kiện `.../camera/event`, gửi ảnh `POST /api/device/camera/snapshot` | Có ở firmware, **backend chưa có** (đề xuất) | `gw_envelope.c`, `gw_api.c` |
+| Heartbeat `home/<h>/gateway/<gw>/heartbeat`, sự kiện `.../camera/event`, gửi ảnh `POST /api/device/camera/snapshot` | Có — backend nhận từ 2026-11-10 (module `devices` heartbeat, module `camera`) | `gw_envelope.c`, `gw_api.c` |
 | Giao diện cảm ứng: header (WiFi, Server, giờ) · thanh nav 3 mục **Camera / Phòng khách / Thiết bị** · nội dung mục đang chọn · dòng trạng thái | Có — chữ tiếng Việt có dấu (font riêng `ui/fonts/`), cảm ứng GT911 bật | `ui/src/gw_ui.c` |
 | Trang Phòng khách: nhiệt độ, độ ẩm (ô lớn) + trạng thái quạt, điều hoà, đèn, rèm cửa + node kết nối/RSSI/lần cập nhật | Có ở màn hình; trường trạng thái là **đề xuất**, node chưa gửi (mục *Giao diện*) | như trên |
 | Trang Thiết bị: bảng thiết bị đã ghép — loại, chấm kết nối xanh/vàng/đỏ, RSSI, giờ lần cuối kết nối (lưu NVS `seen`, nhớ qua khởi động lại) | Có — chi tiết: [MAN_HINH_GATEWAY](../../../../docs/guides/MAN_HINH_GATEWAY.md) | `ui/src/gw_ui.c`, `services/src/gw_registry.c` |
 | Xem trực tiếp ở trang Camera: kéo MJPEG `GET /stream` (ký HMAC camera, IP lấy từ DHCP Local AP theo MAC đã ghép), giải nén bằng TJpgDec trong ROM, co về 448×336; góc phải hàng tiêu đề báo kết nối Camera ↔ Gateway | Có — luồng chỉ chạy khi đang ở trang Camera; có chuyển động thì tự chuyển sang trang Camera | `services/src/gw_camera_live.c`, `ui/`, `application/src/gw_app.c` |
-| Ảnh chụp do chuyển động: nhận, kiểm HMAC, đẩy lên Server (không hiện trên màn hình) | Có (Server chưa có endpoint) | `services/src/gw_local_http.c`, `application/src/gw_app.c` |
+| Ảnh chụp do chuyển động: nhận, kiểm HMAC, đẩy lên Server (không hiện trên màn hình) | Có — ảnh hiện trên web khách + Mobile ([LEN_SERVER](../../../../docs/guides/LEN_SERVER.md)) | `services/src/gw_local_http.c`, `application/src/gw_app.c` |
 | Ghép nối ECDH (`PAIR_*`), cấp LMK/secret qua ESP-NOW, provisioning BLE/SoftAP | **Chưa**: nạp tay qua NVS | — |
 | Lệnh `live_start`/`live_stop` từ Server (xem từ xa trên Mobile, IOT_NODE_NETWORK §5.5) | **Chưa**: trả ack `error` | — |
 | `factory_reset`, OTA (`ota/command` đã kiểm HMAC, chỉ log) | **Chưa** | — |
@@ -108,13 +108,13 @@ Không log secret, LMK, mật khẩu WiFi, chữ ký (bất biến 2); màn hìn
 | S → GW | `home/<h>/gateway/<gw>/device/<dev>/command` | `{command_id, action, ts, hmac}` | **Đã có** (`control`) |
 | GW → S | `home/<h>/gateway/<gw>/device/<dev>/command/ack` | `{command_id, status, power?, ts, hmac}` — trong 5 s | **Đã có** |
 | S → GW | `home/<h>/gateway/<gw>/command` | `restart` (làm), `factory_reset` (chưa) | **Đã có** |
-| GW → S | `home/<h>/gateway/<gw>/heartbeat` mỗi 30 s | `{ts, uptime, rssi, ip, fw_version, nodes[], hmac}`, hmac `"<gateway_id>:<ts>"` | Đề xuất, chưa subscribe |
-| GW → S | `.../device/<cam>/camera/event` | `{type:"motion", ts, snapshot_id?, hmac}`, hmac `"<device_id>:<type>:<ts>"` | Đề xuất, chưa subscribe |
-| GW → S | `POST /api/device/camera/snapshot` | JPEG; header `X-Gateway-Id`, `X-Timestamp`, `X-Signature`, `X-Device-Id`, `X-Trigger`, `X-Command-Id?` | Đề xuất — hiện nhận 404 |
+| GW → S | `home/<h>/gateway/<gw>/heartbeat` mỗi 30 s | `{ts, uptime, rssi, ip, fw_version, nodes[], hmac}`, hmac `"<gateway_id>:<ts>"` | **Đã có** (`devices/features/gateway-heartbeat`): đánh dấu gateway + node `online:true` thuộc gateway là đang kết nối |
+| GW → S | `.../device/<cam>/camera/event` | `{type:"motion", ts, snapshot_id?, hmac}`, hmac `"<device_id>:<type>:<ts>"` | **Đã có** (`camera/features/camera-event`): thông báo "Phát hiện chuyển động" |
+| GW → S | `POST /api/device/camera/snapshot` | JPEG; header `X-Gateway-Id`, `X-Timestamp`, `X-Device-Id`, `X-Trigger`, `X-Command-Id?`, `X-Signature` = HMAC(secret gw, `"<gateway_id>:<ts>:<device_id>:<trigger>:<command_id>:<sha256 thân ảnh>"`) — gắn chữ ký với đúng ảnh (2026-11-10) | **Đã có** (`camera/features/ingest-snapshot`), qua nginx HTTPS :443; trả `201 {snapshot_id}` |
 
 Gateway subscribe `home/+/...` (wildcard home_id) nên không cần biết trước home_id. home_id dùng cho heartbeat/camera event lấy từ NVS `cloud/home_id`, hoặc học từ topic lệnh hợp lệ đầu tiên.
 
-Trên backend: Node phòng khách tạo với `device_type = sensor` (ingest chỉ nhận telemetry từ sensor), camera gán vào gateway này. Chuỗi ký heartbeat/camera event là đề xuất (API_DESIGN §14 Q2) — chốt cùng backend khi làm.
+Trên backend: Node phòng khách tạo với `device_type = sensor` (ingest chỉ nhận telemetry từ sensor), camera `category = camera` gán vào gateway này — `cd backend && npm run hw:register` làm việc này từ `nvs_dev.csv` (không in secret). Chuỗi ký heartbeat/camera event ở trên đã được backend dùng (2026-11-10). Từng bước nối Server: [LEN_SERVER](../../../../docs/guides/LEN_SERVER.md).
 
 ## Build lần đầu
 

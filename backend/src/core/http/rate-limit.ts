@@ -49,13 +49,19 @@ export function applyRateLimits(app: Express): void {
   const authLimiter = makeLimiter(LOGIN_WINDOW, 10, "Too many login attempts, try again later");
   // Legacy: /api/device/data – 60 request / phút (firmware); các route khác có hạn mức riêng bên dưới
   const deviceDataLimiter = makeLimiter(MINUTE, 60, "Device data rate limit exceeded");
+  // Ảnh camera từ gateway: 30 request / phút (mỗi ảnh tới 200 KB nên chặt hơn /device/data)
+  const cameraSnapshotLimiter = makeLimiter(MINUTE, 30, "Camera snapshot rate limit exceeded");
   // Chung cho /api/**: 1500 request / 5 phút (SWR poll 5–15 s trên nhiều trang — 100/15 phút cũ sẽ chặn UI)
-  const apiLimiter = makeLimiter(5 * MINUTE, 1500, "API rate limit exceeded", (req) =>
-    req.originalUrl.startsWith("/api/device/data")
+  const apiLimiter = makeLimiter(
+    5 * MINUTE,
+    1500,
+    "API rate limit exceeded",
+    (req) => req.originalUrl.startsWith("/api/device/data") || req.originalUrl.startsWith("/api/device/camera/snapshot")
   );
 
   app.use("/api/auth/login", authLimiter);
   app.use("/api/device/data", deviceDataLimiter);
+  app.use("/api/device/camera/snapshot", cameraSnapshotLimiter);
 
   // Đăng nhập 3 kênh: mỗi kênh một bộ đếm riêng (10 / 15 phút) để demo đăng nhập 3 portal không
   // ăn quota của nhau; đăng ký 10/giờ dùng chung 2 kênh; refresh 60/15 phút.

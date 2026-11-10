@@ -31,6 +31,12 @@ RealtimeEvent? parseRealtimeEvent(RealtimeMessage message) {
           roomId: json.readIntOrNull('room_id'),
           reading: readingFromJson(json.readObject('reading')),
         );
+      case 'camera_snapshot':
+        return CameraSnapshotEvent(
+          homeId: homeId,
+          deviceId: json.readInt('device_id'),
+          snapshot: cameraSnapshotFromJson(json.readObject('snapshot')),
+        );
       case 'notification':
         return NotificationEvent(
           homeId: homeId,

@@ -10,5 +10,6 @@ IconData roomIcon(String roomType) => switch (roomType) {
   'garage' => Icons.garage_outlined,
   'garden' => Icons.yard_outlined,
   'door' => Icons.door_front_door_outlined,
+  'camera' => Icons.videocam_outlined,
   _ => Icons.meeting_room_outlined,
 };

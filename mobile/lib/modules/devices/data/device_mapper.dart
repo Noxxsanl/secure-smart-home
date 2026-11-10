@@ -1,4 +1,5 @@
 import '../../../core/utils/json.dart';
+import '../domain/camera_snapshot.dart';
 import '../domain/device.dart';
 
 /// Contract §3 `Reading`.
@@ -67,4 +68,30 @@ TelemetrySeries telemetryFromJson(Json json, TelemetryRange requested) {
     points: points,
     latest: readingOrNull(json.readObjectOrNull('latest')),
   );
+}
+
+/// One item of `GET /devices/:id/snapshots` and of the `camera_snapshot`
+/// realtime frame.
+CameraSnapshot cameraSnapshotFromJson(Json json) => CameraSnapshot(
+  id: json.readInt('id'),
+  trigger: SnapshotTrigger.fromApi(json.readStringOrNull('trigger')),
+  sizeBytes: json.readIntOrNull('size_bytes') ?? 0,
+  capturedAt: () {
+    final at = json.readDateOrNull('captured_at');
+    if (at == null) throw const FormatException('Missing "captured_at"');
+    return at;
+  }(),
+);
+
+/// `{ "device_id", "items": [...] }`, newest first. Malformed items are skipped.
+List<CameraSnapshot> cameraSnapshotsFromJson(Json json) {
+  final items = <CameraSnapshot>[];
+  for (final item in json.readObjectList('items')) {
+    try {
+      items.add(cameraSnapshotFromJson(item));
+    } on FormatException {
+      continue;
+    }
+  }
+  return items;
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  Sofa, BedDouble, CookingPot, Bath, Briefcase, Car, Trees, DoorClosed, Thermometer, Droplets,
+  Sofa, BedDouble, CookingPot, Bath, Briefcase, Car, Trees, DoorClosed, Cctv, Thermometer, Droplets,
   type LucideIcon,
 } from "lucide-react";
 import type { RoomSummary } from "@shh/api-client/portal";
@@ -8,7 +8,7 @@ import { formatHumidity, formatTemperature } from "@shh/utils";
 
 const ROOM_ICONS: Record<string, LucideIcon> = {
   living_room: Sofa, bedroom: BedDouble, kitchen: CookingPot, bathroom: Bath,
-  office: Briefcase, garage: Car, garden: Trees, door: DoorClosed,
+  office: Briefcase, garage: Car, garden: Trees, door: DoorClosed, camera: Cctv,
 };
 
 export default function RoomTile({ room }: { room: RoomSummary }) {

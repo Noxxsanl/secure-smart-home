@@ -18,12 +18,23 @@ export function isSafeDeviceId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && !value.includes("\0");
 }
 
+/**
+ * UID lấy từ nguồn không tin cậy (topic MQTT, header HTTP của đường camera/heartbeat) trước khi dùng hoặc đưa vào log:
+ * chỉ chữ, số, `_ . : -`, 1–64 ký tự — không có xuống dòng/ký tự điều khiển nên không chèn được dòng log giả
+ * (log injection). Chặt hơn isSafeDeviceId (vốn chỉ loại NUL cho đường telemetry).
+ */
+const WELL_FORMED_UID = /^[A-Za-z0-9_.:-]{1,64}$/;
+export function isWellFormedUid(value: unknown): value is string {
+  return typeof value === "string" && WELL_FORMED_UID.test(value);
+}
+
 /** JSON đã stringify có chứa `\u0000` (escape thật, không tính `\\u0000` = backslash + chữ "u0000") hay không. */
 export function jsonHasNul(json: string): boolean {
   return /(^|[^\\])(\\\\)*\\u0000/.test(json);
 }
 
-function isTimestampValid(timestamp: number): boolean {
+/** Timestamp nằm trong cửa sổ ±300 s — dùng chung cho HTTP, MQTT ingest, heartbeat gateway, sự kiện camera. */
+export function isTimestampValid(timestamp: number): boolean {
   return Math.abs(Date.now() / 1000 - timestamp) <= TIMESTAMP_WINDOW_SECONDS;
 }
 

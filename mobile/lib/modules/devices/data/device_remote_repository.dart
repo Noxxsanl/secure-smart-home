@@ -1,6 +1,9 @@
+import 'dart:typed_data';
+
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/json.dart';
 import '../../homes/homes.dart';
+import '../domain/camera_snapshot.dart';
 import '../domain/device.dart';
 import '../domain/device_repository.dart';
 import 'device_mapper.dart';
@@ -54,4 +57,20 @@ class RemoteDeviceRepository implements DeviceRepository {
     );
     return telemetryFromJson(asJson(data), range);
   }
+
+  @override
+  Future<List<CameraSnapshot>> listSnapshots(
+    int deviceId, {
+    int limit = 20,
+  }) async {
+    final data = await _api.get(
+      '/devices/$deviceId/snapshots',
+      query: {'limit': limit.clamp(1, 50)},
+    );
+    return cameraSnapshotsFromJson(asJson(data));
+  }
+
+  @override
+  Future<Uint8List> snapshotImage(int snapshotId) =>
+      _api.getBytes('/snapshots/$snapshotId/image');
 }

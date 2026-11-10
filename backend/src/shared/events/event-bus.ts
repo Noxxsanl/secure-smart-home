@@ -2,12 +2,13 @@
 // không phụ thuộc lẫn nhau.
 //   - Nơi PHÁT:  telemetry/domain/telemetry-ingested (telemetry, device_state), control (lệnh)
 //                (device_state), notifications/domain/notify.service (notification), các service đổi
-//                thành viên/phòng/nhà (home_changed), device monitor, simulator.
+//                thành viên/phòng/nhà (home_changed), device monitor, simulator, camera/ingest-snapshot
+//                (camera_snapshot), devices/gateway-heartbeat (device_state).
 //   - Nơi NGHE:  WebSocket hub (đẩy xuống mobile), automation engine (telemetry).
-// Chỉ có 4 loại sự kiện — thêm loại mới phải sửa BusEvents để TypeScript bắt lỗi ở mọi nơi.
+// Chỉ có 5 loại sự kiện — thêm loại mới phải sửa BusEvents để TypeScript bắt lỗi ở mọi nơi.
 import { EventEmitter } from "events";
 import type { DeviceStateSnapshot, Reading } from "./event-payloads";
-import type { CustomerNotification } from "./event-payloads";
+import type { CameraSnapshotSummary, CustomerNotification } from "./event-payloads";
 
 /** Số đo mới của thiết bị thuộc một nhà (chỉ phát khi thiết bị đã gán nhà). */
 export interface TelemetryEvent {
@@ -37,11 +38,19 @@ export interface HomeChangedEvent {
   user_ids?: number[];
 }
 
+/** Camera vừa nhận một ảnh chụp mới (gateway → POST /api/device/camera/snapshot). */
+export interface CameraSnapshotEvent {
+  home_id: number;
+  device_id: number;
+  snapshot: CameraSnapshotSummary;
+}
+
 export interface BusEvents {
   telemetry: TelemetryEvent;
   device_state: DeviceStateEvent;
   notification: NotificationEvent;
   home_changed: HomeChangedEvent;
+  camera_snapshot: CameraSnapshotEvent;
 }
 
 export type BusEventName = keyof BusEvents;

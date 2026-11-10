@@ -3,7 +3,7 @@ import type { DeviceCategory, HomeStatus, PackageCode } from "../../../shared/ty
 import type { DeviceRow } from "../../devices";
 
 /** Loại phòng hợp lệ (kiểm ở tầng ứng dụng, cột rooms.room_type là VARCHAR). */
-export const ROOM_TYPES = ["living_room", "bedroom", "kitchen", "bathroom", "office", "garage", "garden", "door"] as const;
+export const ROOM_TYPES = ["living_room", "bedroom", "kitchen", "bathroom", "office", "garage", "garden", "door", "camera"] as const;
 export type RoomType = (typeof ROOM_TYPES)[number];
 
 /** Một dòng smart_homes + 2 cột suy ra (customer chủ nhà, id gateway). */

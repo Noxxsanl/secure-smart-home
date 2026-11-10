@@ -11,12 +11,17 @@ import '../../../../core/widgets/app_widgets.dart';
 import '../../../../core/widgets/async_views.dart';
 import '../../../homes/homes.dart';
 import '../../application/device_providers.dart';
+import '../../domain/appliance.dart';
 import '../../domain/device.dart';
 import '../../ui/device_presentation.dart';
+import 'camera_live_view.dart';
+import 'camera_snapshots_section.dart';
 import 'telemetry_chart.dart';
 
-/// Device detail (FR-5.3 – 5.5): relay switch (optimistic, rolls back),
-/// sensor values + 24 h / 7 d chart, door state, camera placeholder, rename.
+/// Device detail (FR-5.3 – 5.5): relay control by appliance (switch; curtain
+/// Mở/Đóng; air conditioner with room temperature — optimistic, rolls back),
+/// sensor values + 24 h / 7 d chart, door state, camera live view + pictures,
+/// rename.
 class DeviceDetailPage extends ConsumerStatefulWidget {
   const DeviceDetailPage({
     super.key,
@@ -68,6 +73,17 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
       await ref
           .read(homeOverviewProvider(widget.homeId).notifier)
           .refresh(throwOnError: true);
+      final isCamera =
+          ref
+              .read(homeOverviewProvider(widget.homeId))
+              .value
+              ?.deviceById(widget.deviceId)
+              ?.isCamera ??
+          false;
+      if (isCamera) {
+        ref.invalidate(cameraSnapshotsProvider(widget.deviceId));
+        await ref.read(cameraSnapshotsProvider(widget.deviceId).future);
+      }
     } on Object catch (error) {
       showAppSnack(messenger, userMessageFor(error), error: true);
     }
@@ -118,8 +134,11 @@ class _DeviceDetailPageState extends ConsumerState<DeviceDetailPage> {
                   _SensorBody(device: current)
                 else if (current.isDoorContact)
                   _DoorBody(device: current)
-                else if (current.isCamera)
-                  const _CameraBody(),
+                else if (current.isCamera) ...[
+                  CameraLiveView(device: current),
+                  const SizedBox(height: 20),
+                  CameraSnapshotsSection(deviceId: current.id),
+                ],
                 const SizedBox(height: 20),
                 _InfoCard(device: current),
               ],
@@ -178,7 +197,7 @@ class _Header extends StatelessWidget {
               device.online ? 'Online' : 'Ngoại tuyến',
               color: device.online ? AppColors.success : AppColors.offline,
             ),
-            StatusPill(deviceCategoryLabel(device.category)),
+            StatusPill(deviceTypeLabel(device)),
             if (device.isBlocked)
               const StatusPill('Đã bị khoá', color: AppColors.critical),
           ],
@@ -199,7 +218,44 @@ class _RelayControl extends ConsumerWidget {
     final pending = ref.watch(
       pendingCommandsProvider.select((ids) => ids.contains(device.id)),
     );
-    final hint = deviceControlHint(device, homeSuspended: home.home.isSuspended);
+    final hint = deviceControlHint(
+      device,
+      homeSuspended: home.home.isSuspended,
+    );
+    final kind = ApplianceKind.of(device) ?? ApplianceKind.plainSwitch;
+    final enabled = hint == null && !pending;
+    final title = kind == ApplianceKind.curtain ? 'Mở / Đóng' : 'Bật / Tắt';
+
+    Widget control;
+    if (pending) {
+      control = const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(strokeWidth: 2.5),
+      );
+    } else if (kind == ApplianceKind.curtain) {
+      control = SegmentedButton<bool>(
+        key: const ValueKey<String>('device-open-close'),
+        showSelectedIcon: false,
+        segments: [
+          ButtonSegment(value: false, label: Text(kind.turnOff)),
+          ButtonSegment(value: true, label: Text(kind.turnOn)),
+        ],
+        selected: {device.isOn},
+        onSelectionChanged: enabled
+            ? (value) => togglePower(context, ref, device, value.first)
+            : null,
+      );
+    } else {
+      control = Switch(
+        key: const ValueKey<String>('device-power-switch'),
+        value: device.isOn,
+        onChanged: enabled
+            ? (value) => togglePower(context, ref, device, value)
+            : null,
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -210,9 +266,9 @@ class _RelayControl extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Bật / Tắt',
-                      style: TextStyle(
+                    Text(
+                      title,
+                      style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                         color: AppColors.textPrimary,
@@ -222,29 +278,21 @@ class _RelayControl extends ConsumerWidget {
                     Text(
                       pending
                           ? 'Đang gửi lệnh tới thiết bị…'
-                          : (device.isOn ? 'Đang bật' : 'Đang tắt'),
+                          : kind.stateOf(device.isOn),
                       style: const TextStyle(color: AppColors.textSecondary),
                     ),
                   ],
                 ),
               ),
-              if (pending)
-                const SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2.5),
-                )
-              else
-                Switch(
-                  key: const ValueKey<String>('device-power-switch'),
-                  value: device.isOn,
-                  onChanged: hint == null
-                      ? (value) => togglePower(context, ref, device, value)
-                      : null,
-                ),
+              const SizedBox(width: 12),
+              control,
             ],
           ),
         ),
+        if (kind == ApplianceKind.airConditioner) ...[
+          const SizedBox(height: 12),
+          _AirConditionerInfo(room: home.roomById(device.roomId ?? -1)),
+        ],
         if (hint != null) ...[
           const SizedBox(height: 12),
           InlineBanner(
@@ -254,6 +302,50 @@ class _RelayControl extends ConsumerWidget {
                 : BannerKind.info,
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Room temperature next to the air conditioner, and the set point / mode
+/// that stay read-only until the living-room node accepts IR commands (the
+/// backend only has `turn_on` / `turn_off`).
+class _AirConditionerInfo extends StatelessWidget {
+  const _AirConditionerInfo({required this.room});
+
+  final RoomSummary? room;
+
+  @override
+  Widget build(BuildContext context) {
+    final temperature = room?.temperature;
+    final hasClimate = (room?.hasClimateData ?? false) && temperature != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _ValueCard(
+                icon: Icons.thermostat_outlined,
+                label: 'Nhiệt độ phòng',
+                value: hasClimate ? formatTemperature(temperature) : '--',
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: _ValueCard(
+                icon: Icons.tune,
+                label: 'Nhiệt độ đặt · Chế độ',
+                value: '--',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Hiện chỉ bật/tắt được điều hòa. Chỉnh nhiệt độ và chế độ sẽ mở khi Node phòng khách hỗ trợ điều khiển hồng ngoại.',
+          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+        ),
       ],
     );
   }
@@ -495,52 +587,6 @@ class _DoorBody extends StatelessWidget {
   }
 }
 
-class _CameraBody extends StatelessWidget {
-  const _CameraBody();
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        height: 200,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF20243B), Color(0xFF11131F)],
-          ),
-        ),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.videocam_off_outlined, size: 48, color: Colors.white38),
-              SizedBox(height: 10),
-              Text(
-                'Chưa hỗ trợ xem trực tiếp',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              SizedBox(height: 4),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 24),
-                child: Text(
-                  'Xem camera trực tiếp sẽ có trong bản cập nhật sau.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _InfoCard extends StatelessWidget {
   const _InfoCard({required this.device});
 
@@ -551,7 +597,7 @@ class _InfoCard extends StatelessWidget {
     return AppCard(
       child: Column(
         children: [
-          _InfoRow('Loại thiết bị', deviceCategoryLabel(device.category)),
+          _InfoRow('Loại thiết bị', deviceTypeLabel(device)),
           if (device.roomName != null) _InfoRow('Phòng', device.roomName!),
           _InfoRow(
             'Trạng thái',

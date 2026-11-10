@@ -7,7 +7,9 @@ import type { CustomerDevice } from "@shh/api-client/portal";
 import { lastSeenText } from "@shh/utils";
 import DeviceIcon from "./DeviceIcon";
 import DeviceReading from "./DeviceReading";
+import OpenCloseButtons from "./OpenCloseButtons";
 import type { DevicePowerControl } from "../model/power";
+import { APPLIANCE_TEXT, applianceKind } from "../model/appliance";
 
 type DeviceCardProps = {
   device: CustomerDevice;
@@ -21,6 +23,8 @@ export default function DeviceCard({ device, power, showRoom = true }: DeviceCar
   const on = isRelay && value === true;
   const pending = power.isPending(device);
   const reason = power.blockReason(device);
+  const kind = applianceKind(device);
+  const words = APPLIANCE_TEXT[kind ?? "switch"];
 
   return (
     <div
@@ -31,13 +35,14 @@ export default function DeviceCard({ device, power, showRoom = true }: DeviceCar
         <div className={`flex h-10 w-10 items-center justify-center rounded ${on ? "bg-brand text-white" : "bg-gray-100 text-gray-500 dark:bg-slate-700 dark:text-slate-400"}`}>
           <DeviceIcon device={device} className="h-5 w-5" />
         </div>
-        {isRelay && (
+        {isRelay && kind === "curtain" && <OpenCloseButtons device={device} power={power} />}
+        {isRelay && kind !== "curtain" && (
           <span title={reason ?? undefined}>
             <Switch
               checked={on}
               disabled={!power.canToggle(device)}
               onChange={() => power.toggle(device)}
-              label={`${on ? "Tắt" : "Bật"} ${device.device_name}`}
+              label={`${on ? words.turnOff : words.turnOn} ${device.device_name}`}
             />
           </span>
         )}
@@ -70,7 +75,7 @@ export default function DeviceCard({ device, power, showRoom = true }: DeviceCar
         )}
         {isRelay && (
           <span className={`shrink-0 font-semibold ${on ? "text-brand" : "text-gray-400 dark:text-slate-500"}`}>
-            {pending ? "Đang gửi lệnh…" : on ? "Đang bật" : "Đang tắt"}
+            {pending ? "Đang gửi lệnh…" : on ? words.on : words.off}
           </span>
         )}
       </div>
