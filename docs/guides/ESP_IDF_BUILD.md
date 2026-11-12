@@ -669,7 +669,7 @@ python $env:IDF_PATH\components\partition_table\parttool.py -p COM5 `
 
 Xoá `nvs_dev.bin` sau khi nạp. Secret thiết bị lấy từ lúc tạo thiết bị trên backend (backend chỉ trả về 1 lần, lúc tạo).
 
-### 7.2. Chứng chỉ CA của Broker 2 (MQTT TLS)
+### 7.2. Chứng chỉ CA của Broker MQTT (MQTT TLS)
 
 CA sinh bởi `infra/pki/gen_mqtt_certs.sh` (ra `infra/mosquitto/certs/ca.crt`, xem [MQTT_TLS](MQTT_TLS.md)). Chép `ca.crt` vào project (thư mục `certs/`, gitignore giống `mqtt_ca_cert.h` hiện tại) rồi nhúng vào firmware:
 

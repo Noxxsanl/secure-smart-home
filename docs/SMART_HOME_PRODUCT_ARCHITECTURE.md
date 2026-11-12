@@ -105,7 +105,7 @@ flowchart TB
 
     subgraph IOT["IoT Layer (giữ nguyên nguyên lý HMAC + dual-broker)"]
         BK1["MQTT Broker 1\nSensor ↔ Gateway"]
-        BK2["MQTT Broker 2\nGateway ↔ Backend"]
+        BK2["MQTT broker\nGateway ↔ Backend"]
         GW["ESP32 Gateway\n(scoped theo home_id)"]
         NODES["ESP32 Nodes\n(Door-CAM, Living Room,\nBedroom, Kitchen)"]
     end

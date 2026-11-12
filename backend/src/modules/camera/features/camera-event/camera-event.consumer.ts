@@ -1,4 +1,4 @@
-// Sự kiện camera từ gateway: subscribe Broker 2 (TLS) topic home/+/gateway/+/device/+/camera/event.
+// Sự kiện camera từ gateway: subscribe Broker MQTT (TLS) topic home/+/gateway/+/device/+/camera/event.
 // Mỗi message xử lý ở camera-event.handler.ts. Broker chưa lên thì mqtt.js tự kết nối lại.
 import { connectBroker } from "../../../../infrastructure/mqtt/broker";
 import { CAMERA_EVENT_TOPIC_FILTER } from "../../domain/camera-event";

@@ -1,6 +1,6 @@
 /*
  * gw_tls — CA nội bộ của dự án nhúng vào firmware (infra/pki/gen_mqtt_certs.sh → infra/mosquitto/certs/ca.crt,
- * chép thành certs/mqtt_ca.crt của project — gitignore). Dùng kiểm chứng Broker 2 (8883) và HTTPS Backend.
+ * chép thành certs/mqtt_ca.crt của project — gitignore). Dùng kiểm chứng Broker MQTT (8883) và HTTPS Backend.
  *
  * Bất biến 3: không tắt kiểm chứng TLS. Không có CA thì từ chối mqtts:// / https:// thay vì kết nối mù.
  * mqtt:// và http:// chỉ được khi bật [DEV] CONFIG_GW_DEV_ALLOW_PLAINTEXT.

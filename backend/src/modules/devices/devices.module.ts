@@ -49,7 +49,7 @@ export const devicesModule: AppModule = {
   },
   workers: [
     { name: "deviceMonitor", start: startDeviceMonitor }, // online/offline thiết bị, tick 15 s (features/presence-monitor)
-    { name: "gatewayHeartbeat", start: startGatewayHeartbeat }, // home/+/gateway/+/heartbeat (Broker 2, TLS)
+    { name: "gatewayHeartbeat", start: startGatewayHeartbeat }, // home/+/gateway/+/heartbeat (Broker MQTT, TLS)
     { name: "mqttTracker", start: startMqttTracker }, // theo dõi log $SYS broker để cập nhật IP thiết bị
   ],
 };

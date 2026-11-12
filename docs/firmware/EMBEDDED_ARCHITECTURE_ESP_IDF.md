@@ -85,7 +85,7 @@ Chỉ có 2 driver đơn giản: DHT22 (qua thư viện Adafruit, `sensor_reader
 
 ### 1.6. MQTT chi tiết
 
-Gateway giữ **2 kết nối `PubSubClient` song song** (`mqttSubClient` cho Broker 1, `mqttPubClient` cho Broker 2 — `mqtt_client.cpp:9-14`) trong cùng 1 task, tự quản lý reconnect bằng `millis()` polling riêng cho từng broker (`mqtt_client.cpp:97-116`). Không có QoS > 1 (PubSubClient chỉ hỗ trợ QoS 0/1), không có Last Will and Testament (LWT) được cấu hình — nghĩa là khi Gateway mất kết nối đột ngột (rút điện, crash), **Backend không có cách nào biết ngay lập tức** ngoài chờ hết hạn `last_seen` (đã nêu ở `BACKEND_REFACTOR_SMARTHOME.md` — thiếu Heartbeat/LWT).
+Gateway giữ **2 kết nối `PubSubClient` song song** (`mqttSubClient` cho Broker 1, `mqttPubClient` cho Broker MQTT — `mqtt_client.cpp:9-14`) trong cùng 1 task, tự quản lý reconnect bằng `millis()` polling riêng cho từng broker (`mqtt_client.cpp:97-116`). Không có QoS > 1 (PubSubClient chỉ hỗ trợ QoS 0/1), không có Last Will and Testament (LWT) được cấu hình — nghĩa là khi Gateway mất kết nối đột ngột (rút điện, crash), **Backend không có cách nào biết ngay lập tức** ngoài chờ hết hạn `last_seen` (đã nêu ở `BACKEND_REFACTOR_SMARTHOME.md` — thiếu Heartbeat/LWT).
 
 ### 1.7. Memory
 
@@ -313,7 +313,7 @@ flowchart LR
 | Task | Ưu tiên | Stack (đề xuất) | Core (nếu ESP32 dual-core) | Trách nhiệm |
 |---|---|---|---|---|
 | `wifi_task` | 5 (cao) | 3072B | Core 0 (giao thức mạng) | Quản lý kết nối/reconnect WiFi Station, publish event `WIFI_CONNECTED`/`WIFI_DISCONNECTED` |
-| `mqtt_task` | 5 | 4096B | Core 0 | Duy trì kết nối MQTT Broker 2, publish/subscribe, xử lý reconnect + LWT |
+| `mqtt_task` | 5 | 4096B | Core 0 | Duy trì kết nối MQTT broker, publish/subscribe, xử lý reconnect + LWT |
 | `espnow_task` | 5 | 3072B | Core 0 | Nhận/gửi frame ESP-NOW từ/tới Node, forward vào Queue nội bộ |
 | `provision_task` | 4 | 4096B | Core 0 | Chạy khi ở chế độ Provisioning (BLE/SoftAP), tự huỷ sau khi hoàn tất hoặc timeout |
 | `pairing_task` | 4 | 3072B | Core 0 | Chạy khi Gateway ở "Pairing Mode" (cửa sổ 60s), broadcast `PAIR_REQUEST`, verify challenge-response |
@@ -385,7 +385,7 @@ flowchart LR
 | **Provision Manager** | Điều phối BLE/SoftAP Provisioning (Phần 12) | Hoàn toàn mới — hiện tại không có |
 | **Pairing Manager** | Điều phối ghép nối Node mới, whitelist theo `home_id` (Phần 13) | Hoàn toàn mới |
 | **WiFi Manager** | Kết nối WiFi Station bằng credential từ NVS (không hard-code) | Nâng cấp từ `wifi_manager.cpp` hiện tại — giữ nguyên tư duy retry/backoff, đổi nguồn credential |
-| **MQTT Manager** | Kết nối TLS Broker 2, publish/subscribe theo Topic Design mới (`BACKEND_REFACTOR_SMARTHOME.md` Phần 10) | Nâng cấp từ `mqtt_client.cpp` — thêm TLS, LWT, đổi topic có `home_id` |
+| **MQTT Manager** | Kết nối TLS Broker MQTT, publish/subscribe theo Topic Design mới (`BACKEND_REFACTOR_SMARTHOME.md` Phần 10) | Nâng cấp từ `mqtt_client.cpp` — thêm TLS, LWT, đổi topic có `home_id` |
 | **Device Manager** | Quản lý danh sách Node đã pair: UUID, Type, Room, Status, Firmware version, RSSI, Battery (nếu có), Last Seen (Phần 10.1 chi tiết bên dưới) | Nâng cấp từ `sensor_registry.cpp` — mở rộng từ "chỉ lưu secret" thành đầy đủ metadata |
 | **Room Manager** | Cache cấu trúc Room/Device đồng bộ từ Cloud (để Gateway biết Node nào thuộc phòng nào mà không cần hỏi Cloud mỗi lần) | Hoàn toàn mới |
 | **Heartbeat Manager** | Định kỳ publish RSSI/uptime/node_count | Hoàn toàn mới — hiện tại suy luận online qua `last_seen` gián tiếp, không có heartbeat riêng |

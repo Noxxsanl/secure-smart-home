@@ -70,8 +70,7 @@ Toi thieu:
 | Backend | `http://localhost:5000` |
 | Backend health | `http://localhost:5000/api/health` |
 | PostgreSQL tren host | `localhost:5433` |
-| MQTT Broker 1 (Sensor↔GW) | `localhost:1883` |
-| MQTT Broker 2 (GW→Backend) | `localhost:8883` (TLS) |
+| MQTT broker (GW→Backend) | `localhost:8883` (TLS) |
 
 ---
 
@@ -144,8 +143,7 @@ docker compose ps
 Can thay cac container chay:
 
 - `iot-postgres`
-- `iot-mqtt-broker-1`
-- `iot-mqtt-broker-2`
+- `iot-mosquitto`
 - `iot-nginx`
 - `iot-backend`
 - `iot-frontend`
@@ -162,8 +160,7 @@ Kiem tra log neu co loi:
 docker compose logs -f backend
 docker compose logs -f frontend
 docker compose logs -f postgres
-docker compose logs -f mqtt-broker-1
-docker compose logs -f mqtt-broker-2
+docker compose logs -f mqtt-broker
 ```
 
 Dung toan bo stack:
@@ -190,14 +187,13 @@ dung Docker chi cho PostgreSQL va Mosquitto, hoac cai PostgreSQL/Mosquitto local
 Neu muon chi dung Docker cho ha tang:
 
 ```powershell
-docker compose up -d postgres mqtt-broker-1 mqtt-broker-2
+docker compose up -d postgres mqtt-broker
 ```
 
 Voi cach nay, tren host:
 
 - PostgreSQL la `localhost:5433`
-- MQTT Broker 1 (Sensor↔Gateway) la `localhost:1883`
-- MQTT Broker 2 (Gateway→Backend) la `localhost:8883` (chi MQTT over TLS, CA: `infra/mosquitto/certs/ca.crt`)
+- MQTT broker (Gateway→Backend) la `localhost:8883` (chi MQTT over TLS, CA: `infra/mosquitto/certs/ca.crt`)
 
 ### 5.2 Cau hinh Backend local
 
@@ -354,7 +350,7 @@ Sua cac gia tri:
 #define MQTT_BROKER1_HOST  "192.168.1.100"
 #define MQTT_BROKER1_PORT  1883
 
-// Broker 2 - Publish du lieu len Backend
+// Broker MQTT - Publish du lieu len Backend
 #define MQTT_BROKER2_HOST  "192.168.1.100"
 #define MQTT_BROKER2_PORT  8883
 
@@ -392,7 +388,7 @@ IoT Gateway Node - Starting
 Gateway ID : ESP32-GW-...
 Backend URL: http://192.168.1.100:3000/api/device/data
 [MQTT-SUB] Broker 1: 192.168.1.100:1883
-[MQTT-PUB] Broker 2: 192.168.1.100:8883 (TLS)
+[MQTT-PUB] Broker MQTT: 192.168.1.100:8883 (TLS)
 [MAIN] Ready - listening for sensor data...
 ```
 
@@ -874,9 +870,9 @@ DB_PORT=5433
 Kiem tra:
 
 - ESP32 va may Docker cung mang WiFi.
-- `MQTT_BROKER1_HOST` / `MQTT_BROKER2_HOST` la IP LAN cua may, khong phai `localhost`.
-- Cong `1883` (Broker 1) va `8883` (Broker 2, TLS) khong bi firewall chan.
-- Ca hai container `iot-mqtt-broker-1` va `iot-mqtt-broker-2` dang chay.
+- Host MQTT cua gateway (NVS `cloud/mqtt_uri`) la IP LAN cua may, khong phai `localhost`.
+- Cong `8883` (Broker MQTT, TLS) khong bi firewall chan.
+- Container `iot-mosquitto` dang chay.
 
 ### Gateway forward fail
 

@@ -1,4 +1,4 @@
-// Xử lý một message gateway/<GW_ID>/data trên Broker 2: xác thực HMAC 2 lớp giống hệt đường fallback HTTP
+// Xử lý một message gateway/<GW_ID>/data trên Broker MQTT: xác thực HMAC 2 lớp giống hệt đường fallback HTTP
 // (features/ingest-http). Hai đường gọi CÙNG các hàm của module devices (verifyGatewayHMAC, verifyDeviceHMAC,
 // registerAuthFailure, listGatewayAndSensorTypeStatus) và telemetry/domain (onTelemetryIngested,
 // markGatewayAndSensorSeen) — khi đổi logic xác thực phải đổi cả hai feature (invariant 4).

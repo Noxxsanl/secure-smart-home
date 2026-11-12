@@ -135,7 +135,7 @@ flowchart TB
         CAM <-->|"WiFi (Local AP riêng)"| GWAP
     end
 
-    GWSTA -->|"Internet"| BK2["MQTT Broker 2\n(Gateway ↔ Backend)"]
+    GWSTA -->|"Internet"| BK2["MQTT broker\n(Gateway ↔ Backend)"]
     BK2 --> BACKEND["Backend API\n(scoped theo home_id)"]
     BACKEND --> CLOUD[("Cloud DB / Storage")]
 ```

@@ -27,36 +27,23 @@ services:
       timeout: 5s
       retries: 5
 
-  # Broker 1: Sensor Node → Gateway Node (port 1883)
-  mqtt-broker-1:
-    image: eclipse-mosquitto:2
-    container_name: iot-mosquitto-1
-    restart: always
-    ports:
-      - "1883:1883"
-    volumes:
-      - ./infra/mosquitto/broker1/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - mosquitto1_data:/mosquitto/data
-      - mosquitto1_logs:/mosquitto/log
-    networks:
-      - iot-network
-
-  # Broker 2: Gateway Node → Backend — chỉ MQTT over TLS (port 8883)
+  # Broker MQTT: Gateway ↔ Backend — chỉ MQTT over TLS (port 8883). Node nói với Gateway qua ESP-NOW,
+  # không qua MQTT, nên chỉ cần 1 broker.
   # Chạy infra/pki/gen_mqtt_certs.sh <IP/hostname broker> trước lần up đầu tiên.
-  mqtt-broker-2:
+  mqtt-broker:
     image: eclipse-mosquitto:2
-    container_name: iot-mosquitto-2
+    container_name: iot-mosquitto
     restart: always
     ports:
       - "8883:8883"
     volumes:
-      - ./infra/mosquitto/broker2/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
       # ca.key không mount vào container nào
       - ./infra/mosquitto/certs/ca.crt:/mosquitto/certs/ca.crt:ro
       - ./infra/mosquitto/certs/server.crt:/mosquitto/certs/server.crt:ro
       - ./infra/mosquitto/certs/server.key:/mosquitto/certs/server.key:ro
-      - mosquitto2_data:/mosquitto/data
-      - mosquitto2_logs:/mosquitto/log
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
     networks:
       - iot-network
 
@@ -81,8 +68,8 @@ services:
       - DB_USER=${POSTGRES_APP_USER:-secure_smart_home_app}
       - DB_PASS=${POSTGRES_APP_PASSWORD:?Thiếu POSTGRES_APP_PASSWORD trong .env (xem .env.example)}
       - DB_NAME=${POSTGRES_DB:-secure_smart_home_iot}
-      # Backend chỉ kết nối Broker 2 (gateway → backend layer) qua TLS
-      - MQTT_HOST=mqtt-broker-2
+      # Backend kết nối broker MQTT qua TLS
+      - MQTT_HOST=mqtt-broker
       - MQTT_PORT=8883
       - MQTT_CA_FILE=/certs/mqtt-ca.crt
       - FRONTEND_URL=http://localhost
@@ -92,7 +79,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      mqtt-broker-2:
+      mqtt-broker:
         condition: service_started
     networks:
       - iot-network
@@ -185,10 +172,8 @@ volumes:
   pg_data:
   firmware_data:
   snapshot_data:
-  mosquitto1_data:
-  mosquitto1_logs:
-  mosquitto2_data:
-  mosquitto2_logs:
+  mosquitto_data:
+  mosquitto_logs:
 
 networks:
   iot-network:

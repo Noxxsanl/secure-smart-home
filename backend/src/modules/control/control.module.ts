@@ -20,5 +20,5 @@ export const controlModule: AppModule = {
   customer: (router, channel) => {
     router.post("/devices/:deviceId/commands", sendDeviceCommandController(channel));
   },
-  workers: [{ name: "commandAckListener", start: startCommandAckListener }], // subscribe ack lệnh (Broker 2, TLS)
+  workers: [{ name: "commandAckListener", start: startCommandAckListener }], // subscribe ack lệnh (Broker MQTT, TLS)
 };

@@ -1,6 +1,6 @@
 # MQTT_TLS.md
 
-> **Hướng dẫn MQTT TLS — Broker 2 (Gateway ↔ Backend)**
+> **Hướng dẫn MQTT TLS — Broker MQTT (Gateway ↔ Backend)**
 > Tài liệu ghi lại những gì đã làm cho yêu cầu mã hoá MQTT bằng TLS, cách đã kiểm tra, các bước để chạy trên hệ thống thật, và phần còn thiếu.
 > Tài liệu này mô tả **hiện trạng code**. Kiến trúc đích nằm ở [`SECURITY_ARCHITECTURE.md`](../SECURITY_ARCHITECTURE.md) §4 và [`PRD_SMART_HOME.md`](../PRD_SMART_HOME.md) FR-12.3, FR-12.4.
 
@@ -28,8 +28,8 @@
 
 ## 1. Tổng quan và kiến trúc
 
-- Broker 2 chỉ còn một cổng là **8883 (TLS)**. Cổng plaintext 1884 đã bỏ hẳn.
-- Gateway và Backend đều kiểm chứng chứng chỉ của Broker 2 bằng một **CA nội bộ**. Không có chế độ bỏ qua kiểm tra (`setInsecure()`, `rejectUnauthorized: false`).
+- Broker MQTT chỉ còn một cổng là **8883 (TLS)**. Cổng plaintext 1884 đã bỏ hẳn.
+- Gateway và Backend đều kiểm chứng chứng chỉ của Broker MQTT bằng một **CA nội bộ**. Không có chế độ bỏ qua kiểm tra (`setInsecure()`, `rejectUnauthorized: false`).
 - TLS chỉ bảo vệ kênh truyền. HMAC 2 lớp vẫn giữ nguyên để bảo vệ nội dung từng gói tin (Defense-in-Depth, [Bảo mật](../SECURITY_ARCHITECTURE.md) §3).
 
 Năm sơ đồ dưới đây đi từ tổng quát tới chi tiết. Khi trình bày: 1.1 dành cho người không chuyên, 1.2–1.4 cho phần kỹ thuật, 1.5 cho phần bảo mật và demo.
@@ -42,14 +42,14 @@ Năm sơ đồ dưới đây đi từ tổng quát tới chi tiết. Khi trình 
 flowchart TB
     subgraph TRUOC["❌ Trước — Prototype"]
         direction LR
-        GW1["Gateway ESP32"] -->|"MQTT plaintext<br/>cổng 1884"| B2A["Broker 2"]
+        GW1["Gateway ESP32"] -->|"MQTT plaintext<br/>cổng 1884"| B2A["Broker MQTT"]
         B2A -->|"mqtt://"| BE1["Backend"]
         ATK1["👤 Người trong LAN"] -.->|"nghe lén: đọc được<br/>topic + JSON"| B2A
     end
 
     subgraph SAU["✅ Sau — FR-12.3"]
         direction LR
-        GW2["Gateway ESP32"] -->|"🔒 MQTT over TLS<br/>cổng 8883"| B2B["Broker 2<br/>chỉ nhận TLS"]
+        GW2["Gateway ESP32"] -->|"🔒 MQTT over TLS<br/>cổng 8883"| B2B["Broker MQTT<br/>chỉ nhận TLS"]
         B2B -->|"🔒 mqtts://"| BE2["Backend"]
         ATK2["👤 Người trong LAN"] -.->|"nghe lén: chỉ thấy<br/>dữ liệu đã mã hoá"| B2B
     end
@@ -64,49 +64,45 @@ flowchart TB
     class ATK1,ATK2 atk
 ```
 
-**Ý chính:** trước đây ai ở cùng mạng LAN cũng đọc được topic và dữ liệu JSON gateway gửi lên. Giờ chặng Gateway → Broker 2 → Backend đã được mã hoá, người nghe lén chỉ thấy dữ liệu không đọc được.
+**Ý chính:** trước đây ai ở cùng mạng LAN cũng đọc được topic và dữ liệu JSON gateway gửi lên. Giờ chặng Gateway → Broker MQTT → Backend đã được mã hoá, người nghe lén chỉ thấy dữ liệu không đọc được.
 
 ### 1.2. Kiến trúc triển khai
 
 ```mermaid
 flowchart LR
     subgraph DEV["📶 Thiết bị ESP32 — WiFi 2.4 GHz"]
-        SN["Sensor Node"]
+        SN["Node phòng"]
         GW["Gateway<br/>WiFiClientSecure<br/>CA nhúng: mqtt_ca_cert.h"]
     end
 
     subgraph HOST["🖥️ Máy chủ Docker — IP LAN, vd 192.168.1.100"]
         subgraph NET["Docker network iot-network"]
-            B1["mqtt-broker-1<br/>cổng 1883<br/>plaintext"]
-            B2["mqtt-broker-2<br/>cổng 8883<br/>chỉ TLS ≥ 1.2"]
+            B2["mqtt-broker<br/>cổng 8883<br/>chỉ TLS ≥ 1.2"]
             BE["backend<br/>mqtt.js<br/>infrastructure/mqtt/broker.ts"]
             DB[("PostgreSQL<br/>sensor_data")]
         end
         CERTS[/"infra/mosquitto/certs/<br/>ca.crt · server.crt · server.key<br/>🔑 ca.key không mount"/]
     end
 
-    SN -->|"⚠️ publish local/sensors/+/data<br/>plaintext"| B1
-    GW -->|"⚠️ subscribe local/sensors/+/data<br/>plaintext"| B1
+    SN -->|"ESP-NOW<br/>(không qua MQTT)"| GW
     GW ==>|"🔒 publish gateway/{gw_id}/data<br/>TLS, verify cert bằng CA"| B2
-    BE ==>|"🔒 subscribe gateway/+/data<br/>mqtts://mqtt-broker-2:8883"| B2
+    BE ==>|"🔒 subscribe gateway/+/data<br/>mqtts://mqtt-broker:8883"| B2
     BE --> DB
     CERTS -.->|"mount :ro<br/>ca.crt, server.crt, server.key"| B2
     CERTS -.->|"mount :ro<br/>ca.crt"| BE
 
-    classDef plain fill:#fff3cd,stroke:#b26a00,color:#4e342e
     classDef tls fill:#d4edda,stroke:#2e7d32,color:#1b5e20
     classDef file fill:#e3f2fd,stroke:#1565c0,color:#0d47a1
-    class SN,B1 plain
     class GW,B2,BE tls
     class CERTS file
 ```
 
 **Cách đọc:**
 
-- Mũi tên chỉ chiều **client mở kết nối tới broker**. Dữ liệu thực tế đi theo thứ tự Sensor → Broker 1 → Gateway → Broker 2 → Backend (xem 1.4).
-- Mũi tên đậm 🔒 là kênh TLS. Mũi tên ⚠️ là kênh plaintext. Mũi tên chấm là file chứng chỉ được mount chỉ đọc vào container.
-- Gateway đi vào Broker 2 qua cổng 8883 của máy chủ, dùng IP LAN. Backend đi trong mạng Docker bằng tên `mqtt-broker-2`. Cả hai tên này đều nằm trong SAN của `server.crt`, nên cả hai client xác thực được broker.
-- Broker 1 và chặng Sensor → Gateway không đổi (xem mục 6).
+- Mũi tên chỉ chiều **client mở kết nối tới broker**. Dữ liệu thực tế đi theo thứ tự Node →(ESP-NOW)→ Gateway → Broker MQTT → Backend (xem 1.4).
+- Mũi tên đậm 🔒 là kênh TLS. Mũi tên chấm là file chứng chỉ được mount chỉ đọc vào container.
+- Gateway đi vào Broker MQTT qua cổng 8883 của máy chủ, dùng IP LAN. Backend đi trong mạng Docker bằng tên `mqtt-broker`. Cả hai tên này đều nằm trong SAN của `server.crt`, nên cả hai client xác thực được broker.
+- Chỉ có **một** broker. Broker 1 (`mqtt-broker-1`, cổng 1883 plaintext, chặng Sensor → Gateway) đã gỡ ngày 2026-11-12 vì Node gửi Gateway qua ESP-NOW.
 
 ### 1.3. Chuỗi tin cậy chứng chỉ
 
@@ -117,13 +113,13 @@ flowchart TB
     SCRIPT -->|"chỉ lần đầu,<br/>lần sau dùng lại"| CAKEY["🔑 ca.key<br/>khoá riêng CA<br/>chỉ nằm trên máy dev"]
     CAKEY -->|"tự ký, 3650 ngày"| CACRT["📜 ca.crt<br/>CA nội bộ, công khai"]
     SCRIPT -->|"mỗi lần chạy"| SKEY["🔑 server.key"]
-    CAKEY -->|"ký, 825 ngày"| SCRT["📜 server.crt<br/>CN = mqtt-broker-2<br/>SAN: localhost, mqtt-broker-2, 127.0.0.1<br/>+ IP và DNS: 192.168.1.100"]
+    CAKEY -->|"ký, 825 ngày"| SCRT["📜 server.crt<br/>CN = mqtt-broker<br/>SAN: localhost, mqtt-broker, 127.0.0.1<br/>+ IP và DNS: 192.168.1.100"]
     SKEY -.-|"cặp khoá"| SCRT
 
     CACRT -->|"sinh header"| HDR["firmware/gateway-node/include/<br/>mqtt_ca_cert.h"]
     HDR -->|"build + nạp firmware"| GW["Gateway<br/>setCACert()"]
     CACRT -->|"mount /certs/mqtt-ca.crt"| BE["Backend<br/>MQTT_CA_FILE"]
-    CACRT -->|"cafile"| B2["Broker 2"]
+    CACRT -->|"cafile"| B2["Broker MQTT"]
     SCRT -->|"certfile"| B2
     SKEY -->|"keyfile"| B2
     CACRT -->|"--cafile / -CAfile"| TOOLS["mosquitto_sub<br/>check_mqtt_tls.sh"]
@@ -147,10 +143,9 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     autonumber
-    participant SN as Sensor Node
-    participant B1 as Broker 1 (plaintext)
+    participant SN as Node phòng
     participant GW as Gateway ESP32
-    participant B2 as Broker 2 (TLS 8883)
+    participant B2 as Broker MQTT (TLS 8883)
     participant BE as Backend
     participant DB as PostgreSQL
 
@@ -158,7 +153,7 @@ sequenceDiagram
     Note over B2,BE: Backend khởi động — Node.js, TLS 1.3
     BE->>B2: TCP connect + ClientHello
     B2-->>BE: ServerHello + server.crt
-    BE->>BE: Kiểm chứng cert ký bởi ca.crt và SAN có mqtt-broker-2
+    BE->>BE: Kiểm chứng cert ký bởi ca.crt và SAN có mqtt-broker
     BE->>B2: MQTT CONNECT trong kênh đã mã hoá
     BE->>B2: SUBSCRIBE gateway/+/data (QoS 1)
     end
@@ -175,8 +170,7 @@ sequenceDiagram
     end
     end
 
-    SN->>B1: PUBLISH local/sensors/{id}/data kèm sn_hmac (plaintext)
-    B1->>GW: Chuyển message
+    SN->>GW: Khung ESP-NOW kèm sn_hmac
     GW->>GW: Kiểm HMAC sensor, ký HMAC gateway
     GW->>B2: 🔒 PUBLISH gateway/{gw_id}/data (QoS 1)
     B2->>BE: 🔒 Chuyển message
@@ -201,13 +195,12 @@ flowchart LR
     ATK -->|"③ Kết nối MQTT plaintext"| R3["✅ Broker ngắt kết nối<br/>(kiểm #9, #17)"]
     ATK -->|"④ Ép hạ xuống TLS 1.1"| R4["✅ Broker từ chối<br/>(kiểm #6)"]
     ATK -->|"⑤ Kết nối TLS ẩn danh bằng ca.crt<br/>rồi publish dữ liệu giả"| R5["⚠️ Broker vẫn nhận<br/>(FR-12.4 chưa làm)<br/>Backend loại vì sai HMAC"]
-    ATK -->|"⑥ Nghe lén Broker 1 cổng 1883"| R6["⚠️ Đọc được dữ liệu cảm biến<br/>(ngoài phạm vi FR-12.3)"]
 
     classDef ok fill:#d4edda,stroke:#2e7d32,color:#1b5e20
     classDef warn fill:#fff3cd,stroke:#b26a00,color:#4e342e
     classDef atk fill:#f8d7da,stroke:#c62828,color:#7f0000
     class R1,R2,R3,R4 ok
-    class R5,R6 warn
+    class R5 warn
     class ATK atk
 ```
 
@@ -215,7 +208,7 @@ flowchart LR
 
 - Số `#` là mã phép thử ở [mục 3](#3-những-gì-đã-kiểm-tra).
 - TLS chặn được nghe lén, giả mạo broker, kết nối plaintext và hạ cấp giao thức (① đến ④).
-- ⑤ và ⑥ nằm ngoài FR-12.3 và được ghi ở [mục 6](#6-việc-chưa-làm). Riêng ⑤, HMAC ở lớp ứng dụng vẫn chặn được dữ liệu giả. Đây là lý do hệ thống giữ cả TLS lẫn HMAC.
+- ⑤ nằm ngoài FR-12.3 và được ghi ở [mục 6](#6-việc-chưa-làm). HMAC ở lớp ứng dụng vẫn chặn được dữ liệu giả. Đây là lý do hệ thống giữ cả TLS lẫn HMAC.
 - ① mới được xác nhận qua handshake (#4, #5). Chưa có ảnh Wireshark chụp trên mạng LAN thật (xem bước 7 ở mục 4).
 
 ---
@@ -226,9 +219,9 @@ flowchart LR
 
 | Quyết định | Lý do |
 |---|---|
-| Chỉ bật TLS cho Broker 2, Broker 1 giữ plaintext | FR-12.3 chỉ yêu cầu chặng Gateway ↔ Backend. Theo [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §17 và [Bảo mật](../SECURITY_ARCHITECTURE.md) §4.1, chặng Sensor ↔ Gateway là mạng nội bộ và sẽ chuyển sang ESP-NOW |
+| Chỉ một broker, chỉ TLS (Broker 1 plaintext đã gỡ 2026-11-12) | FR-12.3 chỉ yêu cầu chặng Gateway ↔ Backend. Theo [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §17 và [Bảo mật](../SECURITY_ARCHITECTURE.md) §4.1, chặng Sensor ↔ Gateway là mạng nội bộ — nay đã chạy ESP-NOW nên không cần broker riêng |
 | TLS xác thực server, chưa làm mTLS | PRD xếp xác thực server là MUST, mTLS là SHOULD |
-| Bỏ hẳn cổng plaintext của Broker 2 | Tiêu chí nghiệm thu yêu cầu 100% lưu lượng Gateway ↔ Backend có TLS. Giữ cổng cũ song song sẽ để lại đường vòng không mã hoá |
+| Bỏ hẳn cổng plaintext của Broker MQTT | Tiêu chí nghiệm thu yêu cầu 100% lưu lượng Gateway ↔ Backend có TLS. Giữ cổng cũ song song sẽ để lại đường vòng không mã hoá |
 | Tự ký một CA nội bộ và dùng lại CA đó | PRD cho phép "self-signed CA cho demo". Khi đổi IP chỉ cần cấp lại cert server, CA không đổi nên không phải nạp lại firmware |
 | IP của broker được ghi vào SAN ở cả dạng `IP:` và `DNS:` | ESP32 dùng mbedTLS 2.28.7 (Arduino core 2.0.17), bản này chỉ so khớp SAN kiểu DNS. OpenSSL và Node lại kiểm tra theo SAN kiểu IP. Ghi cả hai thì client nào cũng xác thực được |
 | Dùng khoá RSA-2048 | Tương thích với mbedTLS, OpenSSL và Node mà không cần cấu hình thêm |
@@ -238,14 +231,14 @@ flowchart LR
 
 | File | Thay đổi |
 |---|---|
-| `infra/pki/gen_mqtt_certs.sh` (mới) | Sinh CA nội bộ (chỉ lần đầu), cert cho Broker 2 và file `firmware/gateway-node/include/mqtt_ca_cert.h` |
+| `infra/pki/gen_mqtt_certs.sh` (mới) | Sinh CA nội bộ (chỉ lần đầu), cert cho Broker MQTT và file `firmware/gateway-node/include/mqtt_ca_cert.h` |
 | `tests/security/check_mqtt_tls.sh` (mới) | Script nghiệm thu gồm 4 phép thử, dùng khi demo bảo vệ |
-| `infra/mosquitto/broker2/mosquitto.conf` | Chỉ còn `listener 8883` với `cafile`/`certfile`/`keyfile`, `tls_version tlsv1.2`, `require_certificate false` |
+| `infra/mosquitto/mosquitto.conf` | Chỉ còn `listener 8883` với `cafile`/`certfile`/`keyfile`, `tls_version tlsv1.2`, `require_certificate false` |
 | `infra/pki/README.md` (mới) | Mô tả từng file chứng chỉ và ai được dùng file nào |
-| `compose.yaml`, `compose.prod.yaml` | Broker 2 mở cổng `8883:8883`, mount từng file cert ở chế độ `:ro`. Backend mount `ca.crt` vào `/certs/mqtt-ca.crt`, đặt `MQTT_PORT=8883`, `MQTT_CA_FILE` |
+| `compose.yaml`, `compose.prod.yaml` | Broker MQTT mở cổng `8883:8883`, mount từng file cert ở chế độ `:ro`. Backend mount `ca.crt` vào `/certs/mqtt-ca.crt`, đặt `MQTT_PORT=8883`, `MQTT_CA_FILE` |
 | `backend/src/infrastructure/mqtt/broker.ts` (mới) | Hàm `connectBroker()` dùng chung: `mqtts://`, `ca`, `rejectUnauthorized: true`. Đọc CA khi khởi động, thiếu CA thì dừng |
 | `backend/src/modules/telemetry/features/ingest-mqtt/`, `devices/features/track-device-ip/`, `control/features/command-ack/` (consumer) | Chuyển sang dùng `connectBroker()` |
-| `firmware/gateway-node/lib/mqtt_client/mqtt_client.cpp` | Kết nối Broker 2 dùng `WiFiClientSecure` + `setCACert()` + `setHandshakeTimeout(10)`. Khi kết nối lỗi, log in cả nguyên nhân TLS |
+| `firmware/gateway-node/lib/mqtt_client/mqtt_client.cpp` | Kết nối Broker MQTT dùng `WiFiClientSecure` + `setCACert()` + `setHandshakeTimeout(10)`. Khi kết nối lỗi, log in cả nguyên nhân TLS |
 | `.gitignore` | Bỏ qua `infra/mosquitto/certs/*` (trừ README) và `firmware/gateway-node/include/mqtt_ca_cert.h` |
 | `scripts/setup.sh`, `scripts/setup.bat` | Tự sinh chứng chỉ nếu chưa có, trước bước `compose up` |
 | `README.md`, `docs/guides/CHAY_LOCAL.md`, `firmware/gateway-node/README.md`, `tests/security/ATTACK_SIMULATION_GUIDE.md`, `tests/security/DEMO_THREAT_MODEL.md` | Đổi cổng 1884 thành 8883, thêm bước sinh chứng chỉ |
@@ -256,11 +249,11 @@ flowchart LR
 
 | Biến | Chạy local | Docker (compose tự đặt) |
 |---|---|---|
-| `MQTT_HOST` | `localhost` | `mqtt-broker-2` |
+| `MQTT_HOST` | `localhost` | `mqtt-broker` |
 | `MQTT_PORT` | `8883` (mặc định trong code) | `8883` |
 | `MQTT_CA_FILE` | `../infra/mosquitto/certs/ca.crt` (mặc định, tính từ thư mục `backend/`) | `/certs/mqtt-ca.crt` |
 
-`MQTT_HOST` phải có trong SAN của cert. SAN luôn có sẵn `localhost`, `127.0.0.1` và `mqtt-broker-2`.
+`MQTT_HOST` phải có trong SAN của cert. SAN luôn có sẵn `localhost`, `127.0.0.1` và `mqtt-broker`.
 
 **Macro firmware gateway** (trong `include/config_gw.h`, file này gitignored)
 
@@ -274,9 +267,9 @@ flowchart LR
 
 | File | Ai dùng | Mount vào container |
 |---|---|---|
-| `ca.crt` | Broker 2, backend, gateway (qua `mqtt_ca_cert.h`), `mosquitto_sub --cafile` | Broker 2, backend |
+| `ca.crt` | Broker MQTT, backend, gateway (qua `mqtt_ca_cert.h`), `mosquitto_sub --cafile` | Broker MQTT, backend |
 | `ca.key` | Chỉ script `gen_mqtt_certs.sh`. Ai có file này đều cấp được cert giả cho broker | **Không** |
-| `server.crt`, `server.key` | Broker 2 | Broker 2 |
+| `server.crt`, `server.key` | Broker MQTT | Broker MQTT |
 
 Thời hạn: CA 3650 ngày, cert server 825 ngày.
 
@@ -284,7 +277,7 @@ Thời hạn: CA 3650 ngày, cert server 825 ngày.
 
 ## 3. Những gì đã kiểm tra
 
-Môi trường kiểm tra: Windows 11, Mosquitto 2.1.2 cài trên máy (broker chạy với đúng các dòng TLS của `broker2/mosquitto.conf`, trên cổng test 18883), OpenSSL 1.1.1q (Git Bash), mqtt.js 5.15.1, PlatformIO với Arduino core 2.0.17.
+Môi trường kiểm tra: Windows 11, Mosquitto 2.1.2 cài trên máy (broker chạy với đúng các dòng TLS của `mosquitto.conf`, trên cổng test 18883), OpenSSL 1.1.1q (Git Bash), mqtt.js 5.15.1, PlatformIO với Arduino core 2.0.17.
 
 | # | Hạng mục | Cách kiểm | Kết quả |
 |---|---|---|---|
@@ -310,7 +303,7 @@ Môi trường kiểm tra: Windows 11, Mosquitto 2.1.2 cài trên máy (broker c
 
 **Chưa kiểm tra**
 
-- Gateway ESP32 thật kết nối Broker 2 qua TLS, gồm cả việc mbedTLS chấp nhận SAN `DNS:<IP>`, thời gian handshake và lượng heap còn trống khi chạy.
+- Gateway ESP32 thật kết nối Broker MQTT qua TLS, gồm cả việc mbedTLS chấp nhận SAN `DNS:<IP>`, thời gian handshake và lượng heap còn trống khi chạy.
 - Stack Docker (`eclipse-mosquitto:2`, backend trong container). Lúc kiểm tra Docker Desktop không chạy.
 - Chụp gói tin bằng Wireshark trên mạng LAN thật.
 - Chưa có review bảo mật độc lập cho thay đổi này.
@@ -341,7 +334,7 @@ Kết quả mong đợi:
 ```
 [ca]     Dùng lại CA có sẵn: .../infra/mosquitto/certs/ca.crt
 [server] Đã cấp server.crt (hạn 825 ngày)
-         SAN DNS: localhost mqtt-broker-2 192.168.1.100
+         SAN DNS: localhost mqtt-broker 192.168.1.100
          SAN IP : 127.0.0.1 192.168.1.100
 [fw]     Đã ghi firmware/gateway-node/include/mqtt_ca_cert.h
 ```
@@ -363,20 +356,20 @@ Bật Docker Desktop trước, rồi:
 
 ```bash
 docker compose up -d --build                               # lần đầu
-docker compose up -d --force-recreate mqtt-broker-2 backend  # sau khi sinh lại cert
-docker compose logs mqtt-broker-2 | grep -i "8883\|error"
+docker compose up -d --force-recreate mqtt-broker backend  # sau khi sinh lại cert
+docker compose logs mqtt-broker | grep -i "8883\|error"
 docker compose logs backend | grep -i "mqtt"
 ```
 
 Log mong đợi:
 
 ```
-mqtt-broker-2  | ... Opening ipv4 listen socket on port 8883.
+mqtt-broker  | ... Opening ipv4 listen socket on port 8883.
 backend        | [mqttTracker] connected, subscribing to $SYS logs
 backend        | [mqttData] connected, subscribing to gateway/+/data
 ```
 
-Chạy không dùng Docker thì làm theo [`CHAY_LOCAL.md`](CHAY_LOCAL.md) Bước 3 (config `broker2_local.conf` có TLS).
+Chạy không dùng Docker thì làm theo [`CHAY_LOCAL.md`](CHAY_LOCAL.md) Bước 3 (config `broker_local.conf` có TLS).
 
 ### Bước 5 — Nạp lại firmware gateway
 
@@ -401,7 +394,7 @@ Chạy không dùng Docker thì làm theo [`CHAY_LOCAL.md`](CHAY_LOCAL.md) Bư�
    [MQTT-PUB] Connecting to Broker2 192.168.1.100:8883 (TLS) as 'gw-ESP32-GW-XXXXXXXX'... OK
    ```
 
-Sensor node không cần nạp lại vì Broker 1 không đổi.
+Node không cần nạp lại vì Node nói với Gateway qua ESP-NOW, không dùng broker.
 
 ### Bước 6 — Mở firewall cho cổng 8883
 
@@ -425,7 +418,6 @@ New-NetFirewallRule -DisplayName "MQTT TLS 8883" -Direction Inbound -Protocol TC
 
 3. Demo bằng Wireshark (tiêu chí nghiệm thu mốc M3 trong PRD):
    - Bắt gói trên card mạng LAN với bộ lọc `tcp.port == 8883`. Chỉ thấy `TLSv1.2 Application Data`, không đọc được topic hay payload.
-   - Để so sánh, lọc `tcp.port == 1883` (Broker 1). Thấy `Publish Message` với topic `local/sensors/...` và JSON đọc được. Đây chính là chặng chưa mã hoá, xem mục 6.
 
 ---
 
@@ -434,12 +426,12 @@ New-NetFirewallRule -DisplayName "MQTT TLS 8883" -Direction Inbound -Protocol TC
 | Triệu chứng | Nguyên nhân | Cách sửa |
 |---|---|---|
 | Backend thoát ngay, log `[startup] Cannot read MQTT CA certificate at ...` | Chưa sinh cert, hoặc `MQTT_CA_FILE` sai đường dẫn | Chạy `gen_mqtt_certs.sh`. Khi chạy local, chạy backend từ thư mục `backend/` hoặc đặt đường dẫn tuyệt đối |
-| Trong `infra/mosquitto/certs/` xuất hiện **thư mục** tên `ca.crt`, `server.crt`... | Chạy `docker compose up` trước khi có cert. Docker tự tạo thư mục rỗng cho file mount chưa tồn tại | Chạy `gen_mqtt_certs.sh` (script tự xoá các thư mục rỗng này), rồi `docker compose up -d --force-recreate mqtt-broker-2 backend` |
+| Trong `infra/mosquitto/certs/` xuất hiện **thư mục** tên `ca.crt`, `server.crt`... | Chạy `docker compose up` trước khi có cert. Docker tự tạo thư mục rỗng cho file mount chưa tồn tại | Chạy `gen_mqtt_certs.sh` (script tự xoá các thư mục rỗng này), rồi `docker compose up -d --force-recreate mqtt-broker backend` |
 | Backend log `[mqttData] error: self-signed certificate in certificate chain` | Backend đang dùng một CA khác với CA đã ký cert của broker | Trỏ `MQTT_CA_FILE` về `infra/mosquitto/certs/ca.crt` hiện tại. Khởi động lại broker sau khi sinh cert |
-| Backend log `Hostname/IP does not match certificate's altnames` | `MQTT_HOST` không có trong SAN | Dùng `localhost`/`mqtt-broker-2`, hoặc sinh lại cert kèm host đó |
+| Backend log `Hostname/IP does not match certificate's altnames` | `MQTT_HOST` không có trong SAN | Dùng `localhost`/`mqtt-broker`, hoặc sinh lại cert kèm host đó |
 | Backend log `connect ECONNREFUSED ...:1884` | `.env` cũ vẫn còn `MQTT_PORT=1884` | Đổi thành `MQTT_PORT=8883` |
 | Gateway log `FAILED (rc=-2, TLS: X509 - Certificate verification failed ...)` | `MQTT_BROKER2_HOST` không có trong SAN, hoặc firmware đang chứa CA cũ | Sinh lại cert với đúng IP. Nếu đã thay CA thì build và nạp lại firmware |
-| Gateway log `FAILED (rc=-2)` và không có dòng TLS | Không mở được TCP tới `IP:8883` | Kiểm tra IP, firewall (bước 6), container Broker 2 có đang chạy không |
+| Gateway log `FAILED (rc=-2)` và không có dòng TLS | Không mở được TCP tới `IP:8883` | Kiểm tra IP, firewall (bước 6), container Broker MQTT có đang chạy không |
 | Build firmware báo `Thieu include/mqtt_ca_cert.h` | Chưa chạy script sinh cert trên máy này | `bash infra/pki/gen_mqtt_certs.sh <IP>` |
 | `check_mqtt_tls.sh` báo không đạt ở phép thử 1 | Broker chưa bật TLS, sai cổng, hoặc sai tên/IP | Xem log của broker. Chạy lại script với đúng `host port` |
 
@@ -453,7 +445,6 @@ Cần thay CA (ví dụ khi `ca.key` bị lộ): xoá `infra/mosquitto/certs/ca.
 |---|---|---|---|
 | Tắt `allow_anonymous`, credential và ACL riêng cho từng gateway (FR-12.4) | **MUST** | Ai có `ca.crt` (vốn là file công khai) cũng kết nối TLS và publish/subscribe được mọi topic, kể cả `$SYS/broker/log/N` (thấy client id và IP). Dữ liệu giả vẫn bị HMAC chặn | `password_file` hoặc dynamic security, cộng `acl_file` giới hạn mỗi gateway theo `home/{home_id}/gateway/{gw}/#` ([Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §10, [Bảo mật](../SECURITY_ARCHITECTURE.md) §4.3). Backend dùng tài khoản riêng |
 | mTLS cho gateway | SHOULD | Broker chưa xác thực được client ở tầng transport | Đổi `require_certificate true`, cấp cert client cho từng gateway lúc provisioning ([Bảo mật](../SECURITY_ARCHITECTURE.md) §4.2) |
-| Broker 1 (Sensor ↔ Gateway) vẫn plaintext | Không yêu cầu | Người trong cùng LAN đọc được dữ liệu cảm biến. HMAC vẫn chống giả mạo | Chuyển sang ESP-NOW theo [WiFi Provisioning](../firmware/SMART_HOME_WIFI_PROVISIONING.md), [Firmware](../firmware/EMBEDDED_ARCHITECTURE_ESP_IDF.md), hoặc bật TLS cho Broker 1 nếu phải giữ MQTT |
 | ESP32 không kiểm tra hạn của cert | — | `CONFIG_MBEDTLS_HAVE_TIME_DATE` đang tắt trong Arduino core, nên cert hết hạn vẫn được gateway chấp nhận | Gia hạn cert server trước 825 ngày bằng cách chạy lại script. Hướng lâu dài: ESP-IDF theo [Firmware](../firmware/EMBEDDED_ARCHITECTURE_ESP_IDF.md) |
 | Khoá riêng của CA không có passphrase | — | `ca.key` nằm trên máy dev dạng không mã hoá (đã gitignore, `chmod 600`, không mount vào container) | Chấp nhận được cho demo. Bản production cần lưu CA tách khỏi máy chạy dịch vụ |
 | HTTPS cho `/api/device/**` và `BACKEND_SENSORS_URL` | NFR-S1 | Đường HTTP fallback và API lấy danh sách sensor vẫn là `http://` | Bật TLS ở Nginx, gateway chuyển sang `https://` kèm CA |
@@ -466,6 +457,6 @@ Cần thay CA (ví dụ khi `ca.key` bị lộ): xoá `infra/mosquitto/certs/ca.
 - [`PRD_SMART_HOME.md`](../PRD_SMART_HOME.md): FR-12.3, FR-12.4, NFR-S1, mốc M3 ("Wireshark cho thấy MQTT đã mã hoá")
 - [`SECURITY_ARCHITECTURE.md`](../SECURITY_ARCHITECTURE.md): §4.1 bảng TLS theo broker, §4.2 mTLS, §4.3 ACL, §17.1 luồng TLS handshake
 - [`BACKEND_REFACTOR_SMARTHOME.md`](../architecture/BACKEND_REFACTOR_SMARTHOME.md): §10 thiết kế topic, §17 security design
-- [`CHAY_LOCAL.md`](CHAY_LOCAL.md): chạy Broker 2 TLS không dùng Docker
+- [`CHAY_LOCAL.md`](CHAY_LOCAL.md): chạy Broker MQTT TLS không dùng Docker
 - [`../infra/pki/README.md`](../../infra/pki/README.md): các file chứng chỉ
 - [`../firmware/gateway-node/README.md`](../../firmware/gateway-node/README.md): cấu hình và log mẫu của gateway

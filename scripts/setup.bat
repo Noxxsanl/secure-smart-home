@@ -72,7 +72,7 @@ if not exist "agent\.env" (
     echo [OK] agent\.env da ton tai.
 )
 
-:: Chung chi TLS cho MQTT Broker 2 (can Git Bash + openssl). Tham so cua setup.bat (IP LAN) duoc chuyen tiep.
+:: Chung chi TLS cho MQTT broker (can Git Bash + openssl). Tham so cua setup.bat (IP LAN) duoc chuyen tiep.
 if not exist "infra\mosquitto\certs\server.crt" (
     if not exist "%ProgramFiles%\Git\bin\bash.exe" (
         echo [ERROR] Chua co chung chi MQTT TLS. Mo Git Bash va chay: bash infra/pki/gen_mqtt_certs.sh ^<IP LAN^>

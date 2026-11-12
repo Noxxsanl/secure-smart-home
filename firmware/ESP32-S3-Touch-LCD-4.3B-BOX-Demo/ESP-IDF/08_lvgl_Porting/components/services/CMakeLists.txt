@@ -8,12 +8,12 @@
 #   gw_camera_live  kéo luồng MJPEG GET /stream của camera (ký HMAC camera), tách từng khung JPEG
 #   gw_tls          CA nhúng; chặn kết nối không TLS trừ khi bật [DEV]
 #   gw_envelope     payload Gateway → Server có HMAC gateway (telemetry, ack, heartbeat, camera event)
-#   gw_mqtt         Broker 2 TLS: publish telemetry/ack/…, nhận + kiểm lệnh từ Server
+#   gw_mqtt         Broker MQTT TLS: publish telemetry/ack/…, nhận + kiểm lệnh từ Server
 #   gw_api          HTTPS Backend: /api/device/data (dự phòng), /api/device/camera/snapshot (đề xuất)
 #
 # Không biết drivers/ui/application.
 
-# CA của Broker 2 / Backend (infra/pki/gen_mqtt_certs.sh): chép infra/mosquitto/certs/ca.crt thành
+# CA của Broker MQTT / Backend (infra/pki/gen_mqtt_certs.sh): chép infra/mosquitto/certs/ca.crt thành
 # certs/mqtt_ca.crt ở gốc project (gitignore — docs/guides/ESP_IDF_BUILD.md §7.2). Chưa có thì nhúng file rỗng:
 # vẫn build được, nhưng gw_tls từ chối mqtts:// và https:// lúc chạy.
 set(gw_ca_file "")

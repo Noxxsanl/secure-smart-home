@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Kiểm tra MQTT TLS của Broker 2 (FR-12.3) — dùng khi nghiệm thu / demo bảo vệ
+#  Kiểm tra MQTT TLS của Broker MQTT (FR-12.3) — dùng khi nghiệm thu / demo bảo vệ
 #
 #  Dùng:  bash tests/security/check_mqtt_tls.sh [host] [port]    (mặc định: localhost 8883)
 #  VD:    bash tests/security/check_mqtt_tls.sh 192.168.1.100
@@ -29,7 +29,7 @@ fi
 
 tls() { timeout 10 openssl s_client -connect "$HOST:$PORT" -brief "$@" </dev/null 2>&1; }
 
-echo "Broker 2: $HOST:$PORT"
+echo "Broker MQTT: $HOST:$PORT"
 echo
 
 echo "1. Handshake TLS với CA nội bộ, kiểm chứng cert + tên host"

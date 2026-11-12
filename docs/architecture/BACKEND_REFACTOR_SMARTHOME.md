@@ -118,7 +118,7 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 
 | Vấn đề | Chi tiết |
 |---|---|
-| 2 broker, không TLS, `allow_anonymous true` | Đã xác nhận qua đường dẫn `infra/mosquitto/broker1/mosquitto.conf`, `infra/mosquitto/broker2/mosquitto.conf` (nội dung đã thẩm định ở `SMART_HOME_WIFI_PROVISIONING.md` mục 20, điểm 11) — chấp nhận được cho demo, **không chấp nhận được cho production thương mại**. |
+| 2 broker, không TLS, `allow_anonymous true` | Đã xác nhận qua đường dẫn `infra/mosquitto/broker1/mosquitto.conf`, `infra/mosquitto/broker2/mosquitto.conf` (prototype — từ 2026-11-12 gộp thành 1 broker TLS `infra/mosquitto/mosquitto.conf`; nội dung đã thẩm định ở `SMART_HOME_WIFI_PROVISIONING.md` mục 20, điểm 11) — chấp nhận được cho demo, **không chấp nhận được cho production thương mại**. |
 | Topic không namespace theo khách hàng | `gateway/+/data` (broker2), `local/sensors/+/data` (broker1) — không có `home_id` trong topic, không thể áp ACL theo khách hàng ở tầng broker (`mqttDataService.ts:174`). |
 | Chỉ có 1 topic ("data") — không có `command`/`status`/`heartbeat`/`ota`/`provision` | Toàn bộ giao tiếp hiện tại là **1 chiều** (thiết bị → cloud). Không có cơ chế gửi lệnh xuống thiết bị (bật/tắt relay), không có OTA qua MQTT, không có heartbeat riêng biệt (trạng thái online suy ra từ `last_seen` cập nhật mỗi lần có dữ liệu — không phân biệt được "thiết bị mất kết nối" và "thiết bị active nhưng không có gì để gửi"). |
 | `mqttTracker.ts` phụ thuộc vào định dạng log `$SYS` của Mosquitto | Regex parse chuỗi log (`CONNECT_RE` ở `mqttTracker.ts:6`) — cách lấy IP thiết bị **rất giòn** (brittle), phụ thuộc định dạng log nội bộ của 1 phiên bản broker cụ thể, gãy ngay khi đổi broker (EMQX/VerneMQ) hoặc đổi cấu hình log level. |
@@ -333,7 +333,7 @@ flowchart TB
 
     subgraph IOT["IoT / MQTT Layer"]
         BK1["Broker 1 — Sensor↔Gateway (ESP-NOW/Local, không TLS bắt buộc nội bộ)"]
-        BK2["Broker 2 — Gateway↔Backend (TLS bắt buộc, ACL theo home_id)"]
+        BK2["Broker MQTT — Gateway↔Backend (TLS bắt buộc, ACL theo home_id)"]
     end
 
     WEB --> NGX --> DAPI
@@ -634,7 +634,7 @@ Mọi topic đều bắt đầu bằng `home_id` — đây là thay đổi quan 
 | Hiện tại | Mới | Ghi chú |
 |---|---|---|
 | `local/sensors/+/data` (Broker 1) | Giữ nguyên tầng vật lý Sensor↔Gateway (ESP-NOW nội bộ, không qua MQTT cloud theo `SMART_HOME_WIFI_PROVISIONING.md`) | Không đổi — đây là giao tiếp cục bộ, không phải MQTT cloud |
-| `gateway/+/data` (Broker 2) | `home/{home_id}/gateway/{gw}/device/{dev}/telemetry` | Cần script migrate: gateway cũ phải update firmware để publish theo topic mới có `home_id` |
+| `gateway/+/data` (Broker MQTT) | `home/{home_id}/gateway/{gw}/device/{dev}/telemetry` | Cần script migrate: gateway cũ phải update firmware để publish theo topic mới có `home_id` |
 
 ---
 
@@ -875,7 +875,7 @@ sequenceDiagram
 
 | Hạng mục | Thiết kế |
 |---|---|
-| **TLS cho MQTT** | Broker 2 (Gateway↔Backend) bắt buộc TLS 1.2+ trong production — vá vấn đề #9 (hiện tại `allow_anonymous true`, không TLS). Broker 1 (Sensor↔Gateway nội bộ qua ESP-NOW) không bắt buộc TLS vì không phải giao thức IP/MQTT thật theo `SMART_HOME_WIFI_PROVISIONING.md`. |
+| **TLS cho MQTT** | Broker MQTT (Gateway↔Backend) bắt buộc TLS 1.2+ trong production — vá vấn đề #9 (hiện tại `allow_anonymous true`, không TLS). Broker 1 (Sensor↔Gateway nội bộ qua ESP-NOW) không bắt buộc TLS vì không phải giao thức IP/MQTT thật theo `SMART_HOME_WIFI_PROVISIONING.md`. |
 | **HTTPS** | Toàn bộ API (`/api/dashboard`, `/api/mobile`, `/api/device`) bắt buộc TLS ở tầng Nginx/Load Balancer, không có ngoại lệ. |
 | **JWT** | 2 secret riêng biệt cho Dashboard/Mobile (Phần 7.3), thời hạn ngắn cho Mobile Access Token (15 phút). |
 | **Refresh Token** | Random 256-bit, chỉ lưu hash trong DB, rotate mỗi lần dùng, phát hiện reuse → thu hồi toàn bộ session (Phần 7.3). |
@@ -1165,7 +1165,7 @@ flowchart TB
 | **Phase 1 — Vá lỗ hổng bảo mật khẩn cấp** | Vá `GET /api/device/sensors` rò rỉ secret toàn hệ thống (#1); mã hoá secret tại rest (#6); tách JWT secret Dashboard/Mobile | Rủi ro cao nhất, phải xong **trước khi có khách hàng thứ hai** dù các phase khác chưa xong |
 | **Phase 2 — Domain Customer/Home/Room** | Customer Service, Smart Home Service, Room Service, Device Service tổng quát hoá khỏi ENUM cứng | Nền tảng nghiệp vụ cốt lõi — mọi API/MQTT/Automation sau này đều tham chiếu `home_id`/`room_id` |
 | **Phase 3 — Provisioning & Activation** | Provision Service, Activation Service, Pairing Service, RBAC Service (`operator_home_access`) | Điều kiện để bắt đầu bán hàng loạt theo mô hình Claim đã thiết kế |
-| **Phase 4 — MQTT redesign** | Topic mới có `home_id`, TLS Broker 2, tách Heartbeat khỏi Telemetry, bỏ regex giòn lấy IP từ log broker (Prototype: `mqttTracker.ts`; nay `devices/features/track-device-ip/`) | Cần thiết trước khi scale số lượng gateway lớn |
+| **Phase 4 — MQTT redesign** | Topic mới có `home_id`, TLS Broker MQTT, tách Heartbeat khỏi Telemetry, bỏ regex giòn lấy IP từ log broker (Prototype: `mqttTracker.ts`; nay `devices/features/track-device-ip/`) | Cần thiết trước khi scale số lượng gateway lớn |
 | **Phase 5 — Gateway/Monitoring/Auth Mobile** | Gateway Service đầy đủ, Monitoring Service (Redis + WebSocket thật, tận dụng `ws`), Auth Service Mobile (Refresh Token) | Đáp ứng yêu cầu Dashboard mới (`FRONTEND_REFACTOR_SMARTHOME.md`) và Mobile App bắt đầu nối API thật |
 | **Phase 6 — OTA & Firmware** | OTA Service, Firmware Service, Job Queue (BullMQ/Redis) | Cần thiết khi fleet đủ lớn để phải cập nhật hàng loạt |
 | **Phase 7 — Logging tách bảng** | Log Service với 9+ loại log riêng, retention riêng, tách khỏi `audit_log` gộp hiện tại | Dọn nợ kỹ thuật logging, đáp ứng yêu cầu Logs Center mới ở Dashboard |

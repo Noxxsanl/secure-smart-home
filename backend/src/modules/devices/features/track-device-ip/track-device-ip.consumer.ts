@@ -1,4 +1,4 @@
-// Theo dõi log $SYS của Broker 2 để cập nhật devices.last_ip khi gateway/sensor kết nối.
+// Theo dõi log $SYS của Broker MQTT để cập nhật devices.last_ip khi gateway/sensor kết nối.
 import { connectBroker } from "../../../../infrastructure/mqtt/broker";
 import { updateDeviceIpByUid } from "../../infrastructure/device.repository";
 
@@ -15,7 +15,7 @@ async function updateDeviceIp(clientId: string, ip: string): Promise<void> {
 }
 
 export function startMqttTracker(): void {
-  // Broker 2 (gateway → backend layer; $SYS logs contain gateway IPs), MQTT over TLS
+  // Broker MQTT (gateway → backend layer; $SYS logs contain gateway IPs), MQTT over TLS
   const client = connectBroker("iot-backend-tracker");
 
   client.on("connect", () => {

@@ -11,7 +11,7 @@ dev: ## Stack dev (compose.yaml + compose.override.yaml); -V làm mới anonymou
 prod: ## Stack prod
 	docker compose -f compose.prod.yaml up -d --build
 
-certs: ## Sinh CA + cert Broker 2 (IP LAN máy chạy broker)
+certs: ## Sinh CA + cert Broker MQTT (IP LAN máy chạy broker)
 	bash infra/pki/gen_mqtt_certs.sh $(IP)
 
 migrate: ## Chưa có lệnh riêng

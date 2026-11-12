@@ -144,9 +144,7 @@ npm run build               # next build cả 3 app
 |---|---|---|
 | Admin | `admin` | `admin123` |
 | Operator | `operator01`, `operator02` | `operator123` |
-| Khách hàng | `user01@smarthome.local` (Nguyễn Hoàng Đạt, `dat#4821`) | `user123` |
-| Khách hàng | `lan@smarthome.local` (Trần Thị Lan — CONTROLLER nhà của Đạt) | `user123` |
-| Khách hàng | `hoa@smarthome.local` (Phạm Thị Hoa — VIEWER nhà của Đạt) | `user123` |
+| Khách hàng | `user01@smarthome.local` (Nguyễn Hoàng Đạt, `dat#4821` — chủ "Nhà demo phần cứng", nhà do `npm run hw:register` tạo từ phần cứng thật, xem [LEN_SERVER](../docs/guides/LEN_SERVER.md); seed không tạo nhà cho tài khoản này) | `user123` |
 | Khách hàng | `hung@smarthome.local` (Lê Văn Hùng — chủ "Nhà Quận 7") | `user123` |
 | Khách hàng | `kimanh@smarthome.local` (Ngô Kim Anh, `kimanh#1560` — chưa có nhà, dùng để thử claim / operator gán nhà) | `user123` |
 
@@ -160,7 +158,7 @@ Activation Code để thử trang **Thêm Smart Home** (nhập chữ thường, 
 | `B9FE-3WRA-7GMK` | hết hạn → "Mã kích hoạt đã hết hạn…" |
 | mã bất kỳ khác | không tồn tại; nhập sai ≥ 5 lần / 15 phút bị khoá tạm (`RATE_LIMITED`) |
 
-Muốn thử lời mời Khách: đăng nhập `user01`, vào **Thành viên** — nhà demo đã có sẵn lời mời `minh@smarthome.local` (GUEST, chỉ Đèn phòng khách).
+Muốn thử phân quyền trong nhà: đăng nhập `user01`, vào **Thành viên** và mời một tài khoản khách hàng khác (vd. `kimanh@smarthome.local`) — seed không tạo sẵn thành viên hay lời mời.
 
 ## Còn là mock
 

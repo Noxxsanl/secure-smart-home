@@ -70,7 +70,7 @@ Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transpo
 
 | Vấn đề | Bằng chứng |
 |---|---|
-| Không TLS | `infra/mosquitto/broker1/mosquitto.conf`, `broker2/mosquitto.conf` — `allow_anonymous true`, không cấu hình `cafile`/`certfile`/`keyfile` |
+| Không TLS | `infra/mosquitto/broker1/mosquitto.conf`, `broker2/mosquitto.conf` (prototype; nay chỉ còn `infra/mosquitto/mosquitto.conf`, TLS 8883) — `allow_anonymous true`, không cấu hình `cafile`/`certfile`/`keyfile` |
 | Không phân quyền theo topic (ACL) | Không có file ACL nào được cấu hình — bất kỳ client nào kết nối được vào broker đều subscribe/publish được mọi topic |
 | Topic không namespace theo khách hàng | `gateway/+/data`, `local/sensors/+/data` — không có `home_id`, không thể áp ACL theo khách hàng dù có cấu hình ACL sau này |
 | Firmware dùng `PubSubClient` không TLS | `mqtt_client.cpp`/`mqtt_sender.cpp` dùng `WiFiClient` thuần (không phải `WiFiClientSecure`) |
@@ -181,7 +181,7 @@ flowchart TB
 | Broker | Kênh | TLS | Xác thực Client | Ghi chú |
 |---|---|---|---|---|
 | Broker 1 (nội bộ Gateway↔Node) | ESP-NOW (không phải MQTT/IP theo thiết kế đã chốt ở `SMART_HOME_WIFI_PROVISIONING.md`) | N/A (không phải TCP/IP) | Challenge-Response + Session Key (ECDH) ở tầng ESP-NOW | Không áp dụng TLS vì không phải giao thức IP |
-| Broker 2 (Gateway↔Backend) | MQTT over TLS 1.2+ | **Bắt buộc** | **mTLS** — mỗi Gateway có client certificate riêng ký bởi Internal CA, cấp lúc Provisioning | Đây là kết nối quan trọng nhất cần bảo vệ — Gateway là điểm biên duy nhất giữa nhà khách hàng và Cloud |
+| Broker MQTT (Gateway↔Backend) | MQTT over TLS 1.2+ | **Bắt buộc** | **mTLS** — mỗi Gateway có client certificate riêng ký bởi Internal CA, cấp lúc Provisioning | Đây là kết nối quan trọng nhất cần bảo vệ — Gateway là điểm biên duy nhất giữa nhà khách hàng và Cloud |
 | Backend↔Broker (nội bộ Cloud) | MQTT over TLS (hoặc trust theo VPC riêng nếu cùng private network) | Khuyến nghị bật | Username/password nội bộ hoặc mTLS service-to-service | Backend là client MQTT duy nhất (đã chốt ở `MOBILE_APP_ARCHITECTURE.md` Phần 11 — Mobile không bao giờ kết nối MQTT trực tiếp) |
 
 ### 4.2. Vì sao chọn mTLS cho Gateway↔Broker (không chỉ username/password)
@@ -234,7 +234,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant GW as Gateway
-    participant BK as MQTT Broker 2
+    participant BK as MQTT broker
     participant BE as Backend
 
     Note over GW,BK: Kết nối transport
@@ -602,7 +602,7 @@ sequenceDiagram
 | Phase | Nội dung | Vì sao ưu tiên |
 |---|---|---|
 | **Phase 0 — Vá khẩn cấp (trước mọi việc khác)** | Vá `/api/device/sensors` (whitelist theo `home_id`), loại bỏ hiển thị secret trên Dashboard UI, xoá WiFi/Secret hard-code khỏi firmware compile vào binary | 4 vấn đề Critical ở Phần 2 — rủi ro khai hoả ngay khi có khách hàng thứ 2 |
-| **Phase 1 — TLS toàn diện** | HTTPS bắt buộc mọi API, MQTT TLS cho Broker 2, mTLS Gateway | Nền tảng cho mọi lớp bảo mật khác — không có TLS thì HMAC chỉ chống giả mạo, không chống nghe lén |
+| **Phase 1 — TLS toàn diện** | HTTPS bắt buộc mọi API, MQTT TLS cho Broker MQTT, mTLS Gateway | Nền tảng cho mọi lớp bảo mật khác — không có TLS thì HMAC chỉ chống giả mạo, không chống nghe lén |
 | **Phase 2 — RBAC theo phạm vi (`operator_home_access`)** | Middleware kiểm tra phạm vi Home cho mọi hành động Operator | Vá Privilege Escalation nghiêm trọng nhất |
 | **Phase 3 — Secret Management tập trung** | Mã hoá tại rest (KMS/Vault), tách bảng secret, least-privilege DB user | Điều kiện để Phase 0 không tái diễn dưới hình thức khác |
 | **Phase 4 — Mobile Auth + Refresh Token** | JWT Bearer + Refresh Token rotation, Secure Storage, Biometric unlock | Điều kiện để Mobile App thật kết nối an toàn (`MOBILE_APP_ARCHITECTURE.md` V1) |

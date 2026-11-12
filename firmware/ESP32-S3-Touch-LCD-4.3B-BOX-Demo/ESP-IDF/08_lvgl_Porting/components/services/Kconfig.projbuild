@@ -2,7 +2,7 @@
 menu "Gateway S3: services"
 
     config GW_MQTT_URI_DEFAULT
-        string "MQTT Broker 2 mặc định (NVS cloud/mqtt_uri ghi đè)"
+        string "MQTT broker mặc định (NVS cloud/mqtt_uri ghi đè)"
         default "mqtts://192.168.1.100:8883"
         help
             Host phải nằm trong SAN của chứng chỉ broker (infra/pki/gen_mqtt_certs.sh, docs/guides/MQTT_TLS.md).
@@ -105,7 +105,7 @@ menu "Gateway S3: services"
         bool "[DEV] Cho kết nối Server không TLS (mqtt://, http://)"
         default n
         help
-            Hạ tầng hiện tại: Broker 2 chỉ nhận TLS (8883) nhưng nginx chỉ có cổng 80 (http). Bật để dùng đường
+            Hạ tầng hiện tại: Broker MQTT chỉ nhận TLS (8883) nhưng nginx chỉ có cổng 80 (http). Bật để dùng đường
             dự phòng POST http://.../api/device/data khi dev. Không bao giờ tắt kiểm chứng chứng chỉ khi dùng TLS.
 
 endmenu

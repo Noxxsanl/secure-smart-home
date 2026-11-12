@@ -47,7 +47,7 @@ flowchart LR
     subgraph SERVER["Server"]
         API["Backend Express<br/>/api/**"]
         WS["WebSocket<br/>/api/mobile/ws"]
-        B2["Broker 2<br/>MQTT TLS :8883"]
+        B2["Broker MQTT<br/>MQTT TLS :8883"]
     end
 
     subgraph HOME["Trong nhà"]
@@ -153,7 +153,7 @@ Mọi chữ ký: `HMAC-SHA256(secret, message)` xuất **hex thường**, so sá
 
 Hai dòng đầu là bất biến 5 — backend, gateway và node phải khớp từng byte. Chữ ký telemetry **không ký nội dung** `data`; tính toàn vẹn nội dung dựa vào TLS (Gateway → Server) và mã hoá ESP-NOW (Node → Gateway). Riêng ảnh camera **có ký nội dung** (sha256 của body nằm trong chuỗi ký).
 
-Ghi chú rủi ro tạm chấp nhận: heartbeat gateway và `camera/event` vẫn ký chuỗi ngắn (`<gateway_id>:<ts>`, `<device_id>:motion:<ts>`) nên có thể bị phát lại trong cửa sổ ±300 giây, và `nodes[]`/`ip` của heartbeat **không được ký**. Chấp nhận cho tới khi Broker 2 có ACL theo gateway (FR-12.4) — khi đó chỉ gateway sở hữu topic mới publish được.
+Ghi chú rủi ro tạm chấp nhận: heartbeat gateway và `camera/event` vẫn ký chuỗi ngắn (`<gateway_id>:<ts>`, `<device_id>:motion:<ts>`) nên có thể bị phát lại trong cửa sổ ±300 giây, và `nodes[]`/`ip` của heartbeat **không được ký**. Chấp nhận cho tới khi Broker MQTT có ACL theo gateway (FR-12.4) — khi đó chỉ gateway sở hữu topic mới publish được.
 
 ---
 
@@ -330,7 +330,7 @@ Tiền tố `/api/device`. Gateway gọi qua HTTPS, kiểm chứng chứng chỉ
 
 ## 9. SOFTWARE ↔ FIRMWARE — MQTT
 
-Broker 2 (`mosquitto`, cổng 8883 TLS; 1883 chỉ cho môi trường dev). Gateway là client MQTT duy nhất phía nhà.
+Broker MQTT (`mqtt-broker`, chỉ cổng 8883 TLS). Gateway là client MQTT duy nhất phía nhà.
 
 ### 9.1. Đã có
 

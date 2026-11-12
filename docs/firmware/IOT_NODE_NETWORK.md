@@ -1,7 +1,7 @@
 # IOT_NODE_NETWORK.md
 
 > **Mạng node IoT của đồ án — phần cứng, giao thức từng chặng và luồng dữ liệu từ node tới client.**
-> Đường đi: **Node (ESP32-CAM, Node phòng khách) → Gateway (Waveshare ESP32-S3-Touch-LCD-4.3B-BOX) → Server (Broker 2 TLS + Backend) → Client (Web Dashboard, Mobile)**.
+> Đường đi: **Node (ESP32-CAM, Node phòng khách) → Gateway (Waveshare ESP32-S3-Touch-LCD-4.3B-BOX) → Server (Broker MQTT TLS + Backend) → Client (Web Dashboard, Mobile)**.
 > Tài liệu này mô tả **thiết kế đích cho bộ phần cứng demo**. Hiện trạng code (gateway ESP32 DOIT + `sensor-node` gửi qua Broker 1) nằm ở mục 9. Nguyên tắc chung (ESP-NOW cho node, Local AP cho camera, key hierarchy) đã chốt ở [WiFi Provisioning](SMART_HOME_WIFI_PROVISIONING.md); cấu trúc firmware ESP-IDF ở [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md); bảng tổng hợp mọi API (hiện có + dự kiến) ở [API Design](../API_DESIGN.md). Tài liệu này **không lặp lại** các phần đó mà áp chúng vào phần cứng cụ thể.
 >
 > **Trạng thái:** bản thiết kế, chưa có code. Phần cứng Node phòng khách **chờ bổ sung** (mục 4.3). Các hợp đồng đánh dấu **(đề xuất)** chưa có ở backend.
@@ -28,7 +28,7 @@
 
 | Thiết bị | Phần cứng | Kết nối lên trên | Vai trò |
 |---|---|---|---|
-| **Gateway** | Waveshare ESP32-S3-Touch-LCD-4.3B-BOX (ESP32-S3, 16 MB flash, 8 MB PSRAM, LCD 4.3" cảm ứng) | WiFi Station → router nhà → Internet → Broker 2 (TLS) và Backend (HTTPS) | Thiết bị **duy nhất** giữ WiFi thật của khách. Gom dữ liệu node, xác thực HMAC lớp 1, ký HMAC lớp 2, chuyển lệnh xuống node, hiển thị và điều khiển tại chỗ trên màn hình |
+| **Gateway** | Waveshare ESP32-S3-Touch-LCD-4.3B-BOX (ESP32-S3, 16 MB flash, 8 MB PSRAM, LCD 4.3" cảm ứng) | WiFi Station → router nhà → Internet → Broker MQTT (TLS) và Backend (HTTPS) | Thiết bị **duy nhất** giữ WiFi thật của khách. Gom dữ liệu node, xác thực HMAC lớp 1, ký HMAC lớp 2, chuyển lệnh xuống node, hiển thị và điều khiển tại chỗ trên màn hình |
 | **Camera cửa** | ESP32-CAM (giả định module AI-Thinker, OV2640) | ESP-NOW (điều khiển, sự kiện) + WiFi vào **Local AP của Gateway** (ảnh và luồng MJPEG) | Chụp ảnh khi có chuyển động hoặc khi được yêu cầu; phát luồng hình trực tiếp về Gateway khi có người xem |
 | **Node phòng khách** | Mạch tự thiết kế — **chờ chi tiết** | ESP-NOW tới Gateway | Cảm biến môi trường + điều khiển thiết bị trong phòng khách (theo Kit ở [Kiến trúc sản phẩm](../SMART_HOME_PRODUCT_ARCHITECTURE.md) §4.1) |
 
@@ -62,7 +62,7 @@ flowchart LR
     end
 
     subgraph SERVER["Server"]
-        B2["Mosquitto Broker 2<br/>:8883 TLS"]
+        B2["Mosquitto Broker MQTT<br/>:8883 TLS"]
         API["Backend Express<br/>/api/device/** (HMAC)"]
         DB[("PostgreSQL")]
     end
@@ -91,7 +91,7 @@ flowchart LR
 | Camera → Gateway (ảnh) | HTTP trên Local AP | WPA2 của Local AP (mật khẩu tự sinh) + HMAC camera ở header |
 | Camera → Gateway (luồng trực tiếp) | HTTP MJPEG trên Local AP, Gateway kéo về | WPA2 của Local AP + Gateway ký HMAC khi mở luồng; camera chỉ nhận 1 kết nối luồng |
 | Gateway → Server (luồng từ xa, tuỳ chọn) | WebSocket TLS | TLS + HMAC gateway; chỉ mở khi có người xem, tự đóng khi hết hạn |
-| Gateway → Server | MQTT TLS (Broker 2, cổng 8883) cho telemetry, sự kiện, ack; HTTPS cho ảnh | TLS có kiểm chứng CA (bất biến 3) + HMAC gateway |
+| Gateway → Server | MQTT TLS (Broker MQTT, cổng 8883) cho telemetry, sự kiện, ack; HTTPS cho ảnh | TLS có kiểm chứng CA (bất biến 3) + HMAC gateway |
 | Server → Client | REST, WebSocket | Cookie phiên (Web), JWT Bearer (Mobile); RBAC 2 tầng |
 
 Mobile **không** kết nối MQTT (bất biến 7). Dữ liệu realtime tới Mobile đi qua WebSocket `/api/mobile/ws` của Backend.
@@ -256,7 +256,7 @@ Content-Type: image/jpeg
 
 | Dữ liệu | Kênh | Topic / endpoint | Trạng thái |
 |---|---|---|---|
-| Telemetry | MQTT TLS Broker 2 | `gateway/<GW_ID>/data`, payload `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload}` | **Đã có** — `backend/src/modules/telemetry/features/ingest-mqtt/` |
+| Telemetry | MQTT TLS Broker MQTT | `gateway/<GW_ID>/data`, payload `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload}` | **Đã có** — `backend/src/modules/telemetry/features/ingest-mqtt/` |
 | Lệnh xuống thiết bị | MQTT, Server → Gateway | `home/{home}/gateway/{gw}/device/{dev}/command`, HMAC `command_id:device_id:action:ts` bằng secret gateway | **Đã có** ở backend (`backend/src/modules/control/`); firmware chưa xử lý |
 | Ack lệnh | MQTT, Gateway → Server | `.../device/{dev}/command/ack`, HMAC `command_id:status:ts` | **Đã có** ở backend |
 | Heartbeat gateway | MQTT | `home/{home}/gateway/{gw}/heartbeat` | Thiết kế ở [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §10.2, chưa có |
@@ -344,7 +344,7 @@ Không đổi so với hiện tại: Backend ghi `sensor_data`, phát sự kiệ
 sequenceDiagram
     participant N as Node phòng khách
     participant G as Gateway S3
-    participant B as Broker 2 (TLS)
+    participant B as Broker MQTT (TLS)
     participant S as Backend
     participant M as Mobile
 
@@ -439,14 +439,14 @@ Khi mất Internet:
 ## 9. HIỆN TRẠNG VÀ LỘ TRÌNH CHUYỂN ĐỔI
 
 **Hiện trạng code (2026-10-26):**
-- `firmware/gateway-node`: ESP32 DOIT DevKit V1, Arduino. Subscribe Broker 1 (`local/sensors/+/data`), kiểm HMAC sensor, ký HMAC gateway, publish Broker 2 TLS. Chưa có ESP-NOW, chưa xử lý lệnh, chưa có màn hình.
+- `firmware/gateway-node`: ESP32 DOIT DevKit V1, Arduino. Subscribe Broker 1 (`local/sensors/+/data`), kiểm HMAC sensor, ký HMAC gateway, publish Broker MQTT TLS. Chưa có ESP-NOW, chưa xử lý lệnh, chưa có màn hình.
 - `firmware/sensor-node`: ESP32 DOIT + DHT22, giữ WiFi thật, publish MQTT lên Broker 1.
 - `firmware/camera`, `firmware/LivingRoom`: thư mục rỗng.
 - Backend: đã có ingest `gateway/+/data`, lệnh và ack qua MQTT. Chưa có endpoint ảnh camera.
 
 | Bước | Việc | Kết quả kiểm được |
 |---|---|---|
-| 1 | Port gateway sang board S3: WiFi, Broker 2 TLS, giữ nguyên payload `gateway/+/data` | Backend nhận telemetry từ Gateway mới, không sửa backend |
+| 1 | Port gateway sang board S3: WiFi, Broker MQTT TLS, giữ nguyên payload `gateway/+/data` | Backend nhận telemetry từ Gateway mới, không sửa backend |
 | 2 | ESP-NOW + khung tin mục 5.1; `sensor-node` chuyển sang ESP-NOW làm node thử | Bỏ được Broker 1 khỏi đường dữ liệu |
 | 3 | Xử lý lệnh + ack trên Gateway và node | Bật/tắt relay từ Mobile, ack trong 5 giây |
 | 4 | Giao diện LVGL trên màn hình Gateway | Xem số liệu, điều khiển tại chỗ |

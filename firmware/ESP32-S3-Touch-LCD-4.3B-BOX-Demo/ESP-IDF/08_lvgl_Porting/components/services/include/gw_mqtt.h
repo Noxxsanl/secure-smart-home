@@ -1,5 +1,5 @@
 /*
- * gw_mqtt — Gateway ↔ Server qua Broker 2 (MQTT TLS 8883, CA nhúng — API_DESIGN §9, IOT_NODE_NETWORK §5.3).
+ * gw_mqtt — Gateway ↔ Server qua Broker MQTT (MQTT TLS 8883, CA nhúng — API_DESIGN §9, IOT_NODE_NETWORK §5.3).
  * Gateway là client MQTT duy nhất phía nhà; client_id = gateway_id.
  *
  * Publish (Gateway → Server):

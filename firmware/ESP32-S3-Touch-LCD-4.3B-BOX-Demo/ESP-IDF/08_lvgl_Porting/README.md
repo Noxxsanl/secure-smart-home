@@ -123,7 +123,7 @@ Mở **ESP-IDF 5.4 PowerShell** (ESP_IDF_BUILD §1.2):
 ```powershell
 cd E:\WorkSpace\secure-smart-home-iot\firmware\ESP32-S3-Touch-LCD-4.3B-BOX-Demo\ESP-IDF\08_lvgl_Porting
 
-# CA của Broker 2 (infra/pki/gen_mqtt_certs.sh) — thiếu thì vẫn build được nhưng không kết nối TLS
+# CA của Broker MQTT (infra/pki/gen_mqtt_certs.sh) — thiếu thì vẫn build được nhưng không kết nối TLS
 New-Item -ItemType Directory -Force certs | Out-Null
 Copy-Item ..\..\..\..\infra\mosquitto\certs\ca.crt certs\mqtt_ca.crt
 
@@ -181,7 +181,7 @@ I (...) gw_espnow: TELEMETRY <node id> verified (ts 1762...)
 
 ## Thử từng chặng
 
-**Telemetry tới Server** — trên máy chủ (Broker 2, cert CA):
+**Telemetry tới Server** — trên máy chủ (Broker MQTT, cert CA):
 
 ```bash
 mosquitto_sub -h 192.168.1.100 -p 8883 --cafile infra/mosquitto/certs/ca.crt -t 'gateway/+/data' -v

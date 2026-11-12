@@ -207,7 +207,7 @@ flowchart LR
 
     LLM[("Nhà cung cấp LLM")]
     DB[("PostgreSQL\nagent_* · device_commands\n· audit/log")]
-    MQTT["Broker 2 (TLS)"] --> GW["Gateway"] --> NODE["Node relay"]
+    MQTT["Broker MQTT (TLS)"] --> GW["Gateway"] --> NODE["Node relay"]
 
     CHAT -->|"HTTPS"| API --> ORCH
     ORCH <--> ADP <--> LLM

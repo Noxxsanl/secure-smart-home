@@ -5,14 +5,13 @@
 
 ---
 
-## Tổng quan — 5 service cần chạy
+## Tổng quan — 4 service cần chạy
 
 ```
 Terminal 1: PostgreSQL 16         (database, port 5433 nếu chạy bằng Docker / 5432 nếu cài trực tiếp)
-Terminal 2: Mosquitto Broker 1    (Sensor ↔ Gateway, port 1883)
-Terminal 3: Mosquitto Broker 2    (Gateway → Backend, TLS port 8883)
-Terminal 4: Backend Express       (API,      port 5000)
-Terminal 5: Frontend Next.js      (3 app web: Admin 3001, Operator 3002, Khách hàng 3003)
+Terminal 2: Mosquitto broker      (Gateway ↔ Backend, chỉ TLS port 8883)
+Terminal 3: Backend Express       (API,      port 5000)
+Terminal 4: Frontend Next.js      (3 app web: Admin 3001, Operator 3002, Khách hàng 3003)
 (tuỳ chọn) Mobile Flutter         (app khách hàng, xem Bước 7)
 ```
 
@@ -144,43 +143,27 @@ audit_log, device_tokens, devices, sensor_data, users, notifications, + các b�
 
 ---
 
-## Bước 3 — Cấu hình và chạy Mosquitto (2 Broker)
+## Bước 3 — Cấu hình và chạy Mosquitto
 
-### Tạo file config cho Broker 1 (Sensor ↔ Gateway, port 1883)
+### Sinh chứng chỉ TLS cho Broker MQTT
 
-Tạo file `mosquitto\broker1_local.conf`:
-
-```powershell
-# Tạo thư mục data nếu chưa có
-New-Item -ItemType Directory -Force -Path "e:\WorkSpace\secure-smart-home-iot\mosquitto\data"
-
-# Tạo file config Broker 1
-@'
-listener 1883
-allow_anonymous true
-log_type all
-log_dest stdout
-persistence true
-persistence_location e:\WorkSpace\secure-smart-home-iot\mosquitto\data\broker1\
-'@ | Out-File -Encoding utf8 "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf"
-```
-
-### Sinh chứng chỉ TLS cho Broker 2
-
-Broker 2 chỉ nhận MQTT over TLS (FR-12.3). Mở **Git Bash** ở thư mục gốc repo, truyền IP LAN của máy này (IP mà gateway dùng làm `MQTT_BROKER2_HOST`):
+Broker MQTT chỉ nhận MQTT over TLS (FR-12.3). Mở **Git Bash** ở thư mục gốc repo, truyền IP LAN của máy này (host trong NVS `cloud/mqtt_uri` của gateway):
 
 ```bash
 bash infra/pki/gen_mqtt_certs.sh 192.168.1.100
 ```
 
-Script tạo `mosquitto\certs\` (CA + cert broker) và `firmware\gateway-node\include\mqtt_ca_cert.h`. Chỉ cần chạy lại khi đổi IP LAN — CA giữ nguyên nên không phải nạp lại firmware. Chi tiết: [`MQTT_TLS.md`](MQTT_TLS.md).
+Script tạo `mosquitto\certs\` (CA + cert broker) và chép CA vào `certs\mqtt_ca.crt` của project gateway ESP-IDF. Chỉ cần chạy lại khi đổi IP LAN — CA giữ nguyên nên không phải nạp lại firmware. Chi tiết: [`MQTT_TLS.md`](MQTT_TLS.md).
 
-### Tạo file config cho Broker 2 (Gateway → Backend, TLS port 8883)
+### Tạo file config cho broker (Gateway ↔ Backend, TLS port 8883)
 
-Tạo file `mosquitto\broker2_local.conf`:
+Tạo file `mosquitto\broker_local.conf`:
 
 ```powershell
-# Tạo file config Broker 2 — chỉ listener TLS, không còn cổng plaintext
+# Tạo thư mục data nếu chưa có
+New-Item -ItemType Directory -Force -Path "e:\WorkSpace\secure-smart-home-iot\mosquitto\data"
+
+# Tạo file config broker — chỉ listener TLS, không còn cổng plaintext
 @'
 listener 8883
 cafile   e:\WorkSpace\secure-smart-home-iot\mosquitto\certs\ca.crt
@@ -191,30 +174,15 @@ allow_anonymous true
 log_type all
 log_dest stdout
 persistence true
-persistence_location e:\WorkSpace\secure-smart-home-iot\mosquitto\data\broker2\
-'@ | Out-File -Encoding utf8 "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf"
+persistence_location e:\WorkSpace\secure-smart-home-iot\mosquitto\data\broker\
+'@ | Out-File -Encoding utf8 "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker_local.conf"
 ```
 
-### Mở Terminal 2 — chạy Broker 1 (port 1883)
+### Mở Terminal 2 — chạy broker (TLS port 8883)
 
 ```powershell
 & "C:\Program Files\mosquitto\mosquitto.exe" `
-    -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf" `
-    -v
-```
-
-Output mong đợi:
-```
-1749383000: mosquitto version 2.x.x starting
-1749383000: Opening ipv4 listen socket on port 1883.
-1749383000: mosquitto version 2.x.x running
-```
-
-### Mở Terminal 3 — chạy Broker 2 (TLS port 8883)
-
-```powershell
-& "C:\Program Files\mosquitto\mosquitto.exe" `
-    -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf" `
+    -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker_local.conf" `
     -v
 ```
 
@@ -231,7 +199,7 @@ Output mong đợi:
 
 ## Bước 4 — Cấu hình và chạy Backend
 
-### Mở Terminal 4 — dành riêng cho Backend
+### Mở Terminal 3 — dành riêng cho Backend
 
 ```powershell
 cd e:\WorkSpace\secure-smart-home-iot\backend
@@ -261,7 +229,7 @@ DB_NAME=secure_smart_home_iot
 # JWT (phải >= 32 ký tự)
 JWT_SECRET=local_dev_secret_key_change_in_production_32chars
 
-# MQTT Broker 2 (Gateway → Backend layer) — MQTT over TLS
+# MQTT broker (Gateway → Backend layer) — MQTT over TLS
 MQTT_HOST=localhost
 MQTT_PORT=8883
 MQTT_CA_FILE=../infra/mosquitto/certs/ca.crt
@@ -293,8 +261,8 @@ Tất cả có mặc định an toàn (mẫu đầy đủ: `backend/.env.example
 
 > Không commit `.env`. Production: tắt `DEVICE_SIMULATOR` và `SEED_DEMO_DATA`.
 
-> **Quan trọng:** Khi chạy local, `DB_HOST=localhost` (`DB_PORT=5433` với PostgreSQL trong Docker) và `MQTT_HOST=localhost` với `MQTT_PORT=8883` (Broker 2, TLS). `MQTT_HOST` phải nằm trong SAN của cert broker (`localhost` luôn có sẵn).
-> Khác với Docker: `DB_HOST=postgres`, `DB_PORT=5432`, `MQTT_HOST=mqtt-broker-2`, `MQTT_PORT=8883`, `MQTT_CA_FILE=/certs/mqtt-ca.crt` (compose tự đặt).
+> **Quan trọng:** Khi chạy local, `DB_HOST=localhost` (`DB_PORT=5433` với PostgreSQL trong Docker) và `MQTT_HOST=localhost` với `MQTT_PORT=8883` (Broker MQTT, TLS). `MQTT_HOST` phải nằm trong SAN của cert broker (`localhost` luôn có sẵn).
+> Khác với Docker: `DB_HOST=postgres`, `DB_PORT=5432`, `MQTT_HOST=mqtt-broker`, `MQTT_PORT=8883`, `MQTT_CA_FILE=/certs/mqtt-ca.crt` (compose tự đặt).
 > Thiếu file CA thì backend dừng ngay khi khởi động với lỗi `[startup] Cannot read MQTT CA certificate ...`.
 
 ### Cài dependencies
@@ -342,7 +310,7 @@ curl http://localhost:5000/api/health
 
 ## Bước 5 — Cấu hình và chạy Frontend (3 app web)
 
-### Mở Terminal 5 — dành riêng cho Frontend
+### Mở Terminal 4 — dành riêng cho Frontend
 
 ```powershell
 cd e:\WorkSpace\secure-smart-home-iot\frontend
@@ -431,20 +399,12 @@ foreach ($p in 3001,3002,3003) {
     }
 }
 
-# Mosquitto Broker 1 (Sensor ↔ Gateway)
-$mqtt1 = Get-NetTCPConnection -LocalPort 1883 -ErrorAction SilentlyContinue
-if ($mqtt1) {
-    Write-Host "[Broker 1]  OK — port 1883 đang mở" -ForegroundColor Green
+# Mosquitto broker (Gateway ↔ Backend)
+$mqtt = Get-NetTCPConnection -LocalPort 8883 -ErrorAction SilentlyContinue
+if ($mqtt) {
+    Write-Host "[Broker MQTT]  OK — port 8883 (TLS) đang mở" -ForegroundColor Green
 } else {
-    Write-Host "[Broker 1]  FAIL — port 1883 chưa mở" -ForegroundColor Red
-}
-
-# Mosquitto Broker 2 (Gateway → Backend)
-$mqtt2 = Get-NetTCPConnection -LocalPort 8883 -ErrorAction SilentlyContinue
-if ($mqtt2) {
-    Write-Host "[Broker 2]  OK — port 8883 (TLS) đang mở" -ForegroundColor Green
-} else {
-    Write-Host "[Broker 2]  FAIL — port 8883 (TLS) chưa mở" -ForegroundColor Red
+    Write-Host "[Broker MQTT]  FAIL — port 8883 (TLS) chưa mở" -ForegroundColor Red
 }
 ```
 
@@ -469,7 +429,7 @@ Khi `SEED_DEMO_DATA` bật (mặc định ở môi trường không phải produ
 |---|---|---|---|
 | Admin | `admin` | `admin123` | 3001 |
 | Operator | `operator01` (và `operator02`) | `operator123` | 3002 |
-| Khách hàng | `user01@smarthome.local` (chủ "Nhà của Đạt") | `user123` | 3003 / Mobile |
+| Khách hàng | `user01@smarthome.local` (chủ "Nhà demo phần cứng" sau `npm run hw:register`, xem [LEN_SERVER](LEN_SERVER.md)) | `user123` | 3003 / Mobile |
 | Khách hàng | `lan@…`, `hoa@…`, `hung@…`, `kimanh@…` (`@smarthome.local`; `kimanh` chưa có nhà) | `user123` | 3003 / Mobile |
 
 Activation Code để thử luồng claim (Thêm Smart Home / quét QR):
@@ -490,17 +450,14 @@ Activation Code để thử luồng claim (Thêm Smart Home / quét QR):
 ```
 Mỗi lần mở máy muốn chạy hệ thống, làm theo thứ tự này:
 
-[Terminal 2] Mosquitto Broker 1 (Sensor ↔ Gateway, port 1883)
-  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf" -v
+[Terminal 2] Mosquitto broker (Gateway ↔ Backend, TLS port 8883)
+  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker_local.conf" -v
 
-[Terminal 3] Mosquitto Broker 2 (Gateway → Backend, TLS port 8883)
-  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf" -v
-
-[Terminal 4] Backend
+[Terminal 3] Backend
   cd e:\WorkSpace\secure-smart-home-iot\backend
   npm run dev
 
-[Terminal 5] Frontend (3 app: 3001 / 3002 / 3003)
+[Terminal 4] Frontend (3 app: 3001 / 3002 / 3003)
   cd e:\WorkSpace\secure-smart-home-iot\frontend
   npm run dev
 
@@ -594,10 +551,9 @@ Phải đủ **32 ký tự trở lên**.
 Mosquitto chưa chạy hoặc sai port.
 
 ```powershell
-# Kiểm tra port 1883 (Broker 1) và 8883 (Broker 2, TLS) có mở không
-Get-NetTCPConnection -LocalPort 1883 -ErrorAction SilentlyContinue
+# Kiểm tra port 8883 (broker, TLS) có mở không
 Get-NetTCPConnection -LocalPort 8883 -ErrorAction SilentlyContinue
-# Nếu không thấy gì → Mosquitto chưa chạy → chạy lại Terminal 2 và/hoặc Terminal 3
+# Nếu không thấy gì → Mosquitto chưa chạy → chạy lại Terminal 2
 ```
 
 Port mở nhưng backend log `[mqttData] error: ...` → lỗi TLS. Kiểm tra bằng Git Bash: `bash tests/security/check_mqtt_tls.sh localhost 8883`

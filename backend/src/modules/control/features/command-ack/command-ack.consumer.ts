@@ -1,4 +1,4 @@
-// Kết nối Broker 2 (TLS) và subscribe ack lệnh. Gọi 1 lần lúc khởi động (worker commandAckListener trong
+// Kết nối Broker MQTT (TLS) và subscribe ack lệnh. Gọi 1 lần lúc khởi động (worker commandAckListener trong
 // control.module.ts). Broker chưa lên thì mqtt.js tự kết nối lại; trong lúc đó lệnh tới thiết bị thật kết thúc bằng
 // TIMEOUT. Cũng dùng chính client này (infrastructure/command-mqtt.client.ts) để publish lệnh/OTA.
 import { connectBroker } from "../../../../infrastructure/mqtt/broker";

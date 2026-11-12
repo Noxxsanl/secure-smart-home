@@ -31,7 +31,7 @@ export const telemetryModule: AppModule = {
     router.get("/devices/:deviceId/telemetry", getDeviceTelemetryController);
   },
   workers: [
-    { name: "mqttDataService", start: startMqttDataService }, // subscribe gateway/+/data trên Broker 2
+    { name: "mqttDataService", start: startMqttDataService }, // subscribe gateway/+/data trên Broker MQTT
     { name: "retentionJob", start: startRetentionJob }, // purge-old-telemetry
   ],
 };

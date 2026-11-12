@@ -58,7 +58,7 @@ export default function SettingsPage() {
             <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">MQTT Broker</p>
           </div>
           <p className="text-sm text-gray-500 dark:text-slate-400">
-            Broker 2 chỉ nhận kết nối TLS (cổng 8883) — chi tiết cấu hình chưa hiển thị ở trang này.
+            Broker MQTT chỉ nhận kết nối TLS (cổng 8883) — chi tiết cấu hình chưa hiển thị ở trang này.
           </p>
         </div>
       </div>

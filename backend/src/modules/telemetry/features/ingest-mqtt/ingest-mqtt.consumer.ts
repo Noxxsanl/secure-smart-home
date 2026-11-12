@@ -1,11 +1,11 @@
-// Đường nhận dữ liệu chính: subscribe Broker 2 (gateway → backend, MQTT over TLS) topic gateway/+/data.
+// Đường nhận dữ liệu chính: subscribe Broker MQTT (gateway → backend, MQTT over TLS) topic gateway/+/data.
 // Xử lý từng message ở ingest-mqtt.handler.ts; đường fallback HTTP ở features/ingest-http — hai đường phải luôn
 // đồng bộ logic xác thực khi có thay đổi.
 import { connectBroker } from "../../../../infrastructure/mqtt/broker";
 import { handleGatewayData } from "./ingest-mqtt.handler";
 
 export function startMqttDataService(): void {
-  // Broker 2 (gateway → backend layer), MQTT over TLS
+  // Broker MQTT (gateway → backend layer), MQTT over TLS
   const client = connectBroker("iot-backend-data");
 
   client.on("connect", () => {

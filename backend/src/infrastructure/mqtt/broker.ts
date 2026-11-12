@@ -1,4 +1,4 @@
-// Kết nối Broker 2 (gateway → backend) bằng MQTT over TLS — FR-12.3, NFR-S1.
+// Kết nối Broker MQTT (gateway → backend) bằng MQTT over TLS — FR-12.3, NFR-S1.
 // telemetry/ingest-mqtt, devices/track-device-ip và control/command-ack dùng chung hàm này để luôn cùng cấu hình TLS.
 import fs from "fs";
 import path from "path";

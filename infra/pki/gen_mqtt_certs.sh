@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Sinh CA nội bộ + chứng chỉ server cho Mosquitto Broker 2 (MQTT TLS, FR-12.3)
+#  Sinh CA nội bộ + chứng chỉ server cho broker Mosquitto (MQTT TLS, FR-12.3)
 #
 #  Dùng:  bash infra/pki/gen_mqtt_certs.sh [IP_LAN|hostname ...]
 #  VD:    bash infra/pki/gen_mqtt_certs.sh 192.168.1.100
 #
 #  - Truyền IP LAN của máy chạy broker — đúng host trong NVS cloud/mqtt_uri và
 #    cloud/api_url của gateway. Gateway kiểm tra tên này trong cert.
-#  - Cùng server cert dùng cho Broker 2 (8883) và nginx HTTPS (443, gateway gửi
+#  - Cùng server cert dùng cho broker MQTT (8883) và nginx HTTPS (443, gateway gửi
 #    ảnh camera / fallback /api/device/data).
-#  - SAN luôn có sẵn: localhost, 127.0.0.1, mqtt-broker-2 (tên service Docker).
+#  - SAN luôn có sẵn: localhost, 127.0.0.1, mqtt-broker (tên service Docker).
 #  - CA chỉ tạo 1 lần rồi dùng lại: đổi IP LAN thì chạy lại script để cấp lại
 #    server cert, KHÔNG phải nạp lại firmware. Muốn thay CA: xoá
 #    infra/mosquitto/certs/ca.* rồi chạy lại (khi đó phải build + nạp lại gateway).
@@ -29,7 +29,7 @@ command -v openssl >/dev/null || { echo "[lỗi] Cần cài openssl (có sẵn t
 
 # SAN của server cert. mbedTLS 2.x trên ESP32 (Arduino core 2.0.x) chỉ so khớp SAN
 # kiểu DNS, nên mỗi IP được ghi cả dạng IP (cho OpenSSL/Node) lẫn DNS (cho gateway).
-SAN_DNS=("localhost" "mqtt-broker-2")
+SAN_DNS=("localhost" "mqtt-broker")
 SAN_IP=("127.0.0.1")
 for name in "$@"; do
   if [[ "$name" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
@@ -83,7 +83,7 @@ EOF
   echo "[ca]     Đã tạo CA mới (hạn $CA_DAYS ngày) — ca.key không được rời khỏi máy này"
 fi
 
-# ── 2. Server cert cho Broker 2 ───────────────────────────────────────────────
+# ── 2. Server cert cho broker MQTT ────────────────────────────────────────────
 {
   cat <<'EOF'
 [req]
@@ -91,7 +91,7 @@ distinguished_name = dn
 prompt             = no
 [dn]
 O  = Secure Smart Home IoT
-CN = mqtt-broker-2
+CN = mqtt-broker
 [v3_server]
 basicConstraints       = critical, CA:FALSE
 keyUsage               = critical, digitalSignature, keyEncipherment
@@ -126,4 +126,4 @@ if [[ $# -eq 0 ]]; then
   echo "           Chạy lại: bash infra/pki/gen_mqtt_certs.sh <IP máy chạy broker>"
 fi
 echo
-echo "Tiếp theo: docker compose up -d --force-recreate mqtt-broker-2 nginx backend"
+echo "Tiếp theo: docker compose up -d --force-recreate mqtt-broker nginx backend"

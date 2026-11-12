@@ -82,7 +82,7 @@ else
     ok "agent/.env đã tồn tại."
 fi
 
-# Chứng chỉ TLS cho MQTT Broker 2 — tham số của setup.sh (IP LAN) được chuyển tiếp
+# Chứng chỉ TLS cho MQTT broker — tham số của setup.sh (IP LAN) được chuyển tiếp
 if [ ! -f "infra/mosquitto/certs/server.crt" ]; then
     info "Chưa có chứng chỉ MQTT TLS — đang sinh..."
     bash infra/pki/gen_mqtt_certs.sh "$@"

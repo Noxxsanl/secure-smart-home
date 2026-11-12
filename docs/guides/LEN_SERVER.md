@@ -10,8 +10,8 @@ Hướng dẫn nối bộ demo thật (Gateway Waveshare ESP32-S3 `gw-s3-demo-01
 ## 1. Luồng dữ liệu
 
 ```
-Node ──ESP-NOW──► Gateway ──MQTT TLS :8883  gateway/<gw>/data ─────────────► Broker 2 ─► backend telemetry ─► sensor_data
-                          ──MQTT TLS :8883  home/<h>/gateway/<gw>/heartbeat ─► Broker 2 ─► backend devices (online)
+Node ──ESP-NOW──► Gateway ──MQTT TLS :8883  gateway/<gw>/data ─────────────► Broker MQTT ─► backend telemetry ─► sensor_data
+                          ──MQTT TLS :8883  home/<h>/gateway/<gw>/heartbeat ─► Broker MQTT ─► backend devices (online)
 Camera ─HTTP Local AP─►   ──HTTPS :443  POST /api/device/camera/snapshot ──► nginx ─► backend camera ─► camera_snapshots + file
                           ──MQTT TLS :8883  .../device/<cam>/camera/event ──► backend camera ─► thông báo "Phát hiện chuyển động"
 Web khách  ◄── /api/portal/devices/:id/snapshots, /api/portal/snapshots/:id/image (cookie sh_user)
@@ -49,7 +49,7 @@ Trong **Git Bash** ở gốc repo:
 bash infra/pki/gen_mqtt_certs.sh <IP>
 ```
 
-Script dùng lại CA cũ (nếu có), cấp server cert có SAN = `<IP>` (dùng chung cho Broker 2 :8883 và nginx :443), và **chép
+Script dùng lại CA cũ (nếu có), cấp server cert có SAN = `<IP>` (dùng chung cho Broker MQTT :8883 và nginx :443), và **chép
 CA vào** `firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/certs/mqtt_ca.crt` (gitignore) để gateway nhúng
 lúc build. Không bao giờ chép `ca.key` đi đâu.
 
@@ -57,7 +57,7 @@ lúc build. Không bao giờ chép `ca.key` đi đâu.
 
 ```powershell
 cd E:\WorkSpace\secure-smart-home-iot
-docker compose up -d --build            # lần đầu; đã chạy rồi: docker compose up -d --force-recreate mqtt-broker-2 nginx backend
+docker compose up -d --build            # lần đầu; đã chạy rồi: docker compose up -d --force-recreate mqtt-broker nginx backend
 docker compose logs -f backend          # chờ "[migrate]" xong và "[mqttData] connected"
 ```
 
@@ -76,25 +76,27 @@ npm run hw:register
 Kết quả mẫu:
 
 ```
-[hw:register] Đã tạo nhà "Nhà demo phần cứng" (home_id=3, chủ nhà user01@smarthome.local)
+[hw:register] Đã tạo nhà "Nhà demo phần cứng" (home_id=5, chủ nhà user01@smarthome.local)
   - gw-s3-demo-01  id=31  gateway  phòng: (không)  "Gateway S3"
   - cam-door-01  id=32  camera  phòng: Camera  "Camera"
   - node-living-01  id=33  sensor  phòng: Phòng khách  "Cảm biến nhiệt/ẩm phòng khách"
   - node-living-01-lamp  id=34  relay (mô phỏng)  phòng: Phòng khách  "Đèn phòng khách"
   - node-living-01-fan  id=35  relay (mô phỏng)  phòng: Phòng khách  "Quạt phòng khách"
   - node-living-01-curtain  id=36  relay (mô phỏng)  phòng: Phòng khách  "Rèm cửa phòng khách"
-  - node-living-01-ac  id=37  relay (mô phỏng)  phòng: Phòng khách  "Điều hòa phòng khách"
-[hw:register] Nhớ ghi cloud/home_id = 3 vào NVS gateway để gửi heartbeat/sự kiện camera.
+  - node-living-01-ac  id=37  relay (thật)  phòng: Phòng khách  "Điều hòa phòng khách"
+[hw:register] Nhớ ghi cloud/home_id = 5 vào NVS gateway để gửi heartbeat/sự kiện camera.
 ```
+
+Đây là nhà **duy nhất** của `user01`: seed demo không tạo nhà nào cho tài khoản này.
 
 Chạy lại bất cứ lúc nào (idempotent): nhà/phòng dùng lại, thiết bị cập nhật secret theo NVS và được mở khoá (`fail_count = 0`).
 Nhà đã đăng ký bằng bản cũ (phòng "Cửa chính" chứa "Camera cửa chính") được đổi thành phòng **Camera** / thiết bị **Camera**
 (tên khách đã tự đổi thì giữ nguyên).
 
-Đèn, quạt, rèm, điều hoà của phòng khách là **relay mô phỏng** (`is_simulated = TRUE`): bật/tắt trên web/mobile chạy thật
-qua simulator (ack sau ~0,5 s) nhưng **không** gửi gì xuống node, vì firmware node chưa nhận lệnh relay/IR. Rèm dùng
-`turn_on` = mở, `turn_off` = đóng; điều hoà mới bật/tắt (nhiệt độ đặt, chế độ chờ lệnh IR). Khi node hỗ trợ lệnh: đặt
-`is_simulated = FALSE` cho 4 dòng `<node>-lamp|fan|curtain|ac` (chạy lại script không bật lại mô phỏng).
+Đèn, quạt, rèm của phòng khách là **relay mô phỏng** (`is_simulated = TRUE`): bật/tắt trên web/mobile chạy thật
+qua simulator (ack sau ~0,5 s) nhưng **không** gửi gì xuống node, vì firmware node chưa nhận lệnh relay. Điều hoà là thiết bị
+**thật** (Node học và phát mã IR). Rèm dùng `turn_on` = mở, `turn_off` = đóng. Khi node hỗ trợ lệnh relay: đặt
+`is_simulated = FALSE` cho 3 dòng `<node>-lamp|fan|curtain` (chạy lại script không bật lại mô phỏng).
 Thiết bị đã có ở **nhà khác** thì script dừng (không ghi gì) trừ khi thêm `--force`. Script từ chối chạy khi `NODE_ENV=production`.
 
 ## 5. Cấu hình lại Gateway
@@ -130,12 +132,12 @@ idf.py -p COM3 monitor
 
 | # | Kiểm | Dấu hiệu đạt |
 |---|---|---|
-| 1 | Gateway nối Broker 2 | Log gateway `gw_config: … mqtt=mqtts://<IP>:8883 … home_id=<h>` rồi `gw_mqtt: connected to broker`; header màn hình: Server xanh |
+| 1 | Gateway nối Broker MQTT | Log gateway `gw_config: … mqtt=mqtts://<IP>:8883 … home_id=<h>` rồi `gw_mqtt: connected to broker`; header màn hình: Server xanh |
 | 2 | Nhiệt/ẩm lên Server | Mỗi 10 s backend log `[mqttData] saved id=… from node-living-01 via gw-s3-demo-01` |
 | 3 | Heartbeat | Sau ≤ 30 s, gateway/node/camera hiện **online** trên web (Thiết bị) |
 | 4 | Ảnh camera | Vẫy tay trước PIR: gateway log `snapshot uploaded (… bytes) id=…` + `snapshot from cam-door-01 uploaded to server` |
 | 5 | Thông báo chuyển động | Chuông thông báo của user01: "Phát hiện chuyển động" (chống lặp 60 s / camera) |
-| 6 | Web khách | http://localhost:3003, đăng nhập `user01@smarthome.local` / `user123`, chọn nhà **Nhà demo phần cứng** → Tổng quan/Phòng khách: nhiệt độ, độ ẩm, công tắc Đèn/Quạt/Điều hòa và nút Mở/Đóng rèm; phòng **Camera** → **Camera** → khối "Ảnh camera" (tự làm mới 15 s) |
+| 6 | Web khách | http://localhost:3003, đăng nhập `user01@smarthome.local` / `user123`, nhà **Nhà demo phần cứng** → Tổng quan/Phòng khách: nhiệt độ, độ ẩm, công tắc Đèn/Quạt/Điều hòa và nút Mở/Đóng rèm; phòng **Camera** → **Camera** → khối "Ảnh camera" (tự làm mới 15 s) |
 | 7 | Mobile | Chạy app với `--dart-define=API_BASE_URL=http://<IP>` (qua nginx :80) hoặc `http://<IP>:5000`; đăng nhập user01, chọn nhà, Phòng khách: điều khiển đèn/quạt/rèm/điều hòa; mở **Camera**: khung "Xem trực tiếp" (hiện báo chưa hỗ trợ trên ứng dụng — cắm nguồn luồng ở `cameraLiveSourceProvider` khi backend chuyển tiếp MJPEG) + ảnh mới tự hiện khi có tin WebSocket `camera_snapshot` |
 
 Ảnh lưu trên đĩa ở `backend/storage/snapshots/` (dev, gitignore; prod: volume `snapshot_data`), giữ 7 ngày và tối đa 500 ảnh
@@ -147,7 +149,7 @@ quyền theo nhà (bất biến 6).
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |
 |---|---|---|
 | Gateway `no route to server` / không `connected to broker` | Máy chủ khác mạng router; IP sai; firewall chặn 8883 | Mục 2; thử từ máy khác cùng mạng: `openssl s_client -connect <IP>:8883 -CAfile infra/mosquitto/certs/ca.crt` |
-| Gateway lỗi TLS (`esp-tls … verify`, `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`) | Cert broker không có `<IP>` trong SAN, hoặc gateway nhúng CA cũ | Chạy lại bước 3 với đúng IP, `docker compose up -d --force-recreate mqtt-broker-2 nginx`; nếu đã thay CA thì build + nạp lại gateway |
+| Gateway lỗi TLS (`esp-tls … verify`, `MBEDTLS_ERR_X509_CERT_VERIFY_FAILED`) | Cert broker không có `<IP>` trong SAN, hoặc gateway nhúng CA cũ | Chạy lại bước 3 với đúng IP, `docker compose up -d --force-recreate mqtt-broker nginx`; nếu đã thay CA thì build + nạp lại gateway |
 | Gateway lỗi TLS ngay khi vừa khởi động | Chưa có giờ (RTC/NTP) nên cert bị coi là chưa hiệu lực | Chờ log NTP (có thể ~70 s sau khi nối router) |
 | Backend `[mqttData] gateway auth fail (NOT_FOUND)` | Chưa chạy `hw:register`, hoặc chạy với `nvs_dev.csv` khác bản đã nạp | Bước 4 với đúng file |
 | `gateway auth fail (TIMESTAMP_EXPIRED)` / audit `REPLAY_ATTACK` | Giờ gateway lệch > 300 s | Kiểm NTP của gateway và giờ máy chủ |
@@ -157,4 +159,4 @@ quyền theo nhà (bất biến 6).
 | `camera/event not sent: home_id unknown` | NVS thiếu `cloud/home_id` | Mục 5 |
 | Ảnh bị từ chối HTTP 409 | Camera chưa gán vào nhà nào | Chạy lại `hw:register` |
 | `hw:register` dừng vì thiết bị "đang thuộc nhà khác" | `device_id` trùng thiết bị ở nhà khác (VD đã đăng ký với email khác) | Kiểm lại `--owner`; chắc chắn muốn chuyển thì thêm `--force` |
-| Web không thấy nhà mới | Đang chọn nhà khác | Chọn "Nhà demo phần cứng" ở bộ chọn nhà |
+| Web khách không có nhà nào | Chưa chạy `npm run hw:register` sau khi tạo lại DB | Chạy bước 4, rồi ghi `home_id` mới vào NVS (bước 5) |

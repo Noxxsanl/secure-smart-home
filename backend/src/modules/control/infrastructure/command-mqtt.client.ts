@@ -1,4 +1,4 @@
-// Client MQTT dùng chung của module control (Broker 2, TLS — kiểm chứng chứng chỉ, invariant 3): features/command-ack
+// Client MQTT dùng chung của module control (Broker MQTT, TLS — kiểm chứng chứng chỉ, invariant 3): features/command-ack
 // tạo client + subscribe ack và đăng ký vào đây; các feature gửi lệnh/OTA publish qua publishJson.
 import type { MqttClient } from "mqtt";
 

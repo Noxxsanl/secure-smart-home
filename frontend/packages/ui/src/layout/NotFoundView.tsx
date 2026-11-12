@@ -14,7 +14,8 @@ export default function NotFoundView({ homeHref }: { homeHref: string }) {
           width={320}
           height={240}
           priority
-          className="select-none"
+          // Preflight của Tailwind đặt img { height: auto } — đặt cả hai chiều auto để Next không cảnh báo lệch tỉ lệ
+          className="h-auto w-auto select-none"
         />
 
         <div className="mt-6">

@@ -9,7 +9,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue?logo=typescript)](https://typescriptlang.org)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)](https://nextjs.org)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docker.com)
-[![PlatformIO](https://img.shields.io/badge/PlatformIO-ESP32-orange?logo=platformio)](https://platformio.org)
+[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-5.4-orange?logo=espressif)](https://docs.espressif.com/projects/esp-idf/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org)
 
 </div>
@@ -88,33 +88,30 @@ Codebase hiện tại đã có phần nền tảng (Gateway, Server, Dashboard, 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  FIRMWARE LAYER (C++ / PlatformIO)                                   │
+│  FIRMWARE LAYER (C / ESP-IDF 5.4)                                    │
 │                                                                       │
 │  [ESP32 Sensor Node]              [ESP32 Gateway Node]                │
 │  ┌─────────────────┐              ┌──────────────────────────┐        │
-│  │ Read DHT22      │              │ Subscribe Broker 1 :1883 │        │
-│  │ Compute         │──MQTT 1883──▶│ Verify Sensor HMAC       │        │
+│  │ Read sensors    │              │ Receive ESP-NOW frames   │        │
+│  │ Compute         │──ESP-NOW────▶│ Verify Sensor HMAC       │        │
 │  │ HMAC-SHA256     │              │ (offline, constant-time) │        │
-│  │ Publish payload │              │ Sign Gateway HMAC        │        │
-│  └─────────────────┘              │ Publish → Broker 2 :8883 │        │
+│  │ Send via ESP-NOW│              │ Sign Gateway HMAC        │        │
+│  └─────────────────┘              │ Publish → broker :8883   │        │
 │                                   └──────────────────────────┘        │
 └──────────────────────────────────────────┬────────────────────────────┘
                                            │ MQTT over TLS gateway/{id}/data
                                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  INFRASTRUCTURE LAYER (Docker Compose — 6 services)                  │
+│  INFRASTRUCTURE LAYER (Docker Compose — 8 services)                  │
 │                                                                       │
-│  [Mosquitto Broker 1 :1883]  ─────── Sensor ↔ Gateway only          │
-│  [Mosquitto Broker 2 :8883]  ─────── Gateway → Backend, TLS only    │
+│  [Mosquitto broker :8883]  ───────── Gateway ↔ Backend, TLS only     │
 │                                           │                           │
 │  [Nginx :80] ──/api/*──▶ [Backend Express :5000] ──▶ [PostgreSQL :5432] │
 │              ──/*──────▶ [Next.js Frontend :3000]                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**Why two separate MQTT brokers?**
-- **Broker 1 (`:1883`)** — LAN-local. Sensors and Gateway share this network. If Broker 1 is compromised, forged data still cannot reach the backend because the Gateway validates HMAC before forwarding.
-- **Broker 2 (`:8883`, TLS only)** — Only Gateway-authenticated traffic arrives here, encrypted with TLS ≥ 1.2; Gateway and Backend both verify the broker certificate against the local CA. Backend trusts nothing on Broker 2 either — it re-validates both signatures independently.
+**One MQTT broker (`:8883`, TLS only).** Sensor nodes reach the Gateway over ESP-NOW, so there is no MQTT on that hop. Only Gateway-authenticated traffic arrives here, encrypted with TLS ≥ 1.2; Gateway and Backend both verify the broker certificate against the local CA. Backend trusts nothing on the broker either — it re-validates both signatures independently.
 
 ### Authentication Chain
 
@@ -137,7 +134,7 @@ HMAC#1 (sensor)      + forwards enc. payload       HMAC#2 (gw)       HMAC#2 + HM
 | **Database** | PostgreSQL 16 |
 | **Message Broker** | Eclipse Mosquitto 2 (×2 independent instances) |
 | **Security** | HMAC-SHA256 (mbedTLS on firmware, Node.js crypto on backend), bcrypt (cost 12), JWT HttpOnly cookie, Helmet, express-rate-limit |
-| **Firmware** | C++ / PlatformIO, ESP32 DOIT DevKit V1, DHT22 |
+| **Firmware** | C / ESP-IDF 5.4 — ESP32-S3 Gateway + Node (ESP-NOW), ESP32-CAM |
 | **Infrastructure** | Docker Compose, Nginx Alpine |
 
 ---
@@ -147,7 +144,7 @@ HMAC#1 (sensor)      + forwards enc. payload       HMAC#2 (gw)       HMAC#2 + HM
 ### Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop) ≥ 24.x (running)
-- Free ports: `80`, `3000`, `5000`, `1883`, `8883`, `5433`
+- Free ports: `80`, `443`, `3001`–`3003`, `5000`, `8883`, `5433`
 - `openssl` (bundled with Git Bash on Windows) to generate the MQTT TLS certificates
 
 ### Step 1 — Environment file
@@ -170,14 +167,14 @@ DB_USER=secure_smart_home_app
 DB_PASS=change_me
 DB_NAME=secure_smart_home_iot
 JWT_SECRET=dev_secret_please_change_in_production_min32chars
-MQTT_HOST=mqtt-broker-2
+MQTT_HOST=mqtt-broker
 MQTT_PORT=8883
 FRONTEND_URL=http://localhost
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 ```
 
-> **Note:** `DB_HOST=postgres` and `MQTT_HOST=mqtt-broker-2` are Docker-internal service names.
+> **Note:** `DB_HOST=postgres` and `MQTT_HOST=mqtt-broker` are Docker-internal service names.
 
 **PostgreSQL credentials for Docker** live in the root `.env` (gitignored), read by both compose files. `scripts/setup.sh` / `setup.bat` generate it with random passwords; to create it by hand:
 
@@ -191,13 +188,13 @@ In Docker, compose injects `DB_USER` / `DB_PASS` / `DB_NAME` into the backend fr
 
 ### Step 1b — MQTT TLS certificates
 
-Broker 2 only accepts MQTT over TLS. Generate a local CA and the broker certificate once, passing the LAN IP the Gateway will use (`MQTT_BROKER2_HOST`):
+Broker MQTT only accepts MQTT over TLS. Generate a local CA and the broker certificate once, passing the LAN IP the Gateway will use (NVS `cloud/mqtt_uri`):
 
 ```bash
 bash infra/pki/gen_mqtt_certs.sh 192.168.1.100
 ```
 
-This writes `infra/mosquitto/certs/` (gitignored) and `firmware/gateway-node/include/mqtt_ca_cert.h`. If the LAN IP changes, run it again — the CA is reused, so the Gateway does not need reflashing. Verify with `bash tests/security/check_mqtt_tls.sh`.
+This writes `infra/mosquitto/certs/` (gitignored) and copies `ca.crt` to the gateway project's `certs/mqtt_ca.crt`. If the LAN IP changes, run it again — the CA is reused, so the Gateway does not need reflashing. Verify with `bash tests/security/check_mqtt_tls.sh`.
 
 ### Step 2 — Start the stack
 
@@ -238,8 +235,7 @@ iot-frontend-admin     running                 0.0.0.0:3001->3000/tcp
 iot-frontend-operator  running                 0.0.0.0:3002->3000/tcp
 iot-frontend-user      running                 0.0.0.0:3003->3000/tcp
 iot-backend            running                 0.0.0.0:5000->5000/tcp
-iot-mosquitto-1        running                 0.0.0.0:1883->1883/tcp
-iot-mosquitto-2        running                 0.0.0.0:8883->8883/tcp
+iot-mosquitto          running                 0.0.0.0:8883->8883/tcp
 iot-postgres           running (healthy)       127.0.0.1:5433->5432/tcp
 ```
 
@@ -253,8 +249,7 @@ iot-postgres           running (healthy)       127.0.0.1:5433->5432/tcp
 | **Apps** (direct, dev) | http://localhost:3001 · :3002 · :3003 |
 | **Backend API** | http://localhost:5000 |
 | **Health check** | http://localhost:5000/api/health |
-| **MQTT Broker 1** | `mqtt://localhost:1883` |
-| **MQTT Broker 2** | `mqtts://localhost:8883` (CA: `infra/mosquitto/certs/ca.crt`) |
+| **MQTT broker** | `mqtts://localhost:8883` (CA: `infra/mosquitto/certs/ca.crt`) |
 
 **Default credentials:**
 
@@ -291,12 +286,12 @@ docker compose -f compose.prod.yaml up -d --build
 
 - Node.js ≥ 20, npm ≥ 10
 - PostgreSQL 16
-- Mosquitto MQTT Broker (2 instances: 1883 plaintext, 8883 TLS — certificates from `infra/pki/gen_mqtt_certs.sh`)
+- Mosquitto MQTT broker (8883 TLS only — certificates from `infra/pki/gen_mqtt_certs.sh`)
 
 **Tip:** Run only the infrastructure in Docker, backends locally:
 
 ```bash
-docker compose up -d postgres mqtt-broker-1 mqtt-broker-2
+docker compose up -d postgres mqtt-broker
 ```
 
 The compose file publishes PostgreSQL on `127.0.0.1:5433`, so the locally running backend uses `DB_HOST=localhost` and `DB_PORT=5433`. Without Docker, apply the schema by hand:
@@ -330,173 +325,18 @@ npm run dev
 
 ## Firmware Setup (ESP32)
 
-> **Required order:** Register devices on the Dashboard first → Flash Sensor → Flash Gateway.
-> The Gateway needs each Sensor's `device_id` and `secret_key` to build its local authentication whitelist.
+Firmware is built with **ESP-IDF 5.4** (the old PlatformIO `sensor-node` / `gateway-node` projects were removed).
+Nodes talk to the Gateway over **ESP-NOW** (no MQTT, no broker on that hop); only the Gateway connects to the
+MQTT broker, over TLS on `:8883`.
 
-### Hardware Requirements
+| Project | Board |
+|---------|-------|
+| `firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting` | Gateway — Waveshare ESP32-S3-Touch-LCD-4.3B-BOX |
+| `firmware/esp32_s3_firmware_node` | Room node (ESP-NOW → Gateway) |
+| `firmware/esp32_cam` | ESP32-CAM (snapshots → Gateway) |
 
-| Component | Qty | Notes |
-|-----------|-----|-------|
-| ESP32 DOIT DevKit V1 (30-pin) | 2 | 1 Gateway + 1+ Sensors |
-| DHT22 sensor (AM2302) | 1 per sensor node | Temperature & humidity |
-| 10 kΩ resistor | 1 per DHT22 | Pull-up on DATA pin — **required** |
-| Jumper wires | Several | |
-| Micro-B USB cable (data) | 2 | Charge-only cables will not flash |
-
-### DHT22 → ESP32 Wiring
-
-```
-ESP32 (DOIT V1)              DHT22 (AM2302)
-─────────────────────────────────────────────────
-3V3  ──────────────────────  Pin 1 (VCC)
-GPIO4  ──┬─────────────────  Pin 2 (DATA)
-         │
-        10 kΩ  (DATA → 3V3)
-         │
-3V3  ────┘
-GND  ──────────────────────  Pin 4 (GND)
-                             Pin 3: N/C
-```
-
-### PlatformIO
-
-Firmware uses **PlatformIO**, not the standard Arduino IDE.
-
-- **Recommended:** Install the [PlatformIO IDE](https://platformio.org/install/ide?install=vscode) extension in VS Code
-- **CLI:** `pip install platformio` (Python ≥ 3.8)
-
-Restart VS Code after installation. PlatformIO auto-detects `platformio.ini` when you open a firmware directory.
-
----
-
-### Step 1 — Determine host IP
-
-ESP32 boards need the IP of the machine running Docker.
-
-```bash
-# Windows
-ipconfig
-# → Find "IPv4 Address" for your active WiFi adapter (e.g. 192.168.1.100)
-
-# Linux
-ip addr show | grep "inet " | grep -v 127.0.0.1
-
-# macOS
-ipconfig getifaddr en0
-```
-
-> All ESP32 boards and the host machine must be on the **same 2.4 GHz WiFi network**.
-
-### Step 2 — Register devices on the Dashboard
-
-1. Open **http://localhost** → log in (`admin` / `admin123`)
-2. Go to **Devices** → click **"Add Device"**
-3. Register **Gateway Node**: enter a name, select type = `gateway` → Save → **copy `device_id` and `secret_key` immediately**
-4. Register **Sensor Node**: enter a name, select type = `sensor` → Save → **copy `device_id` and `secret_key` immediately**
-
-> `secret_key` is a 64-character hex string returned **only once** at registration time. Store it immediately.
-
-### Step 3 — Flash Sensor Node
-
-Edit `firmware/sensor-node/include/config.h`:
-
-```cpp
-// Device credentials (from Step 2)
-#define DEVICE_ID   "ESP32-SN-XXXXXXXX"
-#define SECRET_KEY  "abcdef1234...."       // 64-char hex
-
-// WiFi (2.4 GHz only)
-#define WIFI_SSID   "YourSSID"
-#define WIFI_PASS   "YourPassword"
-
-// MQTT Broker 1 (host IP from Step 1)
-#define MQTT_HOST   "192.168.1.100"
-#define MQTT_PORT   1883
-
-// DHT22 sensor
-#define DHT_PIN        4
-#define DHT_TYPE       DHT22
-#define SEND_INTERVAL  5000               // publish every 5 s
-```
-
-```bash
-cd firmware/sensor-node
-pio run --target upload
-```
-
-**Expected Serial Monitor output (115200 baud):**
-
-```
-[WiFi] Connected — IP: 192.168.1.105
-[NTP]  Sync OK
-[MQTT] Connected to 192.168.1.100:1883
-[MQTT] Published → local/sensors/ESP32-SN-XXXXXXXX/data
-```
-
-### Step 4 — Flash Gateway Node
-
-Edit `firmware/gateway-node/include/config_gw.h`:
-
-```cpp
-// Gateway credentials (from Step 2)
-#define GW_DEVICE_ID   "ESP32-GW-XXXXXXXX"
-#define GW_SECRET_KEY  "abcdef1234...."
-
-// WiFi
-#define WIFI_SSID   "YourSSID"
-#define WIFI_PASS   "YourPassword"
-
-// MQTT Broker 1 — subscribe sensor data
-#define MQTT_BROKER1_HOST  "192.168.1.100"
-#define MQTT_BROKER1_PORT  1883
-
-// MQTT Broker 2 — publish to backend over TLS (host must be in the broker cert SAN)
-#define MQTT_BROKER2_HOST  "192.168.1.100"
-#define MQTT_BROKER2_PORT  8883
-
-// Backend URL to fetch sensor list every 5 min
-#define BACKEND_SENSORS_URL  "http://192.168.1.100/api/device/sensors"
-
-// Local sensor whitelist (backup before first backend fetch)
-static const SensorCredential KNOWN_SENSORS[] = {
-    { "ESP32-SN-XXXXXXXX", "secret_key_64_chars_hex" },
-};
-```
-
-```bash
-cd firmware/gateway-node
-pio run --target upload
-```
-
-**Expected Serial Monitor output:**
-
-```
-[WiFi]     Connected
-[NTP]      Sync OK
-[MQTT-SUB] Broker 1: 192.168.1.100:1883 → OK
-[MQTT-SUB] Subscribed: local/sensors/+/data
-[MQTT-PUB] Broker 2: 192.168.1.100:8883 (TLS) → OK
-[Registry] Sensor list fetched from backend
-[MAIN]     Ready — listening for sensor data...
-```
-
-### Step 5 — Activate devices
-
-Devices start as `inactive`. Activate them:
-
-1. Open **http://localhost/devices**
-2. Find Gateway and Sensor
-3. Click **"Activate"** on each (sets `status = active`)
-
-> Devices with `inactive` or `blocked` status are **silently rejected** by the backend.
-
-### Step 6 — Verify on Dashboard
-
-Open **http://localhost** → **Dashboard**:
-
-- Temperature / humidity chart updates every ~5 s
-- Device status shows **Online** (`last_seen < 60 s`)
-- `/audit` page shows new `DATA_RECV` events
+- Build: [docs/guides/ESP_IDF_BUILD.md](docs/guides/ESP_IDF_BUILD.md)
+- Real hardware → Server → web/mobile (cert for the LAN IP, `npm run hw:register`, NVS `cloud/*`): [docs/guides/LEN_SERVER.md](docs/guides/LEN_SERVER.md)
 
 ---
 
@@ -624,9 +464,9 @@ All endpoints except `/api/health` and `/api/auth/login` require a valid JWT in 
 | `DB_PASS` | — (bắt buộc, không có mặc định) | PostgreSQL password |
 | `DB_NAME` | `secure_smart_home_iot` | Database name |
 | `JWT_SECRET` | — | JWT signing key **(required, min 32 chars)** |
-| `MQTT_HOST` | `localhost` | Broker 2 host (`mqtt-broker-2` in Docker) |
-| `MQTT_PORT` | `8883` | Broker 2 TLS port |
-| `MQTT_CA_FILE` | `../infra/mosquitto/certs/ca.crt` | CA used to verify Broker 2 (`/certs/mqtt-ca.crt` in Docker) |
+| `MQTT_HOST` | `localhost` | Broker MQTT host (`mqtt-broker` in Docker) |
+| `MQTT_PORT` | `8883` | Broker MQTT TLS port |
+| `MQTT_CA_FILE` | `../infra/mosquitto/certs/ca.crt` | CA used to verify Broker MQTT (`/certs/mqtt-ca.crt` in Docker) |
 | `FRONTEND_URL` | `http://localhost` | Frontend origin for CORS |
 | `ADMIN_USERNAME` | `admin` | Admin username for `npm run seed` |
 | `ADMIN_PASSWORD` | — | Admin password for `npm run seed` **(required; ≥ 12 chars in production)** |
@@ -734,16 +574,15 @@ secure-smart-home-iot/
 ├── mobile/                    Flutter app for customers
 ├── agent/                     AI Agent (empty — proposal pending approval)
 ├── firmware/
-│   ├── gateway-node/          ESP32: dual-broker bridge + local HMAC verifier
-│   ├── sensor-node/           ESP32: DHT22 reader + HMAC publisher
-│   ├── camera/                ESP32-CAM (empty)
-│   └── livingRoom/            Living-room node (empty)
+│   ├── ESP32-S3-Touch-LCD-4.3B-BOX-Demo/  Gateway (ESP-IDF, ESP-NOW ↔ MQTT TLS bridge + HMAC verifier)
+│   ├── esp32_s3_firmware_node/            Room node (ESP-IDF, ESP-NOW)
+│   └── esp32_cam/                         ESP32-CAM
 ├── infra/
 │   ├── postgres/              init/00_init.sh (app role) + migrations/001_schema.sql (PostgreSQL 16 baseline)
-│   ├── mosquitto/             broker1/ (:1883, Sensor ↔ Gateway), broker2/ (:8883 TLS, Gateway → Backend),
+│   ├── mosquitto/             mosquitto.conf (single broker, :8883 TLS only, Gateway ↔ Backend),
 │   │                          certs/ (gitignored, only .gitkeep is committed)
 │   ├── nginx/                 Reverse proxy config                       → :80
-│   ├── pki/                   gen_mqtt_certs.sh — local CA + Broker 2 TLS certificate
+│   ├── pki/                   gen_mqtt_certs.sh — local CA + Broker MQTT TLS certificate
 │   └── media/                 Camera media server (empty)
 ├── tests/
 │   ├── security/              attack_demo*.sh, check_mqtt_tls.sh (FR-12.3), attack/demo guides

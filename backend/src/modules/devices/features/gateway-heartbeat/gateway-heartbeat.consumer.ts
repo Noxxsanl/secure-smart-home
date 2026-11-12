@@ -1,4 +1,4 @@
-// Heartbeat gateway (docs/API_DESIGN.md, MQTT): subscribe Broker 2 (TLS) topic home/+/gateway/+/heartbeat.
+// Heartbeat gateway (docs/API_DESIGN.md, MQTT): subscribe Broker MQTT (TLS) topic home/+/gateway/+/heartbeat.
 // Gateway gửi mỗi ~30 s; xử lý từng message ở gateway-heartbeat.handler.ts. Broker chưa lên thì mqtt.js tự kết nối lại.
 import { connectBroker } from "../../../../infrastructure/mqtt/broker";
 import { HEARTBEAT_TOPIC_FILTER } from "../../domain/heartbeat";
