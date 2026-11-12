@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     # Backend
     backend_url: str = Field("http://localhost:5000", alias="BACKEND_URL")
     backend_timeout_s: float = Field(10, gt=0, alias="BACKEND_TIMEOUT_S")
+    # Token kênh dịch vụ /api/service của backend: gửi số liệu dùng LLM (token, độ trễ)
+    # cho tab AI Usage. Cùng giá trị với SERVICE_API_TOKEN trong backend/.env.
+    # Trống = không gửi. SecretStr: không lọt vào log.
+    backend_service_token: SecretStr = Field(SecretStr(""), alias="BACKEND_SERVICE_TOKEN")
 
     # STT
     stt_provider: Literal["none", "openai", "whisper_local"] = Field("none", alias="STT_PROVIDER")
@@ -74,6 +78,10 @@ class Settings(BaseSettings):
     @property
     def llm_configured(self) -> bool:
         return bool(self.openai_api_key.get_secret_value())
+
+    @property
+    def usage_reporting_enabled(self) -> bool:
+        return bool(self.backend_service_token.get_secret_value())
 
     @property
     def cors_origins(self) -> list[str]:

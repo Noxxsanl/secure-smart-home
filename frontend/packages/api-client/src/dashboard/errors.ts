@@ -42,6 +42,12 @@ const MESSAGES: Record<string, string> = {
   NOT_SIMULATED: "Thiết bị này là phần cứng thật — không dùng được bộ mô phỏng.",
   VERSION_EXISTS: "Phiên bản firmware này đã tồn tại cho loại thiết bị đã chọn. Đặt số phiên bản mới rồi tải lên lại.",
   NO_TARGETS: "Không có thiết bị nào thuộc phạm vi đã chọn. Chọn phạm vi hoặc nhà khác.",
+  DEVICE_IN_OTHER_HOME: "Thiết bị đang thuộc một nhà khác. Chỉ Admin chuyển được thiết bị giữa các nhà.",
+  TRANSFER_REQUIRES_ADMIN: "Chỉ Admin được chuyển thiết bị giữa các nhà. Liên hệ Admin để chuyển giúp.",
+  DUPLICATE_DEVICE_ID: "Có Device ID bị trùng trong danh sách. Mỗi gateway/node/camera phải có Device ID riêng.",
+  PRICE_EXISTS: "Model này đã có giá. Sửa giá ở dòng của model trong bảng thay vì thêm mới.",
+  PRICE_SOURCE_UNREACHABLE: "Không tải được bảng giá từ nguồn công khai (mạng hoặc nguồn tạm lỗi). Thử lại sau, hoặc nhập giá tay.",
+  PRICE_SOURCE_INVALID: "Nguồn bảng giá trả về dữ liệu không đọc được. Thử lại sau, hoặc nhập giá tay.",
   USERNAME_TAKEN: "Tên đăng nhập đã được dùng. Chọn tên khác.",
   INVALID_CREDENTIALS: "Thông tin đăng nhập không đúng. Kiểm tra lại rồi thử lại.",
 

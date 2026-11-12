@@ -1,6 +1,6 @@
 # Frontend — 3 app web theo role
 
-Monorepo npm workspaces theo kiểu micro-frontend: 3 app Next.js 16 mỏng (mỗi role hệ thống một app, chỉ có route + layout + config) ghép từ các **module nghiệp vụ** đóng gói thành package riêng (`@shh/devices`, `@shh/homes`, …) trên nền `@shh/ui`, `@shh/api-client`, `@shh/utils`. Các app gọi **API thật** của backend: Admin/Operator qua `/api/dashboard/**`, cổng khách hàng qua `/api/portal/**`. Chỉ còn vài màn hình dùng mock — xem [Còn là mock](#còn-là-mock).
+Monorepo npm workspaces theo kiểu micro-frontend: 3 app Next.js 16 mỏng (mỗi role hệ thống một app, chỉ có route + layout + config) ghép từ các **module nghiệp vụ** đóng gói thành package riêng (`@shh/devices`, `@shh/homes`, …) trên nền `@shh/ui`, `@shh/api-client`, `@shh/utils`. Các app gọi **API thật** của backend: Admin/Operator qua `/api/dashboard/**`, cổng khách hàng qua `/api/portal/**`. Không còn màn hình mock nào trên Admin/Operator — xem [Còn là mock](#còn-là-mock).
 
 | App | Thư mục | Package | Cổng dev | Role | Cookie phiên | Kênh API | Tài khoản demo |
 |---|---|---|---|---|---|---|---|
@@ -20,8 +20,9 @@ frontend/
 │   ├── dev-all.mjs             chạy cả 3 app
 │   └── check-architecture.mjs  kiểm quy tắc phụ thuộc (npm run check:arch)
 ├── apps/                       chỉ route, layout, config — không gọi API, không chứa logic nghiệp vụ
-│   ├── admin/                  Dashboard, Smart Homes, …, Team / Operator Access / Settings (chỉ Admin)
-│   ├── operator/               như Admin nhưng không có Team/Settings, chỉ 5 loại log
+│   ├── admin/                  Dashboard, Customers, Smart Homes, Đăng ký Gateway, Gateways, Devices, OTA & Firmware,
+│   │                           AI Usage, Notification Center, Logs, Team / Operator Access (chỉ Admin)
+│   ├── operator/               như Admin nhưng không có Team/Operator Access, chỉ 5 loại log
 │   └── user/                   cổng khách hàng: Tổng quan, Phòng, Thiết bị, Tự động hoá, Thông báo, Thành viên, …
 └── packages/
     ├── config/                 @shh/config      tsconfig.base.json
@@ -33,18 +34,18 @@ frontend/
     │                                            PageStates…) + styles/theme.css (design token)
     └── modules/                mỗi thư mục là một package @shh/<tên>
         ├── auth/               đăng nhập, phiên, guard, quyền console; nhà đang chọn + role trong nhà; hồ sơ
-        ├── homes/              Smart Home (console: danh sách, chi tiết, provisioning) · tổng quan, phòng,
+        ├── homes/              Smart Home (console: danh sách, chi tiết, đăng ký gateway thật) · tổng quan, phòng,
         │                       thành viên, lời mời, kích hoạt (khách)
         ├── devices/            thiết bị, gateway, bộ mô phỏng · danh sách, chi tiết, điều khiển (khách)
         ├── telemetry/          biểu đồ/bảng số đo cảm biến
         ├── automation/         quy tắc tự động hoá + gợi ý thói quen
         ├── notifications/      trung tâm thông báo (console), thông báo theo nhà (khách)
         ├── audit/              log theo loại + tab Log của Smart Home
-        ├── ota/                firmware + triển khai OTA
+        ├── ota/                firmware + triển khai OTA (tab OTA & Firmware của Admin/Operator)
         ├── users/              khách hàng, Team, quyền truy cập nhà của Operator
-        ├── stats/              Dashboard Admin/Operator + huy hiệu sidebar
-        ├── ai/                 AI Dashboard (mock)
-        └── settings/           cài đặt hệ thống của Admin (mock)
+        ├── ai/                 AI Usage: chi phí/token/độ trễ/lỗi của LLM mà AI Agent dùng, bảng giá model,
+        │                       ngân sách ngày, tỷ giá VNĐ (số liệu thật, không mock)
+        └── stats/              Dashboard Admin/Operator + huy hiệu sidebar
 ```
 
 ### Bên trong một module
@@ -112,7 +113,7 @@ Các slot hiện có: thiết bị ← số đo (`renderTelemetry`, console + kh
 npm install                 # chạy ở frontend/ — cài chung cho mọi workspace
 npm run dev                 # chạy cả 3 app (Ctrl+C dừng tất cả)
 npm run dev:admin           # hoặc dev:operator / dev:user
-npm run typecheck           # tsc cho mọi workspace (3 app + 15 package)
+npm run typecheck           # tsc cho mọi workspace (3 app + 14 package)
 npm run check:arch          # quy tắc phụ thuộc R1–R6 (tuỳ chọn: -- --package devices)
 npm run lint                # eslint toàn bộ
 npm run build               # next build cả 3 app
@@ -138,32 +139,33 @@ npm run build               # next build cả 3 app
 - **Không có WebSocket trên web.** Dữ liệu cập nhật bằng polling SWR: tổng quan nhà / thiết bị 5 s, thông báo 15 s, log 30 s, danh sách console 10 s. Mobile mới dùng WebSocket.
 - Cổng khách: cache SWR riêng cho mỗi lần đăng nhập (`PortalSwrProvider` của `@shh/auth`) để tài khoản đăng nhập sau không thấy dữ liệu của tài khoản trước.
 
-### Tài khoản demo và mã kích hoạt (backend seed — `CONTRACT_V2 §8`)
+### Tài khoản demo (backend seed)
+
+Seed chỉ tạo tài khoản — không có nhà, thiết bị mô phỏng, firmware, thông báo hay log giả (từ 2026-11-13; DB còn dữ liệu của seed cũ được backend tự dọn một lần khi khởi động, nhà có gateway thật được giữ).
 
 | Cổng | Tài khoản | Mật khẩu |
 |---|---|---|
 | Admin | `admin` | `admin123` |
 | Operator | `operator01`, `operator02` | `operator123` |
-| Khách hàng | `user01@smarthome.local` (Nguyễn Hoàng Đạt, `dat#4821` — chủ "Nhà demo phần cứng", nhà do `npm run hw:register` tạo từ phần cứng thật, xem [LEN_SERVER](../docs/guides/LEN_SERVER.md); seed không tạo nhà cho tài khoản này) | `user123` |
-| Khách hàng | `hung@smarthome.local` (Lê Văn Hùng — chủ "Nhà Quận 7") | `user123` |
-| Khách hàng | `kimanh@smarthome.local` (Ngô Kim Anh, `kimanh#1560` — chưa có nhà, dùng để thử claim / operator gán nhà) | `user123` |
+| Khách hàng | `user01@smarthome.local` (Nguyễn Hoàng Đạt, `dat#4821`) | `user123` |
 
-Activation Code để thử trang **Thêm Smart Home** (nhập chữ thường, thiếu dấu gạch đều được):
+Tài khoản khách khác: tạo ở cổng khách hàng (`/register`) hoặc ứng dụng di động.
 
-| Mã | Kết quả |
-|---|---|
-| `7K2M-9QXA-4TPB` | hợp lệ — "Kit KIT_A #0003" |
-| `H3VD-8NRW-2CYE` | hợp lệ — "Kit KIT_B #0004" |
-| `Q4ZT-6MJK-1PSX` | đã dùng (Nhà Quận 7) → "Mã này đã được dùng…" |
-| `B9FE-3WRA-7GMK` | hết hạn → "Mã kích hoạt đã hết hạn…" |
-| mã bất kỳ khác | không tồn tại; nhập sai ≥ 5 lần / 15 phút bị khoá tạm (`RATE_LIMITED`) |
+### Đăng ký gateway thật cho khách (Admin + Operator)
 
-Muốn thử phân quyền trong nhà: đăng nhập `user01`, vào **Thành viên** và mời một tài khoản khách hàng khác (vd. `kimanh@smarthome.local`) — seed không tạo sẵn thành viên hay lời mời.
+Trang **Đăng ký Gateway** (`/gateways/register`, `@shh/homes` → `GatewayRegistrationPage`) gắn phần cứng đã nạp NVS vào **bất kỳ tài khoản khách hàng nào**: chọn khách → tên nhà (trùng tên nhà khách đang có thì thêm/cập nhật vào nhà đó, tên mới thì tạo nhà mới đã có chủ) → Device ID + Secret của gateway và từng node/camera (nút **Điền từ file NVS (.csv)** đọc `nvs_dev.csv` ngay trên trình duyệt, chỉ lấy `identity`/`nodes`). Backend `POST /api/dashboard/smart-homes/register-gateway` tạo nhà + phòng + thiết bị trong một transaction, cùng mô hình với `npm run hw:register`: mỗi node cảm biến có cảm biến nhiệt/ẩm, Điều hòa (IR thật) và Đèn/Quạt/Rèm (mô phỏng). Secret ô nhập dạng password, không hiển thị lại, xoá khỏi state sau khi gửi.
+
+- Thiết bị đang thuộc nhà khác → Admin được hỏi xác nhận **chuyển** (thiết bị — chuyển gateway thì cả nhóm thiết bị nối qua nó — bị xoá khỏi nhà cũ cùng số đo/ảnh/lịch sử rồi đăng ký vào nhà mới; chủ nhà cũ được báo); Operator chỉ nhận hướng dẫn liên hệ Admin, không thấy tên nhà kia.
+- Operator thêm thiết bị vào nhà khách **đã có** cần quyền truy cập nhà đó (grant, FR-9.6); tạo nhà mới thì không cần.
+- Xong: ghi `cloud/home_id` hiển thị trên trang vào NVS gateway (heartbeat, sự kiện camera) — xem [LEN_SERVER](../docs/guides/LEN_SERVER.md) §5.
+
+### Tab AI Usage (Admin + Operator xem; Admin sửa giá, ngân sách, tỷ giá)
+
+`/ai-usage` (`@shh/ai` → `AiUsagePage`) đọc `/api/dashboard/ai-usage/**`. Số liệu đến từ AI Agent qua `POST /api/service/ai-usage` (backend `SERVICE_API_TOKEN` = agent `BACKEND_SERVICE_TOKEN`); chưa có lượt gọi nào thì tab hiện hướng dẫn kết nối, không có dữ liệu mẫu. Gồm: thẻ KPI (chi phí USD + VNĐ, lượt gọi/yêu cầu, tỉ lệ lỗi, token vào/ra/cache, độ trễ TB/p50/p95/token đầu, chi phí mỗi yêu cầu), thanh ngân sách hôm nay, 3 biểu đồ một trục (chi phí, token vào/ra, p95 — cặp màu đã kiểm CVD), bảng theo model/mục đích/nhà, 50 lượt gọi gần nhất, bảng giá model. Giá mặc định tra ngày 2026-11-13 trên trang giá chính thức OpenAI/Anthropic (có link nguồn); nút **Đồng bộ giá** (xem trước danh sách thay đổi rồi mới áp dụng) lấy từ kho giá LiteLLM, giữ giá Admin nhập tay.
 
 ## Còn là mock
 
-- **AI dashboard** (`@shh/ai`, dữ liệu ở `packages/modules/ai/src/model/mockData.ts`) — chưa có API; doc [Backend](../docs/architecture/BACKEND_REFACTOR_SMARTHOME.md) §18. Khi có API: thêm hook ở `api/`, bỏ `mockData.ts`, không cần sửa app.
-- **Cài đặt hệ thống của Admin** (`@shh/settings`) — chưa có API, giá trị hiển thị cố định trong component.
+Không còn trên Admin/Operator: đã gỡ AI Dashboard mock (tên package `@shh/ai` nay dùng cho tab AI Usage số liệu thật) và Admin Settings (`@shh/settings`) cùng các trang không thuộc bản cơ bản (Provisioning KIT mô phỏng, Automation Rules của console). Backend vẫn giữ các API tương ứng (`POST /smart-homes` tạo KIT, `/automation`). Tab **OTA & Firmware** được giữ (API thật, chỉ còn dữ liệu thật — firmware giả của seed cũ đã bị dọn) để phát triển OTA sau này. Thiết bị **mô phỏng** còn lại duy nhất là đèn/quạt/rèm của node phòng khách (chưa có phần cứng nhận lệnh) — có nhãn "Mô phỏng" trên danh sách thiết bị.
 
 ## Việc còn lại
 
@@ -171,7 +173,7 @@ Chuyển từ nhật ký tiến độ cũ (`docs/06_FRONTEND_REFACTOR_PROGRESS.m
 
 - **Responsive mobile** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §16.2, Phase 8): Sidebar mới chỉ collapse icon-only, chưa có chế độ hamburger + overlay trên màn hẹp; bảng mật độ cao (Logs, Gateways) chưa chuyển sang dạng card.
 - **Trang đăng nhập console** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.15): chưa có dòng "Cổng quản trị nội bộ — khách hàng dùng Mobile App". Tài khoản khách đăng nhập nhầm cổng vẫn nhận hướng dẫn (`packages/modules/auth/src/model/errors.ts`).
-- **Gán thiết bị đã có vào phòng** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.5): tab Rooms của Smart Home Detail chỉ xem thiết bị theo phòng; thiết bị mới chỉ tạo được qua Provisioning Wizard.
+- **Gán thiết bị đã có vào phòng** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.5): tab Rooms của Smart Home Detail chỉ xem thiết bị theo phòng; thiết bị mới chỉ tạo được qua trang Đăng ký Gateway (phòng theo tên nhập cho từng node).
 - **Biểu đồ theo `sensor_type`** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.6): `packages/modules/telemetry/src/ui/TelemetryChart.tsx` vẫn chỉ vẽ 2 trường cố định `temperature`/`humidity`.
 - **Automation kéo-thả** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.12, Phase 9): chưa làm, đúng khuyến nghị — chỉ đầu tư khi tập trigger/action đã phong phú hơn form IF/THEN.
 - **Điều hòa** (app `user`, `@shh/devices`, chỉ khi `device.appliance === "ac"`): thẻ thiết bị có nhiệt độ đặt 16–30°C (nút −/+, debounce 600 ms, optimistic, `{action:"set_temp"}`). Trang chi tiết có bảng `ui/AcControlPanel.tsx` giống màn TFT của Node: BẬT/TẮT riêng, nhiệt độ cỡ lớn, lưới 16 ô mã IR (TẮT, 16–30°C; ô đã học theo bitmask `ac_codes` bấm để phát mã) và chế độ "Học mã" (`{action:"learn_code", slot}`, đếm ngược 10 s, timeout client riêng 20 s `LEARN_TIMEOUT_MS`, khoá điều khiển khác trong lúc học — hook `api/useAcLearn.ts`). Trạng thái là "lệnh Node đã phát" (IR một chiều). Chưa có chế độ lạnh/quạt, chưa có "giữ lâu để phát thử" (bấm ô đã học là phát luôn). Phụ thuộc backend: lệnh `set_temp`/`learn_code` và các trường `appliance`, `ac_setpoint`, `ac_codes` trong `CustomerDevice`.

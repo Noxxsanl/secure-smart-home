@@ -160,6 +160,45 @@ export type CreateSmartHomeInput = {
   expected_owner_name?: string;
 };
 
+/** POST /smart-homes/register-gateway — đăng ký gateway + node/camera THẬT (device_id/secret đã nạp NVS) cho khách. */
+export type HardwareNodeKind = "node" | "camera";
+
+export type RegisterGatewayInput = {
+  customer_id: number;
+  /** Nhà mới, hoặc nhà cùng tên khách đang làm chủ (thêm/cập nhật thiết bị). */
+  home_name: string;
+  gateway: { device_id: string; secret: string };
+  nodes: { kind: HardwareNodeKind; device_id: string; secret: string; room_name?: string }[];
+  /** Chỉ Admin: chuyển thiết bị đang thuộc nhà khác (xoá kèm dữ liệu cũ của chúng). */
+  transfer?: boolean;
+};
+
+/** Không bao giờ có secret. */
+export type RegisteredDevice = {
+  id: number;
+  device_id: string;
+  device_name: string;
+  category: "gateway" | "sensor" | "camera" | "relay";
+  room_name: string | null;
+  is_simulated: boolean;
+  unblocked: boolean;
+};
+
+export type RegisterGatewayResult = {
+  home: { id: number; name: string; created: boolean };
+  owner: { customer_id: number; name: string; user_tag: string; email: string | null };
+  devices: RegisteredDevice[];
+  transferred_from_home_ids: number[];
+};
+
+/** Body lỗi 409 DEVICE_IN_OTHER_HOME. */
+export type DeviceInOtherHomeError = {
+  error: "DEVICE_IN_OTHER_HOME";
+  device_id: string;
+  home_name: string | null;
+  count: number;
+};
+
 export type UpdateSmartHomeInput = {
   name?: string;
   address?: string | null;
@@ -549,3 +588,174 @@ export type HabitJobResult = {
 };
 
 export type SimulatorStatus = { enabled: boolean };
+
+// ---------------------------------------------------------------------------
+// AI Usage — /api/dashboard/ai-usage/** (module backend ai-usage). Số liệu từng lần gọi LLM/STT của AI Agent:
+// token, độ trễ, lỗi, chi phí (USD) theo bảng giá model. Không có nội dung hội thoại.
+// ---------------------------------------------------------------------------
+
+export type AiUsageRange = "24h" | "7d" | "30d";
+export type AiUsagePurpose = "planner" | "clarify" | "summary" | "stt" | "eval" | "other";
+export type AiUsageStatus = "success" | "error" | "timeout";
+export type AiPriceSource = "official" | "litellm" | "manual";
+
+export type AiUsageSettings = {
+  daily_budget_usd: number | null;
+  usd_to_vnd: number | null;
+  updated_at: string | null;
+};
+
+export type AiUsageTotals = {
+  calls: number;
+  errors: number;
+  /** Số yêu cầu người dùng (request_id khác nhau) — một yêu cầu có thể gồm nhiều vòng gọi LLM. */
+  requests: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_write_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  audio_seconds: number;
+  cost_usd: number;
+  /** Lượt gọi model chưa có giá (không tính vào cost_usd). */
+  unpriced_calls: number;
+  error_rate: number;
+  cost_per_request_usd: number | null;
+  avg_latency_ms: number | null;
+  p50_latency_ms: number | null;
+  p95_latency_ms: number | null;
+  avg_ttft_ms: number | null;
+};
+
+export type AiUsageBucket = {
+  /** Giờ Việt Nam: "YYYY-MM-DD" hoặc "YYYY-MM-DDTHH:00". */
+  bucket: string;
+  calls: number;
+  errors: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  p95_latency_ms: number | null;
+};
+
+export type AiModelUsage = {
+  provider: string;
+  model: string;
+  calls: number;
+  errors: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  unpriced_calls: number;
+  avg_latency_ms: number | null;
+  p95_latency_ms: number | null;
+};
+
+export type AiPurposeUsage = {
+  purpose: AiUsagePurpose | string;
+  calls: number;
+  errors: number;
+  total_tokens: number;
+  cost_usd: number;
+  avg_latency_ms: number | null;
+};
+
+export type AiHomeUsage = {
+  home_id: number;
+  home_name: string | null;
+  calls: number;
+  total_tokens: number;
+  cost_usd: number;
+};
+
+/** Model có lượt gọi chưa tính được chi phí; price_id ≠ null = đã có dòng giá nhưng thiếu trường cần thiết. */
+export type AiUnpricedModel = { provider: string; model: string; calls: number; price_id: number | null };
+
+export type AiUsageSummary = {
+  range: AiUsageRange;
+  from: string;
+  to: string;
+  totals: AiUsageTotals;
+  today: { calls: number; cost_usd: number };
+  settings: AiUsageSettings;
+  series: AiUsageBucket[];
+  by_model: AiModelUsage[];
+  by_purpose: AiPurposeUsage[];
+  top_homes: AiHomeUsage[];
+  unpriced_models: AiUnpricedModel[];
+};
+
+export type AiUsageCall = {
+  id: number;
+  occurred_at: string;
+  provider: string;
+  model: string;
+  purpose: AiUsagePurpose | string;
+  source: string;
+  status: AiUsageStatus;
+  error_code: string | null;
+  input_tokens: number;
+  cached_input_tokens: number;
+  cache_write_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  audio_seconds: number | null;
+  latency_ms: number;
+  ttft_ms: number | null;
+  cost_usd: number | null;
+  home_id: number | null;
+  home_name: string | null;
+  request_id: string | null;
+  round_index: number | null;
+};
+
+export type AiModelPrice = {
+  id: number;
+  provider: string;
+  model: string;
+  input_usd_per_mtok: number | null;
+  cached_input_usd_per_mtok: number | null;
+  cache_write_usd_per_mtok: number | null;
+  output_usd_per_mtok: number | null;
+  audio_usd_per_minute: number | null;
+  source: AiPriceSource;
+  source_url: string | null;
+  checked_at: string | null;
+  updated_at: string;
+  calls_30d: number;
+};
+
+export type AiPriceList = {
+  prices: AiModelPrice[];
+  unpriced_models: AiUnpricedModel[];
+  sync_source_url: string;
+};
+
+/** Giá nhập tay: USD / 1 triệu token; STT: USD / phút. null = không áp dụng. */
+export type AiPriceInput = {
+  input_usd_per_mtok: number | null;
+  cached_input_usd_per_mtok: number | null;
+  cache_write_usd_per_mtok: number | null;
+  output_usd_per_mtok: number | null;
+  audio_usd_per_minute: number | null;
+  source_url?: string | null;
+};
+
+export type AiPriceValues = {
+  inputUsdPerMtok: number | null;
+  cachedInputUsdPerMtok: number | null;
+  cacheWriteUsdPerMtok: number | null;
+  outputUsdPerMtok: number | null;
+  audioUsdPerMinute: number | null;
+};
+
+export type AiPriceSyncResult = {
+  source_url: string;
+  /** false = bản xem trước, chưa ghi gì. */
+  applied: boolean;
+  changes: { provider: string; model: string; action: "updated" | "added"; before: AiPriceValues | null; after: AiPriceValues }[];
+  unchanged: string[];
+  not_found: string[];
+  skipped_manual: string[];
+};

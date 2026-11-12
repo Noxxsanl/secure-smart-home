@@ -45,7 +45,7 @@ export default function AssignOwnerModal({ homeName, state, onClose }: AssignOwn
             autoFocus
             value={search}
             onChange={(e) => state.changeSearch(e.target.value)}
-            placeholder="VD: kimanh#1560"
+            placeholder="VD: dat#4821"
             className="h-9 w-full rounded border border-gray-200 dark:border-slate-600 bg-white dark:bg-slate-700 pl-8 pr-3 text-sm text-gray-900 dark:text-slate-100 outline-none placeholder:text-gray-300 dark:placeholder:text-slate-500 focus:border-brand focus:ring-2 focus:ring-brand/15"
           />
         </div>

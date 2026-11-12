@@ -10,9 +10,12 @@
 //   /dashboard/**               – sau requireDashboard("admin", "operator") (cookie sh_admin | sh_operator + X-Portal)
 //   /portal/auth/**, /portal/** – khách hàng web (cookie sh_user + X-Portal: user), cùng handler với /mobile
 //   /mobile/auth/**, /mobile/** – app khách hàng (Bearer + refresh token); /mobile/ws là WebSocket (module realtime)
+//   /service/**                 – dịch vụ nội bộ (AI Agent): Bearer SERVICE_API_TOKEN; nginx chặn từ bên ngoài
 // Router /auth LUÔN mount trước guard của cùng kênh, nếu không login sẽ bị chặn 401.
 import { Router } from "express";
+import { requireServiceToken } from "./core/auth/service-token";
 import healthRoutes from "./core/health/health.routes";
+import { aiUsageModule } from "./modules/ai-usage";
 import { auditModule } from "./modules/audit";
 import { automationModule } from "./modules/automation";
 import { cameraModule } from "./modules/camera";
@@ -54,6 +57,7 @@ export const APP_MODULES: readonly AppModule[] = [
   auditModule,
   statsModule,
   simulatorModule,
+  aiUsageModule,
 ];
 
 function buildCustomerRouter(channel: CustomerChannel): Router {
@@ -82,6 +86,11 @@ export function buildApiRouter(): Router {
 
   api.use("/mobile/auth", createMobileAuthRouter());
   api.use("/mobile", requireMobileUser, buildCustomerRouter("mobile"));
+
+  const service = Router();
+  service.use(requireServiceToken);
+  for (const mod of APP_MODULES) mod.service?.(service);
+  api.use("/service", service);
   return api;
 }
 

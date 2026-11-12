@@ -295,7 +295,7 @@ Output mong đợi:
 [Server] Listening on port 5000
 ```
 
-> **Lần chạy đầu — đọc log backend:** migration V2 và seed chạy ngay lúc khởi động. Tìm dòng `[migrate] FAILED <tên>: …` — nếu có, migration dừng, server vẫn chạy nhưng **seed bị bỏ qua** (sửa lỗi DB rồi khởi động lại). Seed thành công in các dòng `[seed] created …` (không in secret). Seed chạy một lần (đánh dấu `seed_demo_v2` trong `_migrations`) và idempotent.
+> **Lần chạy đầu — đọc log backend:** migration V2 và seed chạy ngay lúc khởi động. Tìm dòng `[migrate] FAILED <tên>: …` — nếu có, migration dừng, server vẫn chạy nhưng **seed bị bỏ qua** (sửa lỗi DB rồi khởi động lại). Seed thành công in dòng `[seed] created users=…` (không in mật khẩu). Seed chạy một lần (đánh dấu `seed_demo_v3` trong `_migrations`) và idempotent; DB còn dữ liệu của seed cũ (`seed_demo_v2`) được dọn một lần, in `[seed] removed legacy demo data: …`.
 
 Kiểm tra nhanh backend đang chạy:
 ```powershell
@@ -423,25 +423,17 @@ Mỗi app chỉ nhận đúng role của nó; đăng nhập nhầm cổng sẽ �
 
 ### Dữ liệu demo (seed)
 
-Khi `SEED_DEMO_DATA` bật (mặc định ở môi trường không phải production), backend seed dữ liệu demo — mọi thiết bị trong nhà demo là thiết bị mô phỏng (`is_simulated=1`).
+Khi `SEED_DEMO_DATA` bật (mặc định ở môi trường không phải production), backend chỉ seed **tài khoản** — không có nhà, thiết bị, số đo, firmware hay log giả (từ 2026-11-13). Nhà và thiết bị đến từ phần cứng thật: Admin/Operator đăng ký ở trang **Đăng ký Gateway** của console (`/gateways/register`) cho bất kỳ tài khoản khách nào, hoặc dùng công cụ dev `npm run hw:register` (xem [LEN_SERVER](LEN_SERVER.md)). DB đã chạy seed cũ được tự dọn dữ liệu mô phỏng một lần khi backend khởi động (nhà có gateway thật được giữ nguyên).
 
 | Vai trò | Đăng nhập | Mật khẩu | Cổng |
 |---|---|---|---|
 | Admin | `admin` | `admin123` | 3001 |
 | Operator | `operator01` (và `operator02`) | `operator123` | 3002 |
-| Khách hàng | `user01@smarthome.local` (chủ "Nhà demo phần cứng" sau `npm run hw:register`, xem [LEN_SERVER](LEN_SERVER.md)) | `user123` | 3003 / Mobile |
-| Khách hàng | `lan@…`, `hoa@…`, `hung@…`, `kimanh@…` (`@smarthome.local`; `kimanh` chưa có nhà) | `user123` | 3003 / Mobile |
+| Khách hàng | `user01@smarthome.local` (chủ nhà có phần cứng demo sau khi đăng ký gateway, xem [LEN_SERVER](LEN_SERVER.md)) | `user123` | 3003 / Mobile |
 
-Activation Code để thử luồng claim (Thêm Smart Home / quét QR):
+Tài khoản khách khác: tự tạo ở cổng khách hàng (http://localhost:3003/register) rồi Admin/Operator đăng ký gateway cho tài khoản đó. Seed không còn tạo mã kích hoạt (Activation Code) — nhà đăng ký từ console đã có chủ ngay.
 
-| Code | Trạng thái |
-|---|---|
-| `7K2M-9QXA-4TPB` | Hợp lệ |
-| `H3VD-8NRW-2CYE` | Hợp lệ |
-| `Q4ZT-6MJK-1PSX` | Đã dùng |
-| `B9FE-3WRA-7GMK` | Hết hạn |
-
-> Mật khẩu/mã trên chỉ là dữ liệu demo local — không dùng ở production.
+> Mật khẩu trên chỉ là dữ liệu demo local — không dùng ở production.
 
 ---
 

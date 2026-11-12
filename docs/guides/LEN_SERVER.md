@@ -63,9 +63,18 @@ docker compose logs -f backend          # chờ "[migrate]" xong và "[mqttData]
 
 Backend tự tạo bảng mới `camera_snapshots` khi khởi động (migration append-only).
 
-Đăng ký 3 thiết bị **với đúng device_id/secret đã nạp vào chip** (đọc từ `nvs_dev.csv` của gateway — file gitignore, script
-không in secret). Chạy trên máy (không trong container, vì container không thấy thư mục firmware); `backend/.env` cần
-`DB_HOST=localhost`, `DB_PORT=5433` như [CHAY_LOCAL](CHAY_LOCAL.md):
+Đăng ký thiết bị **với đúng device_id/secret đã nạp vào chip** (giá trị trong `nvs_dev.csv` của gateway — file gitignore).
+Có 2 cách, cùng kết quả (nhà + phòng Phòng khách/Camera + gateway, node, camera, đèn/quạt/rèm mô phỏng, điều hoà thật):
+
+**Cách 1 — trên console (Admin hoặc Operator), gắn được cho bất kỳ tài khoản khách nào.** Đăng nhập http://localhost:3001
+(`admin`) hoặc http://localhost:3002 (`operator01`) → **Đăng ký Gateway** → chọn khách hàng (tài khoản khách tự tạo ở cổng
+khách hàng `/register`, hoặc `user01@smarthome.local`) → đặt tên nhà → bấm **Điền từ file NVS (.csv)** chọn `nvs_dev.csv`
+(đọc ngay trên trình duyệt, chỉ lấy `identity`/`nodes`) hoặc gõ tay Device ID + Secret → **Đăng ký**. Trang hiện `home_id`
+cần ghi vào NVS ở bước 5. Gateway đang thuộc nhà khác: Admin được hỏi có chuyển không (thiết bị bị xoá khỏi nhà cũ cùng
+số đo/ảnh cũ); Operator phải nhờ Admin.
+
+**Cách 2 — công cụ dev trên máy** (không trong container, vì container không thấy thư mục firmware); `backend/.env` cần
+`DB_HOST=localhost`, `DB_PORT=5433` như [CHAY_LOCAL](CHAY_LOCAL.md), script không in secret:
 
 ```powershell
 cd backend
@@ -87,7 +96,7 @@ Kết quả mẫu:
 [hw:register] Nhớ ghi cloud/home_id = 5 vào NVS gateway để gửi heartbeat/sự kiện camera.
 ```
 
-Đây là nhà **duy nhất** của `user01`: seed demo không tạo nhà nào cho tài khoản này.
+Seed demo không tạo nhà hay thiết bị nào (từ 2026-11-13 seed chỉ tạo tài khoản; dữ liệu mô phỏng của seed cũ được backend tự dọn một lần), nên đây là nhà duy nhất trên hệ thống cho tới khi đăng ký thêm.
 
 Chạy lại bất cứ lúc nào (idempotent): nhà/phòng dùng lại, thiết bị cập nhật secret theo NVS và được mở khoá (`fail_count = 0`).
 Nhà đã đăng ký bằng bản cũ (phòng "Cửa chính" chứa "Camera cửa chính") được đổi thành phòng **Camera** / thiết bị **Camera**
@@ -159,4 +168,4 @@ quyền theo nhà (bất biến 6).
 | `camera/event not sent: home_id unknown` | NVS thiếu `cloud/home_id` | Mục 5 |
 | Ảnh bị từ chối HTTP 409 | Camera chưa gán vào nhà nào | Chạy lại `hw:register` |
 | `hw:register` dừng vì thiết bị "đang thuộc nhà khác" | `device_id` trùng thiết bị ở nhà khác (VD đã đăng ký với email khác) | Kiểm lại `--owner`; chắc chắn muốn chuyển thì thêm `--force` |
-| Web khách không có nhà nào | Chưa chạy `npm run hw:register` sau khi tạo lại DB | Chạy bước 4, rồi ghi `home_id` mới vào NVS (bước 5) |
+| Web khách không có nhà nào | Chưa đăng ký gateway (trang Đăng ký Gateway hoặc `npm run hw:register`) sau khi tạo lại DB | Bước 4, rồi ghi `home_id` mới vào NVS (bước 5) |

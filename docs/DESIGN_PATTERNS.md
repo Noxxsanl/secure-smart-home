@@ -191,7 +191,7 @@ Không dùng optimistic update cho thiết bị thật: trạng thái chỉ đ�
 
 **Vấn đề:** AI Dashboard và Admin Settings chưa có API. Khi nối API thật không được phải sửa từng component.
 
-**Pattern:** truy cập dữ liệu chỉ nằm trong hook ở `api/` của module; bên trong hook chọn nguồn mock hoặc API. Component không biết dữ liệu đến từ đâu — cách Mobile đang làm với `USE_MOCK`. `@shh/ai` đã theo cách này (`api/useAiDashboard.ts` đọc `model/mockData.ts`, component trong `ui/` chỉ nhận props); `@shh/settings` còn giá trị cố định trong component.
+**Pattern:** truy cập dữ liệu chỉ nằm trong hook ở `api/` của module; bên trong hook chọn nguồn mock hoặc API. Component không biết dữ liệu đến từ đâu — cách Mobile đang làm với `USE_MOCK`. (Web hiện không còn module mock: `@shh/ai` và `@shh/settings` — từng theo cách này — đã gỡ ngày 2026-11-13.)
 
 #### c) Giữ polling cho Dashboard
 

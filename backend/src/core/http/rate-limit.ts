@@ -59,6 +59,18 @@ export function applyRateLimits(app: Express): void {
     (req) => req.originalUrl.startsWith("/api/device/data") || req.originalUrl.startsWith("/api/device/camera/snapshot")
   );
 
+  // Kênh dịch vụ nội bộ (AI Agent): chỉ đếm request thất bại (token sai/thiếu) — 30 lần / 15 phút / IP, chặn dò
+  // token khi cổng backend mở trong dev (compose publish :5000). Lượt hợp lệ không bị tính.
+  const serviceFailLimiter = rateLimit({
+    windowMs: LOGIN_WINDOW,
+    max: 30,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", detail: "Too many failed service requests" },
+  });
+
+  app.use("/api/service", serviceFailLimiter);
   app.use("/api/auth/login", authLimiter);
   app.use("/api/device/data", deviceDataLimiter);
   app.use("/api/device/camera/snapshot", cameraSnapshotLimiter);

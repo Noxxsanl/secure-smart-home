@@ -36,9 +36,9 @@ export default function SmartHomeListPage() {
           <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Smart Homes</h1>
           <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">Danh sách nhà thông minh theo khách hàng và trạng thái kích hoạt.</p>
         </div>
-        <Link href="/smart-homes/new" className={BTN_PRIMARY}>
+        <Link href="/gateways/register" className={BTN_PRIMARY}>
           <Plus className="h-3.5 w-3.5" />
-          Tạo Smart Home mới
+          Đăng ký Gateway cho khách
         </Link>
       </div>
 

@@ -2,8 +2,8 @@
 
 import { logCategoryLabel, ACTIVATION_METHOD_LABELS, ACTIVATION_REASON_LABELS } from "@shh/api-client/dashboard";
 import Link from "next/link";
-import { UserCircle, Home, Server, Cpu, AlertTriangle, Activity } from "lucide-react";
-import { StatsCard, StatusBadge, SeverityBadge, ProgressBar, Panel, PanelEmpty, LoadErrorBar } from "@shh/ui";
+import { UserCircle, Home, Server, Cpu, AlertTriangle, Activity, CirclePlus } from "lucide-react";
+import { StatsCard, StatusBadge, SeverityBadge, Panel, PanelEmpty, LoadErrorBar, BTN_PRIMARY } from "@shh/ui";
 import { useAuth } from "@shh/auth";
 import { formatDateTime, formatRelative } from "@shh/utils";
 import { useAdminDashboard } from "../../api/useAdminDashboard";
@@ -30,13 +30,18 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="w-full space-y-3">
-      <div>
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
-          Xin chào, {user?.display_name ?? user?.username ?? "Admin"}
-        </h1>
-        <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">
-          Tổng quan nền tảng — Smart Home theo trạng thái, hạ tầng thiết bị, cảnh báo và kích hoạt gần đây.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
+            Xin chào, {user?.display_name ?? user?.username ?? "Admin"}
+          </h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">
+            Tổng quan nền tảng — khách hàng, Smart Home, gateway và thiết bị thật, cảnh báo gần đây.
+          </p>
+        </div>
+        <Link href="/gateways/register" className={BTN_PRIMARY}>
+          <CirclePlus className="h-3.5 w-3.5" /> Đăng ký Gateway
+        </Link>
       </div>
 
       {!!error && <LoadErrorBar error={error} onRetry={() => void refresh()} />}
@@ -125,6 +130,7 @@ export default function AdminDashboardPage() {
         {/* Top errors */}
         <Panel
           title="Lỗi nghiêm trọng gần đây"
+          className="xl:col-span-2"
           action={<Link href="/logs/error" className="text-xs font-medium text-brand hover:brightness-90">Xem tất cả</Link>}
         >
           {(stats?.top_errors ?? []).length === 0 ? (
@@ -143,36 +149,6 @@ export default function AdminDashboardPage() {
                 </li>
               ))}
             </ul>
-          )}
-        </Panel>
-
-        {/* Firmware Rollout */}
-        <Panel
-          title="Firmware Rollout"
-          subtitle="Các đợt OTA đang chạy."
-          action={<Link href="/ota" className="text-xs font-medium text-brand hover:brightness-90">Quản lý OTA</Link>}
-        >
-          {(stats?.firmware_rollouts ?? []).length === 0 ? (
-            <PanelEmpty>Không có rollout nào đang chạy.</PanelEmpty>
-          ) : (
-            <div className="space-y-3 p-4">
-              {stats!.firmware_rollouts.map((d) => (
-                <div key={d.id}>
-                  <div className="mb-1 flex items-center justify-between gap-2 text-sm">
-                    <span className="text-gray-700 dark:text-slate-300">
-                      {d.firmware_type === "gateway" ? "Gateway" : "Node"} FW v{d.firmware_version}
-                      <span className="ml-1.5 text-xs text-gray-400 dark:text-slate-500">
-                        · {d.scope === "fleet" ? "toàn fleet" : d.target_home_name ?? "một nhà"}
-                      </span>
-                    </span>
-                    <span className="font-mono text-xs text-gray-400 dark:text-slate-500">
-                      {d.applied_count}/{d.target_count} · {d.progress_percent}%
-                    </span>
-                  </div>
-                  <ProgressBar percent={d.progress_percent} colorClassName="bg-brand" />
-                </div>
-              ))}
-            </div>
           )}
         </Panel>
 

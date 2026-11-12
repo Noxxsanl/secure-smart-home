@@ -21,8 +21,9 @@ backend/src/
 │                        # time.ts, privacy.ts, events/{event-bus, event-payloads}.ts, module.ts (interface AppModule)
 ├── infrastructure/      # database/{pool, db, migrate, like-pattern}.ts, mqtt/broker.ts, storage/ (port SnapshotStore + adapter đĩa)
 ├── modules/<m>/         # xem §2
-├── seed/demo-seed.ts    # dữ liệu demo (composition: được import index của mọi module)
-└── scripts/             # seed.ts (npm run seed), register-hardware.ts (npm run hw:register — đăng ký phần cứng thật, dev)
+├── seed/                # demo-seed.ts (chỉ tài khoản demo) + legacy-demo-cleanup.ts (dọn 1 lần dữ liệu mô phỏng của seed cũ)
+└── scripts/             # seed.ts (npm run seed), register-hardware.ts (npm run hw:register — đăng ký phần cứng thật, dev;
+                         # trên console: trang Đăng ký Gateway = homes/features/register-gateway)
 ```
 
 Một module:
@@ -40,7 +41,7 @@ modules/<m>/
 
 `AppModule` (`shared/module.ts`) có các móc theo kênh: `device` (`/api/device/**`, HMAC), `dashboard`
 (`/api/dashboard/**`, sau `requireDashboard("admin","operator")`), `customer` (`/api/portal/**` + `/api/mobile/**`,
-cùng handler, tham số `channel`), `api` (chỉ legacy), `workers`. Router `/auth` của 3 kênh do identity export và
+cùng handler, tham số `channel`), `service` (`/api/service/**`, dịch vụ nội bộ — AI Agent — sau `requireServiceToken` của `core/auth/service-token.ts`, Bearer `SERVICE_API_TOKEN`), `api` (chỉ legacy), `workers`. Router `/auth` của 3 kênh do identity export và
 `app.module.ts` mount TRƯỚC guard của kênh. Module không bao giờ `router.use(mw)` không kèm path trên router của kênh.
 
 ## 2. Module
@@ -48,7 +49,7 @@ cùng handler, tham số `channel`), `api` (chỉ legacy), `workers`. Router `/a
 | Module | Bảng sở hữu | Feature | Worker |
 |---|---|---|---|
 | `identity` | users, customers, refresh_tokens | login, register, logout, refresh-session, get-me, get-profile, update-profile, change-password, list/create/update/delete-staff, search-customers, get-customer-detail · `guards/` (requireDashboard, requirePortalUser, requireMobileUser, csrfGuard) | refreshTokenRetention |
-| `homes` | smart_homes, rooms, smart_home_members, member_device_access, operator_home_access, activation_tokens, activation_logs | list-my-homes, get-home-overview, update-home, get-room, rename-room, list/invite/update/remove-member, leave-home, list/accept/decline-invitation, claim-home · list/create/get/update-smart-home, assign-owner, issue-activation-code, revoke-activation-codes, request-home-access, list/grant/revoke-operator-grant | — |
+| `homes` | smart_homes, rooms, smart_home_members, member_device_access, operator_home_access, activation_tokens, activation_logs | list-my-homes, get-home-overview, update-home, get-room, rename-room, list/invite/update/remove-member, leave-home, list/accept/decline-invitation, claim-home · list/create/get/update-smart-home, register-gateway (phần cứng thật → tài khoản khách), assign-owner, issue-activation-code, revoke-activation-codes, request-home-access, list/grant/revoke-operator-grant | — |
 | `devices` | devices, device_tokens | get-device-detail, rename-device, list-console-devices, get-console-device-detail, set-device-status, update-device, remove-device, list-gateways, get-gateway-detail, list-gateway-sensors, presence-monitor, track-device-ip, gateway-heartbeat (MQTT `home/+/gateway/+/heartbeat`) | deviceMonitor, gatewayHeartbeat, mqttTracker |
 | `telemetry` | sensor_data | ingest-http, ingest-mqtt, get-device-telemetry, purge-old-telemetry | mqttDataService, retentionJob |
 | `camera` | camera_snapshots | ingest-snapshot (`POST /api/device/camera/snapshot`), list-camera-snapshots, get-snapshot-image, camera-event (MQTT `…/camera/event` → thông báo `CAMERA_MOTION`), purge-old-snapshots | cameraEventConsumer, snapshotRetention |
@@ -59,6 +60,7 @@ cùng handler, tham số `channel`), `api` (chỉ legacy), `workers`. Router `/a
 | `ota` | firmware, ota_jobs, ota_history | list-firmware, upload-firmware, update-firmware, list-deployments, create-deployment, rollback-deployment | — |
 | `audit` | audit_log | list-logs, delete-logs · `logEvent` cho mọi module | — |
 | `stats` | — | get-badges, get-operator-stats, get-admin-stats | — |
+| `ai-usage` | ai_usage_logs, ai_model_prices, ai_usage_settings | ingest-usage (`POST /api/service/ai-usage`), get-usage-summary, list-usage-calls, list-model-prices, save-model-price, delete-model-price, sync-model-prices (kho giá LiteLLM), update-usage-settings · facade `recordAiUsage` (Agent chạy trong backend) | — |
 | `realtime` | — | mobile-ws (`attachWsHub`, WebSocket `/api/mobile/ws`, gọi từ main.ts) | — |
 | `simulator` | — (miễn T1/T2) | get-simulator-status, simulate-device-power, simulate-door, simulator-engine | simulator |
 | `legacy` | — (miễn T1/T2) | route Prototype `/api/{auth,devices,audit-log,users,notifications}` giữ cho `tests/security/attack_demo*.sh`; không tách feature, không phát triển thêm | — |

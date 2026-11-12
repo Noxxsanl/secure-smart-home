@@ -1,5 +1,5 @@
 import { dashApi, dashPath } from "@shh/api-client/dashboard";
-import type { AccessRequestInput, ActivationCodeIssued, CreateSmartHomeInput, HomeStatus, OperatorAccessGrant, ProvisionResult, SmartHomeDetailHome, UpdateSmartHomeInput } from "@shh/api-client/dashboard";
+import type { AccessRequestInput, ActivationCodeIssued, HomeStatus, OperatorAccessGrant, RegisterGatewayInput, RegisterGatewayResult, SmartHomeDetailHome, UpdateSmartHomeInput } from "@shh/api-client/dashboard";
 
 // §5 Smart homes — `/api/dashboard/smart-homes/**`.
 
@@ -11,9 +11,12 @@ export function smartHomeKey(id: number) {
   return dashPath(`/smart-homes/${id}`);
 }
 
-/** FR-2.2: một request = một transaction (nhà + phòng + gateway + thiết bị + mã kích hoạt). */
-export function createSmartHome(input: CreateSmartHomeInput) {
-  return dashApi<ProvisionResult>("/smart-homes", { method: "POST", body: input });
+/**
+ * Đăng ký gateway + node/camera thật cho một khách hàng: nhà (mới hoặc nhà cùng tên của khách) + phòng + thiết bị trong
+ * MỘT transaction. Secret chỉ đi trong body request này, response không bao giờ trả lại.
+ */
+export function registerGateway(input: RegisterGatewayInput) {
+  return dashApi<RegisterGatewayResult>("/smart-homes/register-gateway", { method: "POST", body: input });
 }
 
 /** name/address: Admin, hoặc Operator khi nhà chưa kích hoạt; status: chỉ Admin. */

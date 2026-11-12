@@ -1,11 +1,12 @@
 import {
-  LayoutDashboard, Home, UserCircle, QrCode, Server, Cpu, UploadCloud,
-  Zap, Bell, ShieldAlert, Users, KeyRound, Settings, BrainCircuit,
+  LayoutDashboard, Home, UserCircle, CirclePlus, Server, Cpu, UploadCloud, Bell, BrainCircuit, ShieldAlert, Users, KeyRound,
 } from "lucide-react";
 import type { NavSection } from "@shh/ui";
 import { logNavChildren } from "@shh/audit";
 
-// Sidebar ADMIN — docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md §5.2.
+// Sidebar ADMIN — bản cơ bản (2026-11-13): khách hàng, nhà, đăng ký gateway thật cho tài khoản khách, thiết bị, giám sát
+// và quản trị nhân viên. Đã gỡ các trang mock / chưa dùng tới: Provisioning KIT mô phỏng, Automation
+// Rules, AI Dashboard, Settings.
 export const NAV_SECTIONS: NavSection[] = [
   {
     section: "Tổng quan",
@@ -14,25 +15,25 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    section: "Kinh doanh",
+    section: "Khách hàng",
     items: [
-      { label: "Smart Homes", href: "/smart-homes", icon: Home, badgeKey: "unclaimedHomes" },
       { label: "Customers", href: "/customers", icon: UserCircle },
-      { label: "Provisioning", href: "/smart-homes/new", icon: QrCode },
+      { label: "Smart Homes", href: "/smart-homes", icon: Home },
     ],
   },
   {
-    section: "Hạ tầng thiết bị",
+    section: "Thiết bị",
     items: [
+      { label: "Đăng ký Gateway", href: "/gateways/register", icon: CirclePlus },
       { label: "Gateways", href: "/gateways", icon: Server, badgeKey: "offlineGateways" },
       { label: "Devices", href: "/devices", icon: Cpu },
       { label: "OTA & Firmware", href: "/ota", icon: UploadCloud, badgeKey: "otaInProgress" },
     ],
   },
   {
-    section: "Tự động hoá",
+    section: "Trí tuệ nhân tạo",
     items: [
-      { label: "Automation Rules", href: "/automation", icon: Zap },
+      { label: "AI Usage", href: "/ai-usage", icon: BrainCircuit },
     ],
   },
   {
@@ -43,17 +44,10 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    section: "Trí tuệ nhân tạo",
-    items: [
-      { label: "AI Dashboard", href: "/ai-dashboard", icon: BrainCircuit },
-    ],
-  },
-  {
     section: "Quản trị hệ thống",
     items: [
       { label: "Team & Roles", href: "/team", icon: Users },
       { label: "Operator Access", href: "/team/access", icon: KeyRound },
-      { label: "Settings", href: "/settings", icon: Settings },
     ],
   },
 ];
@@ -61,15 +55,14 @@ export const NAV_SECTIONS: NavSection[] = [
 // Nhãn breadcrumb cho các route console dùng chung (admin + operator).
 const CONSOLE_ROUTE_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
-  "ai-dashboard": "AI Dashboard",
   devices: "Devices",
   logs: "Logs",
-  new: "Provisioning",
+  register: "Đăng ký Gateway",
   "smart-homes": "Smart Homes",
   customers: "Customers",
   gateways: "Gateways",
-  automation: "Automation",
   ota: "OTA & Firmware",
+  "ai-usage": "AI Usage",
   notifications: "Notification Center",
   gateway: "Gateway Log",
   device: "Device Log",
@@ -85,5 +78,4 @@ export const ROUTE_LABELS: Record<string, string> = {
   ...CONSOLE_ROUTE_LABELS,
   team: "Team & Roles",
   access: "Operator Access",
-  settings: "Settings",
 };

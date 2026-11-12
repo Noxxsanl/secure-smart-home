@@ -41,6 +41,7 @@ const TABLE_OWNERS = {
   notifications: ["notifications"],
   ota: ["firmware", "ota_jobs", "ota_history"],
   audit: ["audit_log"],
+  "ai-usage": ["ai_usage_logs", "ai_model_prices", "ai_usage_settings"],
 };
 const TABLE_EXEMPT_MODULES = new Set(["legacy", "simulator"]);
 const COMPOSITION = (rel) => ["main.ts", "app.ts", "app.module.ts"].includes(rel) || /^(seed|scripts)\//.test(rel);

@@ -95,6 +95,7 @@ Mobile **không** nói chuyện MQTT (bất biến 7); node **không** gọi Ser
 | `/api/portal/**` | USER (web khách) | Cookie `sh_user` | Ngoài phạm vi PRD V2 (FR-1.4), xem `frontend/README.md` |
 | `/api/mobile/**` | USER (Mobile) | `Authorization: Bearer <access>` + refresh token | Cùng router với Portal: `createCustomerRouter(channel)` |
 | `/api/device/**` | Gateway | HMAC | Không có phiên người dùng |
+| `/api/service/**` | Dịch vụ nội bộ (AI Agent `agent/`) | `Authorization: Bearer <SERVICE_API_TOKEN>` | Chưa đặt token → 503 `SERVICE_CHANNEL_DISABLED`; nginx trả 404 cho `/api/service/` từ bên ngoài, agent gọi thẳng `backend:5000` trong mạng Docker |
 | `/api/health` | Giám sát | Không | |
 | `/api/auth`, `/api/devices`, `/api/users`, `/api/audit-log`, `/api/notifications` | Prototype | Cookie cũ | **Cũ** — mục 7.3 |
 
@@ -266,6 +267,7 @@ Tiền tố `/api/dashboard` (feature của từng module, gắn qua móc `dashb
 |---|---|---|---|---|
 | Smart Home | GET · POST | `/smart-homes` | A, O | Danh sách; tạo nhà theo KIT (1 transaction, không trả secret) |
 | | GET · PATCH | `/smart-homes/:id` | A, O | Chi tiết; sửa tên/địa chỉ (O chỉ với nhà chưa claim); đổi trạng thái chỉ A |
+| | POST | `/smart-homes/register-gateway` | A, O | Đăng ký gateway + node/camera **thật** (device_id/secret đã nạp NVS) cho một khách: `{customer_id, home_name, gateway:{device_id, secret}, nodes:[{kind: node\|camera, device_id, secret, room_name?}], transfer?}` → 201 `{home:{id,name,created}, owner, devices[], transferred_from_home_ids}` (không trả secret). Nhà cùng tên của khách được dùng lại; mỗi node cảm biến kèm relay `<id>-lamp\|fan\|curtain` (mô phỏng) và `<id>-ac` (thật). `transfer` xoá thiết bị khỏi nhà cũ (gateway → cả nhóm thiết bị nối qua nó). Lỗi: 404 `CUSTOMER_NOT_FOUND`, 409 `DEVICE_IN_OTHER_HOME` `{device_id, home_name (chỉ A), count}`, 403 `TRANSFER_REQUIRES_ADMIN` (O gửi `transfer`), 403 `ACCESS_GRANT_REQUIRED` (O thêm vào nhà đã có mà không có grant), 400 `DUPLICATE_DEVICE_ID` |
 | | POST | `/smart-homes/:id/activation-codes` | A, O | Phát mã kích hoạt (mã rõ chỉ trả lần này) |
 | | POST | `/smart-homes/:id/activation-codes/revoke` | A, O | Thu hồi mã |
 | | POST | `/smart-homes/:id/assign-owner` | A, O | Gán chủ nhà thủ công |
@@ -295,10 +297,20 @@ Tiền tố `/api/dashboard` (feature của từng module, gắn qua móc `dashb
 | | POST | `/operator-access` | A | Cấp quyền vào nhà |
 | | POST | `/operator-access/:id/revoke` | A | Thu hồi |
 | AI | POST | `/ai/suggestions/run` | A, O | Chạy sinh gợi ý ngay |
+| AI Usage | GET | `/ai-usage/summary?range=24h\|7d\|30d` | A, O | Tổng chi phí (USD), token vào/ra/cache, lượt gọi, tỉ lệ lỗi, độ trễ TB/p50/p95, token đầu; chuỗi theo giờ/ngày (giờ VN); theo model, mục đích, nhà; chi phí hôm nay; ngân sách + tỷ giá; model chưa có giá |
+| | GET | `/ai-usage/calls?limit=&status=failed&model=` | A, O | 50 lượt gọi gần nhất — số liệu kỹ thuật, **không** có nội dung hội thoại |
+| | GET | `/ai-usage/prices` | A, O | Bảng giá model (USD / 1 triệu token vào, đọc cache, ghi cache, ra; STT USD/phút), nguồn + ngày tra |
+| | POST · PUT · DELETE | `/ai-usage/prices`, `/ai-usage/prices/:id` | A | Thêm/sửa/xoá giá (nguồn `manual`); lượt gọi chưa có giá được tính bù. Lỗi 409 `PRICE_EXISTS` |
+| | POST | `/ai-usage/prices/sync` | A | Đồng bộ từ kho giá LiteLLM (`AI_PRICING_SOURCE_URL`, chỉ https): body `{apply?: boolean}` — mặc định **xem trước** (không ghi), `apply: true` mới ghi; giữ giá `manual`, giá 0 từ nguồn bị bỏ qua, audit ghi giá trước/sau. Lỗi 502 `PRICE_SOURCE_UNREACHABLE` / `PRICE_SOURCE_INVALID` |
+| | PUT | `/ai-usage/settings` | A | `{daily_budget_usd, usd_to_vnd}` (null = bỏ) |
 | Simulator | GET | `/simulator/status` | A, O | Trạng thái simulator (`is_simulated=1`) |
 | | POST | `/simulator/devices/:id/power` · `/door` | A, O | Giả lập đổi trạng thái thiết bị |
 
 A = ADMIN, O = OPERATOR. Phân quyền chi tiết từng route nằm trong controller; cột "Ai" là tóm tắt.
+
+#### Kênh dịch vụ — `POST /api/service/ai-usage`
+
+AI Agent gửi số liệu mỗi lần gọi LLM/STT (module `ai-usage`; phía agent: `agent/src/smarthome_agent/usage`). Body là một bản ghi hoặc `{records: [...]}` (≤ 20) → 201 `{accepted}`. Trường: `provider`, `model`, `purpose` (`planner|clarify|summary|stt|eval|other`), `status` (`success|error|timeout`), `error_code?` (tên lớp lỗi, không có thông điệp), `input_tokens` (**tổng**, gồm `cached_input_tokens` và `cache_write_tokens`), `output_tokens` (gồm `reasoning_tokens`), `audio_seconds?`, `latency_ms`, `ttft_ms?`, `home_id?`, `user_id?`, `request_id?`, `round_index?`, `occurred_at?` (≤ 7 ngày). **Không** có trường nội dung prompt/câu trả lời. Chi phí do backend tính theo bảng giá lúc ghi (khớp model trùng tên hoặc bản có ngày như `gpt-5-mini-2025-08-07`); chưa có giá → `null`, tính bù khi có giá.
 
 ### 7.2. Dự kiến
 
@@ -420,6 +432,7 @@ Chi tiết thông số luồng: [IoT Node Network](firmware/IOT_NODE_NETWORK.md)
 |---|---|---|
 | Đăng nhập Mobile | `POST /api/mobile/auth/login` → `GET /api/mobile/ws` (`auth`) → `POST /auth/refresh` khi hết hạn | Đã có |
 | Nhận nhà | Dashboard `POST /smart-homes` → `POST /smart-homes/:id/activation-codes` → Mobile `POST /claim` → WS `home_changed` | Đã có |
+| Gắn phần cứng thật cho khách | Dashboard `POST /smart-homes/register-gateway` (nhà đã có chủ ngay) → WS `home_changed`; gateway ghi `cloud/home_id` vào NVS | Đã có (console: trang Đăng ký Gateway) |
 | Telemetry | Node ESP-NOW `TELEMETRY` → MQTT `gateway/+/data` (hoặc `POST /api/device/data`) → WS `telemetry` | Backend đã có; ESP-NOW dự kiến |
 | Bật/tắt thiết bị | `POST /devices/:id/commands` → MQTT `.../command` → ESP-NOW `CMD` → `CMD_ACK` → MQTT `.../command/ack` → HTTP 200 + WS `device_state` | Backend đã có; firmware dự kiến |
 | Thao tác trên màn hình Gateway | ESP-NOW `CMD`/`CMD_ACK` → MQTT `.../status` (`source: gateway_local`) → WS `device_state` | Dự kiến |

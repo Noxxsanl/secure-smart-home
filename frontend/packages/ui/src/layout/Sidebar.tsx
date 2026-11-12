@@ -13,8 +13,8 @@ function matches(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-// Chỉ tô sáng mục có href khớp dài nhất — tránh "/smart-homes" và
-// "/smart-homes/new" (Provisioning) cùng sáng một lúc.
+// Chỉ tô sáng mục có href khớp dài nhất — tránh "/gateways" và
+// "/gateways/register" (Đăng ký Gateway) cùng sáng một lúc.
 function findActiveHref(sections: NavSection[], pathname: string): string | null {
   let best: string | null = null;
   for (const section of sections) {

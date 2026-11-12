@@ -13,7 +13,6 @@
     "@shh/ai": "*",
     "@shh/audit": "*",
     "@shh/auth": "*",
-    "@shh/automation": "*",
     "@shh/devices": "*",
     "@shh/homes": "*",
     "@shh/notifications": "*",

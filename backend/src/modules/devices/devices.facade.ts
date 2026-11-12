@@ -45,7 +45,19 @@ export { getGatewaySigner } from "./domain/gateway-signer";
 export type { GatewaySigner } from "./domain/gateway-signer";
 
 // ── Ghi trạng thái thiết bị (chủ sở hữu bảng devices) ───────────────────────
-export { insertDevice } from "./infrastructure/device-provisioning.repository";
+export {
+  deleteDevicesForTransfer,
+  findDevicesByUids,
+  findGatewayChildren,
+  insertDevice,
+  upsertHardwareDevice,
+  upsertNodeAppliance,
+} from "./infrastructure/device-provisioning.repository";
+export type {
+  ExistingDeviceRef,
+  HardwareDeviceRecord,
+  NodeApplianceRecord,
+} from "./infrastructure/device-provisioning.repository";
 /** Đã nhận số đo hợp lệ: last_seen = NOW(), fail_count = 0, (tuỳ chọn) last_ip. */
 export { markDeviceSeen } from "./infrastructure/device.repository";
 

@@ -192,7 +192,6 @@ function SmartHomeDetailView({
             <Panel
               title="Rule tự động hoá"
               subtitle="Rule do khách hàng tạo trên ứng dụng — nhân viên chỉ xem."
-              action={<Link href="/automation" className="text-xs font-semibold text-brand hover:brightness-90">Mở Automation →</Link>}
             >
               {rules.length === 0 ? (
                 <PanelEmpty>Nhà này chưa có rule nào.</PanelEmpty>

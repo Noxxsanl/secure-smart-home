@@ -1,67 +1,27 @@
-// Seed dữ liệu demo (CONTRACT_V2 §8). main.ts gọi `await runDemoSeed()` ngay sau migration, trước khi
-// listen. Chạy đúng một lần (dòng `seed_demo_v2` trong _migrations), chỉ khi env.seedDemoData.
+// Seed tài khoản demo. main.ts gọi `await runDemoSeed()` ngay sau migration, trước khi listen.
 //
-// Idempotent kể cả khi lần chạy trước dừng giữa chừng:
-//   - user/khách: tìm theo username/email trước khi tạo;
-//   - mỗi nhà là MỘT transaction và được nhận diện theo tên → đã có thì bỏ qua cả nhà;
-//   - phần dùng chung (grant, firmware, OTA, thông báo nhân viên, audit chung) + dòng marker nằm trong
-//     MỘT transaction cuối: marker chỉ tồn tại khi mọi thứ đã xong.
+// Từ 2026-11-13 seed KHÔNG tạo dữ liệu mô phỏng nào (nhà KIT, thiết bị is_simulated, số đo giả, firmware/OTA,
+// thông báo, audit giả): Admin/Operator chỉ thấy phần cứng thật, đăng ký ở trang "Đăng ký Gateway" của console
+// (POST /api/dashboard/smart-homes/register-gateway) hoặc bằng công cụ dev `npm run hw:register`.
+// Chỉ tạo tài khoản: admin, operator01, operator02 (nhân viên) và user01 (khách hàng, chủ phần cứng demo).
 //
-// Bảo mật (invariant 1, 2): mật khẩu demo chỉ có trong mã này (đã công khai ở CONTRACT/UI demo) và được
-// băm bcrypt cost 12; secret thiết bị do createKitHome sinh ngẫu nhiên, không bao giờ in ra; mã kích hoạt
-// cố định chỉ lưu SHA-256. Log chỉ in số lượng "[seed] created …".
+// DB đã chạy seed cũ (marker seed_demo_v2) được dọn một lần bởi cleanupLegacyDemoData (legacy-demo-cleanup.ts) —
+// chạy cả khi SEED_DEMO_DATA tắt, vì dữ liệu giả đã nằm sẵn trong DB.
+//
+// Bảo mật (invariant 1, 2): mật khẩu demo chỉ có trong mã này (đã công khai ở README) và được băm bcrypt cost 12.
+// Log chỉ in số lượng.
 import bcrypt from "bcrypt";
-import type { PoolClient } from "pg";
 import { env } from "../config/env";
-import { hashActivationCode, normalizeActivationCode } from "../modules/homes";
-import { sha256Hex } from "../shared/crypto";
-import { queryOne, queryRows, runSql, withTransaction, type SqlParam } from "../infrastructure/database/db";
-import { homeLocalParts } from "../shared/time";
-import type { Severity } from "../shared/types/domain";
-import { assignOwner } from "../modules/homes";
-import { createKitHome } from "../modules/homes";
-import type { KitHomeResult } from "../modules/homes";
-import { resolveEventMeta } from "../modules/audit";
+import { queryOne, runSql, withTransaction } from "../infrastructure/database/db";
+import { cleanupLegacyDemoData } from "./legacy-demo-cleanup";
 
-const MARKER = "seed_demo_v2";
-const BCRYPT_COST = 12; // khớp identity (register, create-staff) / legacy users.routes.ts
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-// Nhà demo dùng múi giờ mặc định Asia/Ho_Chi_Minh — số đo nhiệt/ẩm dao động theo giờ địa phương
-const TIMEZONE = "Asia/Ho_Chi_Minh";
-const INSERT_CHUNK = 500;
+const MARKER = "seed_demo_v3";
+const BCRYPT_COST = 12; // khớp identity (register, create-staff)
 
-const counts = {
-  users: 0,
-  homes: 0,
-  devices: 0,
-  members: 0,
-  sensor_data: 0,
-  notifications: 0,
-  audit: 0,
-  firmware: 0,
-};
-
-// ── Tiện ích thời gian / ngẫu nhiên ────────────────────────────────────────
-
-const ago = (ms: number): Date => new Date(Math.floor((Date.now() - ms) / 1000) * 1000);
-const fromNow = (ms: number): Date => ago(-ms);
-const rand = (min: number, max: number): number => min + Math.random() * (max - min);
-const randInt = (min: number, max: number): number => Math.floor(rand(min, max + 1));
-
-async function insertChunks(conn: PoolClient, head: string, columns: number, rows: SqlParam[][]): Promise<void> {
-  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
-    const chunk = rows.slice(i, i + INSERT_CHUNK);
-    const tuple = `(${new Array(columns).fill("?").join(", ")})`;
-    await runSql(`${head} VALUES ${new Array(chunk.length).fill(tuple).join(", ")}`, chunk.flat(), conn);
-  }
-}
-
-// ── Người dùng ─────────────────────────────────────────────────────────────
+let createdUsers = 0;
 
 const passwordHashes = new Map<string, Promise<string>>();
-/** Cùng một mật khẩu demo dùng chung một hash (bcrypt đã có salt) để seed không tốn 8 × ~250 ms. */
+/** Cùng một mật khẩu demo dùng chung một hash (bcrypt đã có salt). */
 function hashPassword(password: string): Promise<string> {
   let hash = passwordHashes.get(password);
   if (!hash) {
@@ -71,15 +31,14 @@ function hashPassword(password: string): Promise<string> {
   return hash;
 }
 
-async function ensureStaff(username: string, role: "admin" | "operator", fullName: string, password: string): Promise<number> {
+async function ensureStaff(username: string, role: "admin" | "operator", fullName: string, password: string): Promise<void> {
   const existing = await queryOne<{ id: number }>("SELECT id FROM users WHERE LOWER(username) = LOWER(?)", [username]);
-  if (existing) return existing.id;
-  const result = await runSql(
-    "INSERT INTO users (username, password_hash, role, full_name, status) VALUES (?, ?, ?, ?, 'active') RETURNING id",
+  if (existing) return;
+  await runSql(
+    "INSERT INTO users (username, password_hash, role, full_name, status) VALUES (?, ?, ?, ?, 'active')",
     [username, await hashPassword(password), role, fullName]
   );
-  counts.users += 1;
-  return result.insertId;
+  createdUsers += 1;
 }
 
 interface CustomerSpec {
@@ -90,15 +49,15 @@ interface CustomerSpec {
   address: string;
 }
 
-async function ensureCustomer(spec: CustomerSpec): Promise<number> {
+async function ensureCustomer(spec: CustomerSpec): Promise<void> {
   const existing = await queryOne<{ id: number }>("SELECT id FROM users WHERE LOWER(email) = LOWER(?)", [spec.email]);
-  if (existing) return existing.id;
+  if (existing) return;
   const hash = await hashPassword("user123");
   // users + customers: ghi 2 bảng → 1 transaction (invariant 9)
-  const userId = await withTransaction(async (conn) => {
+  await withTransaction(async (conn) => {
     const user = await runSql(
-      "INSERT INTO users (username, email, full_name, password_hash, role, status, last_login) VALUES (NULL, ?, ?, ?, 'user', 'active', ?) RETURNING id",
-      [spec.email, spec.fullName, hash, ago(randInt(1, 12) * HOUR)],
+      "INSERT INTO users (username, email, full_name, password_hash, role, status) VALUES (NULL, ?, ?, ?, 'user', 'active') RETURNING id",
+      [spec.email, spec.fullName, hash],
       conn
     );
     await runSql(
@@ -106,465 +65,30 @@ async function ensureCustomer(spec: CustomerSpec): Promise<number> {
       [user.insertId, spec.fullName, spec.phone, spec.address, spec.userTag],
       conn
     );
-    return user.insertId;
   });
-  counts.users += 1;
-  return userId;
+  createdUsers += 1;
 }
-
-// ── Audit / thông báo (INSERT trực tiếp để đặt được created_at trong quá khứ) ─
-
-interface AuditSeed {
-  eventType: string;
-  homeId: number | null;
-  deviceId?: number | null;
-  actorUserId?: number | null;
-  message: string;
-  minutesAgo: number;
-  details?: Record<string, unknown>;
-}
-
-async function insertAudit(conn: PoolClient, rows: AuditSeed[]): Promise<void> {
-  if (rows.length === 0) return;
-  const params = rows.map((row): SqlParam[] => {
-    const meta = resolveEventMeta(row.eventType);
-    return [
-      row.eventType,
-      meta.category,
-      meta.severity,
-      row.deviceId ?? null,
-      row.homeId,
-      row.actorUserId ?? null,
-      row.message,
-      row.details ? JSON.stringify(row.details) : null,
-      ago(row.minutesAgo * MINUTE),
-    ];
-  });
-  await insertChunks(
-    conn,
-    "INSERT INTO audit_log (event_type, category, severity, device_id, home_id, actor_user_id, message, details, created_at)",
-    9,
-    params
-  );
-  counts.audit += rows.length;
-}
-
-interface CustomerNotificationSeed {
-  userId: number;
-  homeId: number;
-  type: string;
-  title: string;
-  message: string;
-  severity: Severity;
-  isRead: boolean;
-  minutesAgo: number;
-  relatedDeviceId?: number | null;
-}
-
-async function insertCustomerNotifications(conn: PoolClient, rows: CustomerNotificationSeed[]): Promise<void> {
-  if (rows.length === 0) return;
-  const params = rows.map((row): SqlParam[] => [
-    row.title,
-    row.message,
-    row.type,
-    row.severity,
-    "user",
-    row.userId,
-    row.homeId,
-    row.relatedDeviceId ?? null,
-    row.isRead,
-    ago(row.minutesAgo * MINUTE),
-  ]);
-  await insertChunks(
-    conn,
-    "INSERT INTO notifications (title, message, type, severity, target_role, user_id, home_id, related_device_id, is_read, created_at)",
-    10,
-    params
-  );
-  counts.notifications += rows.length;
-}
-
-interface StaffNotificationSeed {
-  targetRole: "admin" | "operator" | "all";
-  type: string;
-  title: string;
-  message: string;
-  severity: Severity;
-  homeId: number | null;
-  isRead: boolean;
-  minutesAgo: number;
-}
-
-async function insertStaffNotifications(conn: PoolClient, rows: StaffNotificationSeed[]): Promise<void> {
-  for (const row of rows) {
-    await runSql(
-      `INSERT INTO notifications (title, message, type, severity, target_role, home_id, is_read, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [row.title, row.message, row.type, row.severity, row.targetRole, row.homeId, row.isRead, ago(row.minutesAgo * MINUTE)],
-      conn
-    );
-  }
-  counts.notifications += rows.length;
-}
-
-// ── Dựng nhà ───────────────────────────────────────────────────────────────
-
-interface Actors {
-  adminId: number;
-  operator01Id: number;
-  hung: number;
-  kimanh: number;
-}
-
-interface HomeSpec {
-  name: string;
-  packageCode: "KIT_A" | "KIT_B";
-  address: string;
-  expectedOwnerName: string | null;
-  createdDaysAgo: number;
-}
-
-async function homeExists(name: string): Promise<boolean> {
-  return (await queryOne<{ id: number }>("SELECT id FROM smart_homes WHERE name = ?", [name])) !== null;
-}
-
-async function buildKit(conn: PoolClient, spec: HomeSpec, actors: Actors): Promise<KitHomeResult> {
-  const kit = await createKitHome(conn, {
-    name: spec.name,
-    packageCode: spec.packageCode,
-    address: spec.address,
-    expectedOwnerName: spec.expectedOwnerName,
-    createdBy: actors.adminId,
-    simulated: true,
-  });
-  await runSql("UPDATE smart_homes SET created_at = ? WHERE id = ?", [ago(spec.createdDaysAgo * DAY), kit.home.id], conn);
-  counts.homes += 1;
-  counts.devices += 1 + kit.devices.length;
-  return kit;
-}
-
-function code12(display: string): string {
-  const normalized = normalizeActivationCode(display);
-  if (!normalized) throw new Error("seed: invalid built-in activation code");
-  return normalized;
-}
-
-async function insertToken(
-  conn: PoolClient,
-  homeId: number,
-  code: string,
-  expiresAt: Date,
-  createdAt: Date,
-  createdBy: number
-): Promise<{ id: number; hash: string }> {
-  const hash = hashActivationCode(code);
-  const result = await runSql(
-    "INSERT INTO activation_tokens (home_id, code_hash, expires_at, created_by, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id",
-    [homeId, hash, expiresAt, createdBy, createdAt],
-    conn
-  );
-  return { id: result.insertId, hash };
-}
-
-/** Claim thật qua assignOwner (cùng đường với API), rồi lùi mốc thời gian cho giống dữ liệu đã chạy lâu. */
-async function claimHome(
-  conn: PoolClient,
-  kit: KitHomeResult,
-  ownerId: number,
-  code: string,
-  claimedDaysAgo: number,
-  actors: Actors
-): Promise<void> {
-  const homeId = kit.home.id;
-  const claimedAt = ago(claimedDaysAgo * DAY);
-  const token = await insertToken(conn, homeId, code, fromNow(150 * DAY), ago((claimedDaysAgo + 1) * DAY), actors.adminId);
-  await assignOwner(conn, { homeId, userId: ownerId, tokenId: token.id, actorUserId: null });
-  await runSql("UPDATE activation_tokens SET used_at = ? WHERE id = ?", [claimedAt, token.id], conn);
-  await runSql("UPDATE smart_homes SET claimed_at = ? WHERE id = ?", [claimedAt, homeId], conn);
-  await runSql(
-    `INSERT INTO activation_logs (home_id, user_id, activation_token_id, code_hash, method, result, reason, ip_address, user_agent, created_at)
-     VALUES (?, ?, ?, ?, 'code', 'success', NULL, '192.168.1.20', 'SmartHome Mobile', ?)`,
-    [homeId, ownerId, token.id, token.hash, claimedAt],
-    conn
-  );
-}
-
-function deviceByName(kit: KitHomeResult, name: string): KitHomeResult["devices"][number] {
-  const device = kit.devices.find((item) => item.device_name === name);
-  if (!device) throw new Error("seed: device not found in kit");
-  return device;
-}
-
-// Số đo 7 ngày, mỗi 10 phút: nhiệt độ/độ ẩm theo chu kỳ ngày + nhiễu; vài lần mở/đóng cửa
-async function seedTelemetry(conn: PoolClient, kit: KitHomeResult): Promise<void> {
-  const base: Record<string, { temp: number; hum: number }> = {
-    bedroom: { temp: 29, hum: 66 },
-    living_room: { temp: 27, hum: 62 },
-    kitchen: { temp: 28, hum: 70 },
-    office: { temp: 26.5, hum: 60 },
-  };
-  const nowSec = Math.floor(Date.now() / 1000) * 1000;
-  const rows: SqlParam[][] = [];
-  for (const sensor of kit.devices.filter((device) => device.category === "sensor")) {
-    const room = kit.rooms.find((item) => item.id === sensor.room_id);
-    const profile = base[room?.room_type ?? "living_room"] ?? base.living_room;
-    for (let i = 7 * 144 - 1; i >= 0; i--) {
-      const at = new Date(nowSec - i * 10 * MINUTE);
-      const hour = homeLocalParts(at, TIMEZONE).minuteOfDay / 60;
-      const wave = Math.sin(((hour - 9) / 24) * 2 * Math.PI); // đỉnh ~15h, đáy ~3h
-      const temperature = Math.min(34, Math.max(22, profile.temp + 3 * wave + rand(-0.4, 0.4)));
-      const humidity = Math.min(85, Math.max(45, profile.hum - 8 * wave + rand(-1.5, 1.5)));
-      rows.push([
-        sensor.id,
-        kit.gateway.id,
-        JSON.stringify({ temperature: Math.round(temperature * 10) / 10, humidity: Math.round(humidity * 10) / 10 }),
-        at,
-      ]);
-    }
-  }
-  for (const door of kit.devices.filter((device) => device.category === "door_contact")) {
-    const openings = Array.from({ length: 12 }, () => nowSec - randInt(10, 7 * 24 * 60 - 10) * MINUTE).sort((a, b) => a - b);
-    for (const openAt of openings) {
-      rows.push([door.id, kit.gateway.id, JSON.stringify({ door_open: true }), new Date(openAt)]);
-      rows.push([door.id, kit.gateway.id, JSON.stringify({ door_open: false }), new Date(openAt + 25_000)]);
-    }
-  }
-  await insertChunks(conn, "INSERT INTO sensor_data (device_id, gateway_id, payload, received_at)", 4, rows);
-  counts.sensor_data += rows.length;
-}
-
-// ── Nhà 2: "Nhà Quận 7" ────────────────────────────────────────────────────
-
-async function seedHome2(actors: Actors): Promise<void> {
-  const spec: HomeSpec = {
-    name: "Nhà Quận 7",
-    packageCode: "KIT_A",
-    address: "88 Nguyễn Lương Bằng, Quận 7, TP. Hồ Chí Minh",
-    expectedOwnerName: "Lê Văn Hùng",
-    createdDaysAgo: 25,
-  };
-  if (await homeExists(spec.name)) return;
-
-  await withTransaction(async (conn) => {
-    const kit = await buildKit(conn, spec, actors);
-    const homeId = kit.home.id;
-    // Mã cố định của CONTRACT §8 (chỉ lưu SHA-256): khách đã claim bằng mã này nên token ở trạng thái "đã dùng"
-    await claimHome(conn, kit, actors.hung, code12("Q4ZT-6MJK-1PSX"), 20, actors);
-    // Một lần nhập sai trước đó của chính chủ (hiện trong lịch sử kích hoạt của khách)
-    await runSql(
-      `INSERT INTO activation_logs (home_id, user_id, code_hash, method, result, reason, ip_address, user_agent, created_at)
-       VALUES (NULL, ?, ?, 'code', 'failed', 'NOT_FOUND', '192.168.1.45', 'SmartHome Mobile', ?)`,
-      [actors.hung, sha256Hex("seed-mistyped-code"), ago(20 * DAY + 3 * MINUTE)],
-      conn
-    );
-    counts.members += 1;
-
-    const light = deviceByName(kit, "Đèn phòng khách");
-    await seedTelemetry(conn, kit);
-
-    await insertCustomerNotifications(conn, [
-      { userId: actors.hung, homeId, type: "HOME_CLAIMED", title: "Chào mừng về nhà", message: `Nhà "${spec.name}" đã được kích hoạt. Bạn là chủ nhà.`, severity: "success", isRead: true, minutesAgo: 20 * 1440 },
-      { userId: actors.hung, homeId, type: "GATEWAY_OFFLINE", title: "Gateway mất kết nối", message: `Gateway của nhà "${spec.name}" đã mất kết nối. Các thiết bị sẽ không điều khiển được cho tới khi kết nối lại.`, severity: "critical", isRead: false, minutesAgo: 5 * 60 },
-      { userId: actors.hung, homeId, type: "GATEWAY_ONLINE", title: "Gateway đã kết nối lại", message: `Gateway của nhà "${spec.name}" đã hoạt động trở lại.`, severity: "success", isRead: false, minutesAgo: 5 * 60 - 10 },
-    ]);
-
-    await insertAudit(conn, [
-      { eventType: "HOME_CREATED", homeId, actorUserId: actors.adminId, message: `Tạo nhà "${spec.name}" (KIT_A)`, minutesAgo: 25 * 1440 },
-      { eventType: "ACTIVATION_CODE_CREATED", homeId, actorUserId: actors.adminId, message: `Tạo mã kích hoạt cho nhà "${spec.name}"`, minutesAgo: 24 * 1440 },
-      { eventType: "ACTIVATION_FAILED", homeId: null, actorUserId: actors.hung, message: "Nhập mã kích hoạt không tồn tại", minutesAgo: 20 * 1440 + 3 },
-      { eventType: "ACTIVATION_SUCCESS", homeId, actorUserId: actors.hung, message: `Kích hoạt nhà "${spec.name}" thành công`, minutesAgo: 20 * 1440 },
-      { eventType: "GATEWAY_ONLINE", homeId, deviceId: kit.gateway.id, message: `Gateway ${kit.gateway.device_id} đã kết nối`, minutesAgo: 20 * 1440 - 5 },
-      { eventType: "GATEWAY_OFFLINE", homeId, deviceId: kit.gateway.id, message: `Gateway ${kit.gateway.device_id} mất kết nối`, minutesAgo: 5 * 60 },
-      { eventType: "GATEWAY_ONLINE", homeId, deviceId: kit.gateway.id, message: `Gateway ${kit.gateway.device_id} đã kết nối lại`, minutesAgo: 5 * 60 - 10 },
-      { eventType: "DEVICE_COMMAND", homeId, deviceId: light.id, actorUserId: actors.hung, message: 'Bật "Đèn phòng khách"', minutesAgo: 8 * 60 },
-    ]);
-  });
-}
-
-// ── Nhà 3–5: chưa claim ────────────────────────────────────────────────────
-
-async function seedUnclaimedHome(
-  actors: Actors,
-  spec: HomeSpec,
-  displayCode: string,
-  expired: boolean
-): Promise<void> {
-  if (await homeExists(spec.name)) return;
-  await withTransaction(async (conn) => {
-    const kit = await buildKit(conn, spec, actors);
-    const homeId = kit.home.id;
-    const createdAt = ago(spec.createdDaysAgo * DAY);
-    // Mã cố định của CONTRACT §8 (chỉ lưu SHA-256). Nhà 5: mã đã hết hạn (expires_at trong quá khứ)
-    const expiresAt = expired ? ago(10 * DAY) : fromNow(180 * DAY - spec.createdDaysAgo * DAY);
-    await insertToken(conn, homeId, code12(displayCode), expiresAt, createdAt, actors.adminId);
-
-    const rows: AuditSeed[] = [
-      { eventType: "HOME_CREATED", homeId, actorUserId: actors.adminId, message: `Tạo nhà "${spec.name}" (${spec.packageCode})`, minutesAgo: spec.createdDaysAgo * 1440 },
-      { eventType: "ACTIVATION_CODE_CREATED", homeId, actorUserId: actors.adminId, message: `Tạo mã kích hoạt cho nhà "${spec.name}"`, minutesAgo: spec.createdDaysAgo * 1440 - 1 },
-    ];
-    if (expired) {
-      // Khách thử mã đã hết hạn → lịch sử kích hoạt thất bại (EXPIRED)
-      await runSql(
-        `INSERT INTO activation_logs (home_id, user_id, code_hash, method, result, reason, ip_address, user_agent, created_at)
-         VALUES (?, ?, ?, 'code', 'failed', 'EXPIRED', '192.168.1.77', 'SmartHome Mobile', ?)`,
-        [homeId, actors.kimanh, hashActivationCode(code12(displayCode)), ago(8 * DAY)],
-        conn
-      );
-      rows.push({ eventType: "ACTIVATION_FAILED", homeId, actorUserId: actors.kimanh, message: "Mã kích hoạt đã hết hạn", minutesAgo: 8 * 1440 });
-    }
-    await insertAudit(conn, rows);
-  });
-}
-
-// ── Phần dùng chung + marker (một transaction) ─────────────────────────────
-
-async function seedShared(actors: Actors): Promise<void> {
-  await withTransaction(async (conn) => {
-    const home2 = await queryOne<{ id: number }>("SELECT id FROM smart_homes WHERE name = 'Nhà Quận 7'", [], conn);
-    const home5 = await queryOne<{ id: number }>("SELECT id FROM smart_homes WHERE name = 'Kit KIT_A #0005'", [], conn);
-
-    // Grant của operator01 trên nhà Quận 7 (còn ~4 giờ)
-    if (home2) {
-      const existingGrant = await queryOne<{ id: number }>(
-        "SELECT id FROM operator_home_access WHERE operator_user_id = ? AND home_id = ? AND revoked_at IS NULL AND expires_at > NOW()",
-        [actors.operator01Id, home2.id],
-        conn
-      );
-      if (!existingGrant) {
-        const grantedAt = ago(10 * MINUTE);
-        await runSql(
-          `INSERT INTO operator_home_access (operator_user_id, home_id, reason, granted_by, expires_at, created_at)
-           VALUES (?, ?, 'Ticket #1024 — gateway mất kết nối', ?, ?, ?)`,
-          [actors.operator01Id, home2.id, actors.adminId, new Date(grantedAt.getTime() + 4 * HOUR), grantedAt],
-          conn
-        );
-        await insertAudit(conn, [
-          { eventType: "OPERATOR_ACCESS_GRANTED", homeId: home2.id, actorUserId: actors.adminId, message: "Cấp quyền xem nhà Quận 7 cho operator01 (4 giờ): Ticket #1024", minutesAgo: 10 },
-          { eventType: "OPERATOR_HOME_VIEWED", homeId: home2.id, actorUserId: actors.operator01Id, message: 'Operator operator01 xem thiết bị của nhà "Nhà Quận 7"', minutesAgo: 6 },
-        ]);
-      }
-    }
-
-    // Firmware (chỉ metadata; file thật không cần tồn tại cho demo)
-    const firmwareSeeds = [
-      { type: "gateway", version: "2.3.1", stable: true, notes: "Bản ổn định: sửa lỗi mất kết nối MQTT khi đổi WiFi.", daysAgo: 40 },
-      { type: "node", version: "1.4.0", stable: true, notes: "Bản ổn định: tiết kiệm pin, cải thiện độ chính xác cảm biến.", daysAgo: 35 },
-      { type: "gateway", version: "2.4.0-beta.1", stable: false, notes: "Bản thử nghiệm: hỗ trợ OTA theo nhà.", daysAgo: 3 },
-    ] as const;
-    for (const fw of firmwareSeeds) {
-      const checksum = sha256Hex(`seed-firmware-${fw.type}-${fw.version}`);
-      const result = await runSql(
-        `INSERT INTO firmware
-           (target_type, version, file_name, size_bytes, checksum_sha256, storage_path, release_notes, is_stable, uploaded_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT DO NOTHING`,
-        [
-          fw.type,
-          fw.version,
-          `${fw.type}-${fw.version}.bin`,
-          fw.type === "gateway" ? 1_048_576 : 524_288,
-          checksum,
-          `${env.firmwareStorageDir}/${checksum}.bin`,
-          fw.notes,
-          fw.stable,
-          actors.adminId,
-          ago(fw.daysAgo * DAY),
-        ],
-        conn
-      );
-      if (result.affectedRows > 0) {
-        counts.firmware += 1;
-        await insertAudit(conn, [
-          { eventType: "FIRMWARE_UPLOADED", homeId: null, actorUserId: actors.adminId, message: `Tải lên firmware ${fw.type} ${fw.version}`, minutesAgo: fw.daysAgo * 1440 },
-        ]);
-      }
-    }
-
-    // Một job OTA đã hoàn tất: node 1.4.0 cho Nhà Quận 7
-    const anyJob = await queryOne<{ id: number }>("SELECT id FROM ota_jobs LIMIT 1", [], conn);
-    const nodeFw = await queryOne<{ id: number }>("SELECT id FROM firmware WHERE target_type = 'node' AND version = '1.4.0'", [], conn);
-    if (!anyJob && home2 && nodeFw) {
-      const startedAt = ago(10 * DAY);
-      const job = await runSql(
-        `INSERT INTO ota_jobs (firmware_id, scope_type, scope_id, status, created_by, created_at, finished_at)
-         VALUES (?, 'home', ?, 'completed', ?, ?, ?)
-         RETURNING id`,
-        [nodeFw.id, home2.id, actors.adminId, startedAt, new Date(startedAt.getTime() + 20 * MINUTE)],
-        conn
-      );
-      const targets = await queryRows<{ id: number }>(
-        "SELECT id FROM devices WHERE home_id = ? AND device_type <> 'gateway' ORDER BY id",
-        [home2.id],
-        conn
-      );
-      if (targets.length > 0) {
-        await insertChunks(
-          conn,
-          "INSERT INTO ota_history (ota_job_id, device_id, status, progress_percent, started_at, finished_at)",
-          6,
-          targets.map((target, index): SqlParam[] => [
-            job.insertId,
-            target.id,
-            "applied",
-            100,
-            new Date(startedAt.getTime() + index * 2 * MINUTE),
-            new Date(startedAt.getTime() + (index * 2 + 3) * MINUTE),
-          ])
-        );
-      }
-    }
-
-    // Thông báo nhân viên
-    await insertStaffNotifications(conn, [
-      { targetRole: "all", type: "HOME_CLAIMED", title: "Nhà đã được kích hoạt", message: 'Nhà "Nhà Quận 7" vừa được khách hàng kích hoạt.', severity: "success", homeId: home2?.id ?? null, isRead: true, minutesAgo: 20 * 1440 },
-      { targetRole: "all", type: "GATEWAY_OFFLINE", title: "Gateway mất kết nối", message: 'Gateway của nhà "Nhà Quận 7" đã mất kết nối.', severity: "critical", homeId: home2?.id ?? null, isRead: false, minutesAgo: 5 * 60 },
-      { targetRole: "all", type: "OTA_COMPLETED", title: "Cập nhật firmware hoàn tất", message: "Đợt cập nhật firmware node 1.4.0 đã hoàn tất trên mọi thiết bị.", severity: "success", homeId: home2?.id ?? null, isRead: true, minutesAgo: 10 * 1440 },
-      { targetRole: "operator", type: "PROVISIONING", title: "Kit chờ giao cho khách", message: 'Nhà "Kit KIT_A #0003" đã sẵn sàng, chưa có chủ nhà.', severity: "info", homeId: null, isRead: false, minutesAgo: 5 * 1440 },
-      { targetRole: "operator", type: "ACTIVATION_EXPIRED", title: "Mã kích hoạt đã hết hạn", message: 'Mã kích hoạt của "Kit KIT_A #0005" đã hết hạn — cần cấp mã mới.', severity: "warning", homeId: home5?.id ?? null, isRead: false, minutesAgo: 10 * 1440 },
-      { targetRole: "admin", type: "OPERATOR_ACCESS", title: "Operator được cấp quyền xem nhà", message: "operator01 được cấp quyền xem nhà Quận 7 trong 4 giờ (Ticket #1024).", severity: "warning", homeId: home2?.id ?? null, isRead: false, minutesAgo: 10 },
-    ]);
-
-    // Audit chung (không gắn nhà)
-    await insertAudit(conn, [
-      { eventType: "LOGIN_SUCCESS", homeId: null, actorUserId: actors.adminId, message: "Quản trị viên đăng nhập", minutesAgo: 90 },
-      { eventType: "LOGIN_SUCCESS", homeId: null, actorUserId: actors.operator01Id, message: "Nhân viên vận hành đăng nhập", minutesAgo: 20 },
-      { eventType: "LOGIN_FAILED", homeId: null, message: "Đăng nhập thất bại: sai thông tin đăng nhập", minutesAgo: 240 },
-      { eventType: "MQTT_CONNECTED", homeId: null, message: "Backend kết nối Broker MQTT (TLS)", minutesAgo: 60 },
-    ]);
-
-    // Đánh dấu hoàn tất — cùng transaction nên chỉ tồn tại khi mọi thứ trên đã ghi xong
-    await runSql("INSERT INTO _migrations (name) VALUES (?) ON CONFLICT DO NOTHING", [MARKER], conn);
-  });
-}
-
-// ── Điểm vào ───────────────────────────────────────────────────────────────
 
 export async function runDemoSeed(): Promise<void> {
+  await cleanupLegacyDemoData();
+
   if (!env.seedDemoData) return;
   const done = await queryOne<{ name: string }>("SELECT name FROM _migrations WHERE name = ?", [MARKER]);
   if (done) return;
 
-  const adminId = await ensureStaff("admin", "admin", "Quản trị viên", "admin123");
-  const operator01Id = await ensureStaff("operator01", "operator", "Nhân viên vận hành 01", "operator123");
+  await ensureStaff("admin", "admin", "Quản trị viên", "admin123");
+  await ensureStaff("operator01", "operator", "Nhân viên vận hành 01", "operator123");
   await ensureStaff("operator02", "operator", "Nhân viên vận hành 02", "operator123");
+  // Chủ phần cứng demo — nhà + thiết bị do Admin/Operator đăng ký (trang "Đăng ký Gateway") hoặc `npm run hw:register`
+  await ensureCustomer({
+    email: "user01@smarthome.local",
+    fullName: "Nguyễn Hoàng Đạt",
+    userTag: "dat#4821",
+    phone: "0901234567",
+    address: "12 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh",
+  });
 
-  // Chủ "Nhà demo phần cứng" — nhà do `npm run hw:register` tạo từ NVS của phần cứng thật, seed không tạo nhà cho user01
-  await ensureCustomer({ email: "user01@smarthome.local", fullName: "Nguyễn Hoàng Đạt", userTag: "dat#4821", phone: "0901234567", address: "12 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh" });
-  const hung = await ensureCustomer({ email: "hung@smarthome.local", fullName: "Lê Văn Hùng", userTag: "hung#2094", phone: "0934567890", address: "88 Nguyễn Lương Bằng, Quận 7, TP. Hồ Chí Minh" });
-  const kimanh = await ensureCustomer({ email: "kimanh@smarthome.local", fullName: "Ngô Kim Anh", userTag: "kimanh#1560", phone: "0945678901", address: "21 Trần Phú, Quận 5, TP. Hồ Chí Minh" });
-
-  const actors: Actors = { adminId, operator01Id, hung, kimanh };
-
-  await seedHome2(actors);
-  await seedUnclaimedHome(actors, { name: "Kit KIT_A #0003", packageCode: "KIT_A", address: "Kho Quận Thủ Đức", expectedOwnerName: null, createdDaysAgo: 5 }, "7K2M-9QXA-4TPB", false);
-  await seedUnclaimedHome(actors, { name: "Kit KIT_B #0004", packageCode: "KIT_B", address: "Kho Quận Thủ Đức", expectedOwnerName: null, createdDaysAgo: 3 }, "H3VD-8NRW-2CYE", false);
-  await seedUnclaimedHome(actors, { name: "Kit KIT_A #0005", packageCode: "KIT_A", address: "Kho Quận Thủ Đức", expectedOwnerName: null, createdDaysAgo: 200 }, "B9FE-3WRA-7GMK", true);
-  await seedShared(actors);
-
-  // Chỉ số lượng — không bao giờ in mật khẩu/secret/mã kích hoạt
-  console.log(
-    `[seed] created users=${counts.users} homes=${counts.homes} devices=${counts.devices} members=${counts.members} ` +
-      `sensor_data=${counts.sensor_data} ` +
-      `notifications=${counts.notifications} audit=${counts.audit} firmware=${counts.firmware}`
-  );
+  await runSql("INSERT INTO _migrations (name) VALUES (?) ON CONFLICT DO NOTHING", [MARKER]);
+  // Chỉ số lượng — không bao giờ in mật khẩu
+  if (createdUsers > 0) console.log(`[seed] created users=${createdUsers}`);
 }

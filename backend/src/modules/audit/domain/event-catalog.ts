@@ -98,6 +98,9 @@ export const EVENT_CATALOG_ENTRIES: ReadonlyArray<readonly [string, LogCategory,
   ["STAFF_UPDATED", "activity", "info"],
   ["STAFF_DELETED", "activity", "info"],
   ["LOGS_DELETED", "activity", "warning"],
+  ["AI_PRICE_UPDATED", "activity", "info"], // thêm: Admin thêm/sửa/xoá giá model LLM (tab AI Usage)
+  ["AI_PRICES_SYNCED", "activity", "info"], // thêm: đồng bộ giá LLM từ nguồn công khai
+  ["AI_SETTINGS_UPDATED", "activity", "info"], // thêm: ngân sách AI/ngày, tỷ giá USD→VNĐ
   // automation
   ["AUTOMATION_CREATED", "automation", "info"],
   ["AUTOMATION_UPDATED", "automation", "info"],

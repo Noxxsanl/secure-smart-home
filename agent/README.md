@@ -60,6 +60,28 @@ Test không đọc key thật: `tests/conftest.py` ghi đè `OPENAI_API_KEY` r�
 Job **Agent (ruff, pytest)** trong `.github/workflows/ci.yml`, chạy khi `agent/**` đổi: Python 3.12,
 `pip install -r requirements-dev.txt`, `ruff check .`, `ruff format --check .`, `pytest`.
 
+## Đo chi phí, token, độ trễ (tab AI Usage)
+
+`src/smarthome_agent/usage/` gửi số liệu mỗi lần gọi LLM/STT về backend (`POST /api/service/ai-usage`, Bearer `BACKEND_SERVICE_TOKEN` = `SERVICE_API_TOKEN` của backend). Chi phí do backend tính theo bảng giá model mà Admin quản lý; agent chỉ gửi token + thời gian, **không** gửi nội dung chat. Chưa đặt token thì không gửi gì. Gửi nền, lỗi mạng chỉ ghi cảnh báo, không ảnh hưởng câu trả lời.
+
+```python
+from smarthome_agent.usage import get_usage_reporter, openai_usage, track_llm_call
+
+async with track_llm_call(
+    get_usage_reporter(),
+    provider="openai",
+    model=settings.openai_model,
+    purpose="planner",
+    home_id=home_id,
+    request_id=request_id,
+    round_index=i,
+) as call:
+    response = await client.responses.create(...)
+    call.set_usage(openai_usage(response.usage))  # anthropic_usage(...) cho Claude
+```
+
+Lỗi/quá thời gian vẫn được ghi (chỉ tên lớp lỗi) rồi ném tiếp. Test: `tests/test_usage.py`.
+
 ## Nguyên tắc an toàn
 
 - Agent không có tài khoản hệ thống: mọi lời gọi backend dùng Bearer token của người đang chat,

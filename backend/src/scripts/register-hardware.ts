@@ -5,6 +5,9 @@
 // Mặc định: --nvs ../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/nvs_dev.csv (tính từ thư mục
 // backend), --owner user01@smarthome.local, --home-name "Nhà demo phần cứng".
 //
+// Trên console đã có trang "Đăng ký Gateway" (Admin/Operator, mọi tài khoản khách) cùng mô hình thiết bị — xem
+// modules/homes/features/register-gateway. Script này giữ cho thao tác nhanh trên máy dev.
+//
 // Đây là công cụ DEV, KHÔNG dùng cho production (composition, ngoài quy tắc T1/T2 như seed/): từ chối chạy khi
 // NODE_ENV=production (thoát mã 1). Ghi thẳng smart_homes/rooms/smart_home_members/devices trong MỘT transaction
 // (invariant 9). Idempotent: chạy lại thì nhà/phòng được dùng lại, thiết bị upsert theo device_id.

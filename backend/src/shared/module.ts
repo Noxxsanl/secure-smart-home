@@ -23,6 +23,8 @@ export interface AppModule {
   device?: (router: Router) => void;
   /** /api/dashboard/** — đã qua requireDashboard("admin", "operator"); dùng getAuth(req). */
   dashboard?: (router: Router) => void;
+  /** /api/service/** — dịch vụ nội bộ (AI Agent), đã qua requireServiceToken (Bearer SERVICE_API_TOKEN). */
+  service?: (router: Router) => void;
   /** /api/portal/** (channel "web") và /api/mobile/** (channel "mobile") — đã qua guard USER của kênh. */
   customer?: (router: Router, channel: CustomerChannel) => void;
   workers?: readonly ModuleWorker[];

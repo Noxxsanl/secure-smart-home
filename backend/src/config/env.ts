@@ -73,6 +73,34 @@ function readSecret(name: string, derivationLabel: string): string {
 // TRUST_PROXY → giá trị cho app.set("trust proxy", …). Mặc định false (không tin X-Forwarded-For).
 // Nhận: số hop ("1"), hoặc danh sách subnet/IP/từ khoá loopback|linklocal|uniquelocal phân tách bằng dấu phẩy.
 // KHÔNG nhận "true" (tin mọi proxy → client giả IP để né rate limit) — coi như chưa cấu hình.
+/**
+ * Token của kênh dịch vụ nội bộ /api/service/** (AI Agent gửi số liệu dùng LLM). Không đặt hoặc ngắn hơn 32 ký tự →
+ * null = kênh tắt (503). Không bao giờ log giá trị.
+ */
+function readServiceToken(): string | null {
+  const value = process.env.SERVICE_API_TOKEN?.trim();
+  if (!value) return null;
+  if (value.length < 32) {
+    console.warn("[startup] SERVICE_API_TOKEN is shorter than 32 characters – service channel disabled");
+    return null;
+  }
+  return value;
+}
+
+const DEFAULT_AI_PRICING_SOURCE =
+  "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+
+/** Nguồn JSON giá LLM (nút "Đồng bộ giá"): chỉ chấp nhận https. */
+function readPricingSource(): string {
+  const value = process.env.AI_PRICING_SOURCE_URL?.trim();
+  if (!value) return DEFAULT_AI_PRICING_SOURCE;
+  if (!/^https:\/\/[^\s]+$/.test(value)) {
+    console.warn("[startup] AI_PRICING_SOURCE_URL must be an https URL – using the default LiteLLM source");
+    return DEFAULT_AI_PRICING_SOURCE;
+  }
+  return value;
+}
+
 function readTrustProxy(): boolean | number | string {
   const raw = process.env.TRUST_PROXY?.trim();
   if (!raw || raw.toLowerCase() === "false" || raw === "0") return false;
@@ -121,6 +149,10 @@ export interface AppEnv {
   snapshotStorageDir: string;
   /** Số ngày giữ ảnh chụp camera (job purge-old-snapshots hằng giờ; thêm trần 500 ảnh / camera). */
   cameraSnapshotRetentionDays: number;
+  /** Token Bearer của kênh /api/service/** (AI Agent → backend); null = kênh tắt. */
+  serviceApiToken: string | null;
+  /** Nguồn JSON giá LLM cho nút "Đồng bộ giá" (mặc định kho giá công khai của LiteLLM). */
+  aiPricingSourceUrl: string;
 }
 
 export const env: Readonly<AppEnv> = Object.freeze({
@@ -138,4 +170,6 @@ export const env: Readonly<AppEnv> = Object.freeze({
   telemetryRetentionDays: readInt("TELEMETRY_RETENTION_DAYS", 8, 1, 3650),
   snapshotStorageDir: process.env.SNAPSHOT_STORAGE_DIR?.trim() || "storage/snapshots",
   cameraSnapshotRetentionDays: readInt("CAMERA_SNAPSHOT_RETENTION_DAYS", 7, 1, 3650),
+  serviceApiToken: readServiceToken(),
+  aiPricingSourceUrl: readPricingSource(),
 });

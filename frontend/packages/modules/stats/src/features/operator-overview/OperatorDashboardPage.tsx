@@ -2,8 +2,8 @@
 
 import { logCategoryLabel } from "@shh/api-client/dashboard";
 import Link from "next/link";
-import { QrCode, KeyRound, Ticket, AlertTriangle, ArrowRight, Server } from "lucide-react";
-import { StatsCard, StatusBadge, SeverityBadge, Panel, PanelEmpty, LoadErrorBar, BTN_SM } from "@shh/ui";
+import { KeyRound, Ticket, AlertTriangle, Server, CirclePlus } from "lucide-react";
+import { StatsCard, StatusBadge, SeverityBadge, Panel, PanelEmpty, LoadErrorBar, BTN_PRIMARY } from "@shh/ui";
 import { useAuth } from "@shh/auth";
 import { useNow, formatDateTime, formatRelative, formatRemaining } from "@shh/utils";
 import { useOperatorDashboard } from "../../api/useOperatorDashboard";
@@ -16,23 +16,24 @@ export default function OperatorDashboardPage() {
 
   return (
     <div className="w-full space-y-3">
-      <div>
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
-          Xin chào, {user?.display_name ?? user?.username ?? "Operator"}
-        </h1>
-        <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">
-          Hàng đợi provisioning, các nhà đang hỗ trợ và cảnh báo vận hành cần xử lý.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-slate-100">
+            Xin chào, {user?.display_name ?? user?.username ?? "Operator"}
+          </h1>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-slate-400">
+            Các nhà đang hỗ trợ, gateway mất kết nối và cảnh báo vận hành cần xử lý.
+          </p>
+        </div>
+        <Link href="/gateways/register" className={BTN_PRIMARY}>
+          <CirclePlus className="h-3.5 w-3.5" /> Đăng ký Gateway
+        </Link>
       </div>
 
       {!!error && <LoadErrorBar error={error} onRetry={() => void refresh()} />}
 
       {/* KPI Row */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <StatsCard title="Provisioning Queue" value={placeholder ? "—" : stats?.provisioning_queue.length ?? 0}
-          subtitle="Smart Home chờ khách kích hoạt."
-          accent="bg-warning-soft text-warning" iconBg="bg-warning-soft"
-          icon={<QrCode className="h-4 w-4 text-warning" />} />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StatsCard title="Đang hỗ trợ" value={placeholder ? "—" : stats?.active_access_grants.length ?? 0}
           subtitle="Quyền truy cập nhà còn hiệu lực của bạn."
           accent="bg-brand-soft text-brand" iconBg="bg-brand-soft"
@@ -51,34 +52,7 @@ export default function OperatorDashboardPage() {
           icon={<Server className="h-4 w-4 text-critical" />} />
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-2">
-        {/* Provisioning queue */}
-        <Panel
-          title="Provisioning Queue"
-          subtitle="Nhà đã chuẩn bị, chưa có chủ sở hữu — mới nhất trước."
-          action={<Link href="/smart-homes/new" className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:brightness-90">+ Tạo Home</Link>}
-        >
-          {(stats?.provisioning_queue ?? []).length === 0 ? (
-            <PanelEmpty>Không có Home nào đang chờ kích hoạt.</PanelEmpty>
-          ) : (
-            <div className="divide-y divide-gray-100 dark:divide-slate-700">
-              {stats!.provisioning_queue.map((h) => (
-                <div key={h.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-gray-900 dark:text-slate-100">{h.name}</p>
-                    <p className="truncate text-xs text-gray-400 dark:text-slate-500">
-                      {h.package} · {h.address || "Chưa có địa chỉ"} · tạo {formatRelative(h.created_at, "—")}
-                    </p>
-                  </div>
-                  <Link href={`/smart-homes/${h.id}`} className={BTN_SM}>
-                    Xem <ArrowRight size={11} />
-                  </Link>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
-
+      <div className="grid gap-3">
         {/* Active access grants */}
         <Panel title="Nhà đang hỗ trợ" subtitle="Quyền truy cập có thời hạn của bạn (Operator Home Access).">
           {(stats?.active_access_grants ?? []).length === 0 ? (
@@ -110,7 +84,7 @@ export default function OperatorDashboardPage() {
       </div>
 
       {/* Recent operational logs */}
-      <Panel title="Sự kiện vận hành gần đây" subtitle="10 sự kiện mới nhất của Gateway, Device, Provision, Automation và OTA.">
+      <Panel title="Sự kiện vận hành gần đây" subtitle="10 sự kiện mới nhất của Gateway, Device và Provision.">
         {(stats?.recent_logs ?? []).length === 0 ? (
           <PanelEmpty>Chưa có sự kiện vận hành nào.</PanelEmpty>
         ) : (

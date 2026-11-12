@@ -25,6 +25,7 @@ import { listMembersController } from "./features/list-members/list-members.cont
 import { listMyHomesController } from "./features/list-my-homes/list-my-homes.controller";
 import { listOperatorGrantsController } from "./features/list-operator-grants/list-operator-grants.controller";
 import { listSmartHomesController } from "./features/list-smart-homes/list-smart-homes.controller";
+import { registerGatewayController } from "./features/register-gateway/register-gateway.controller";
 import { removeMemberController } from "./features/remove-member/remove-member.controller";
 import { renameRoomController } from "./features/rename-room/rename-room.controller";
 import { requestHomeAccessController } from "./features/request-home-access/request-home-access.controller";
@@ -40,6 +41,9 @@ export const homesModule: AppModule = {
     const smartHomes = Router();
     smartHomes.get("/", listSmartHomesController);
     smartHomes.post("/", createSmartHomeController);
+    // Đăng ký gateway + node/camera thật cho một khách hàng (Admin + Operator). Khai báo trước "/:id" cho dễ đọc —
+    // POST không khớp route GET/PATCH "/:id" nào.
+    smartHomes.post("/register-gateway", registerGatewayController);
     smartHomes.get("/:id", getSmartHomeDetailController);
     smartHomes.patch("/:id", updateSmartHomeController);
     smartHomes.post("/:id/assign-owner", assignOwnerController);
