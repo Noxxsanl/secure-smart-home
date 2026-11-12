@@ -9,7 +9,8 @@ import DeviceIcon from "./DeviceIcon";
 import DeviceReading from "./DeviceReading";
 import OpenCloseButtons from "./OpenCloseButtons";
 import type { DevicePowerControl } from "../model/power";
-import { APPLIANCE_TEXT, applianceKind } from "../model/appliance";
+import AcSetpointControl from "./AcSetpointControl";
+import { APPLIANCE_TEXT, applianceKind, isAirConditioner } from "../model/appliance";
 
 type DeviceCardProps = {
   device: CustomerDevice;
@@ -56,6 +57,7 @@ export default function DeviceCard({ device, power, showRoom = true }: DeviceCar
       </Link>
 
       {!isRelay && <DeviceReading device={device} />}
+      {isRelay && isAirConditioner(device) && <AcSetpointControl device={device} power={power} />}
 
       <div className="flex items-center justify-between gap-2 text-xs">
         {device.status === "blocked" ? (

@@ -4,7 +4,7 @@ import pool from "./pool";
 // Hệ thống migration tuần tự đơn giản cho PostgreSQL.
 // BASELINE = infra/postgres/migrations/001_schema.sql (schema V2 đầy đủ, nạp lúc khởi tạo volume Docker hoặc
 // chạy tay theo docs/guides/CHAY_LOCAL.md). Mảng `migrations` chỉ chứa thay đổi SAU baseline (30 entry MySQL cũ
-// đã được gộp vào 001_schema.sql); hiện có bảng camera_snapshots (module camera).
+// đã được gộp vào 001_schema.sql); hiện có bảng camera_snapshots (module camera) và cột devices.appliance/ac_setpoint/ac_codes (điều hoà IR).
 //
 // Mỗi entry chỉ được áp dụng đúng một lần, theo dõi qua bảng _migrations.
 // QUY TẮC: chỉ THÊM vào cuối mảng, mỗi entry đúng 1 câu SQL, không sửa/xoá/đổi tên entry cũ.
@@ -49,6 +49,22 @@ const migrations: { name: string; sql: string }[] = [
   {
     name: "add_idx_camera_snapshots_home",
     sql: "CREATE INDEX IF NOT EXISTS idx_camera_snapshots_home ON camera_snapshots (home_id)",
+  },
+  // Điều hoà điều khiển thật qua IR (Node phòng khách học mã IR rồi phát lại): relay của Node mang loại đồ gia dụng
+  // và (điều hoà) nhiệt độ đặt. Giữ đúng tên/cột với 001_schema.sql. ADD COLUMN IF NOT EXISTS bỏ qua cả cột lẫn CHECK
+  // khi cột đã có (DB tạo từ baseline).
+  {
+    name: "add_appliance_to_devices",
+    sql: "ALTER TABLE devices ADD COLUMN IF NOT EXISTS appliance VARCHAR(16) NULL CONSTRAINT ck_devices_appliance CHECK (appliance IN ('lamp','fan','curtain','ac'))",
+  },
+  {
+    name: "add_ac_setpoint_to_devices",
+    sql: "ALTER TABLE devices ADD COLUMN IF NOT EXISTS ac_setpoint SMALLINT NULL CONSTRAINT ck_devices_ac_setpoint CHECK (ac_setpoint BETWEEN 16 AND 30)",
+  },
+  // Mã IR điều hoà Node đã học (bitmask): bit 0 = mã TẮT, bit (t - 15) = mã BẬT-làm-lạnh ở t°C (t = 16..30). NULL = chưa học/chưa biết.
+  {
+    name: "add_ac_codes_to_devices",
+    sql: "ALTER TABLE devices ADD COLUMN IF NOT EXISTS ac_codes INTEGER NULL CONSTRAINT ck_devices_ac_codes CHECK (ac_codes BETWEEN 0 AND 65535)",
   },
 ];
 

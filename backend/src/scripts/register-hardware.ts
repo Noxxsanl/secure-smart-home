@@ -1,6 +1,6 @@
 // Đăng ký PHẦN CỨNG THẬT vào DB dev: đọc file NVS CSV của gateway (định dạng nvs_partition_gen: key,type,encoding,value)
 // và tạo/cập nhật nhà + phòng (Phòng khách, Camera) + thiết bị (gateway, node nhiệt/ẩm, camera) khớp đúng device_id/secret
-// đã nạp vào chip, kèm 4 relay MÔ PHỎNG của phòng khách (đèn, quạt, rèm, điều hoà — xem LIVING_ROOM_APPLIANCES).
+// đã nạp vào chip, kèm 4 relay của phòng khách (đèn, quạt, rèm: MÔ PHỎNG; điều hoà: THẬT qua IR — xem LIVING_ROOM_APPLIANCES).
 //   npm run hw:register -- [--nvs <đường dẫn csv>] [--owner <email>] [--home-name <tên nhà>] [--force]
 // Mặc định: --nvs ../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/nvs_dev.csv (tính từ thư mục
 // backend), --owner user01@smarthome.local, --home-name "Nhà demo phần cứng".
@@ -128,15 +128,17 @@ const CAMERA_NAME = "Camera";
 const LEGACY_CAMERA_NAME = "Camera cửa chính";
 
 // Thiết bị điều khiển của phòng khách (màn hình Gateway trang Phòng khách đọc cùng 4 trường lamp/fan/curtain/ac).
-// Node phòng khách CHƯA nhận lệnh relay/IR nên tạm là relay MÔ PHỎNG (is_simulated) — bật/tắt chạy thật qua simulator,
-// không gửi gì xuống phần cứng. Khi firmware node hỗ trợ lệnh, đặt is_simulated = FALSE cho các dòng này.
-// device_id = "<id node phòng khách>-<hậu tố>"; tên chứa từ khoá ("Đèn", "Quạt", "Rèm", "Điều hòa") để web/mobile chọn
-// đúng kiểu điều khiển.
+// Điều hoà là thiết bị THẬT (is_simulated = FALSE): Node phòng khách học mã IR remote rồi phát lại; lệnh bật/tắt/đặt nhiệt
+// độ đi MQTT xuống gateway → Node, còn trạng thái online/bật/nhiệt độ đồng bộ từ telemetry của Node (telemetry/ingest-common).
+// Đèn/quạt/rèm CHƯA có phần cứng nhận lệnh nên vẫn là relay MÔ PHỎNG (is_simulated) — bật/tắt chạy qua simulator, không gửi
+// gì xuống phần cứng; khi firmware hỗ trợ thì đặt `simulated: false` cho dòng tương ứng.
+// device_id = "<id node phòng khách>-<suffix>" và cột devices.appliance = suffix (ingest dựa vào cặp này để tìm điều hoà
+// của Node); tên chứa từ khoá ("Đèn", "Quạt", "Rèm", "Điều hòa") để web/mobile chọn đúng kiểu điều khiển.
 const LIVING_ROOM_APPLIANCES = [
-  { suffix: "lamp", name: "Đèn phòng khách" },
-  { suffix: "fan", name: "Quạt phòng khách" },
-  { suffix: "curtain", name: "Rèm cửa phòng khách" },
-  { suffix: "ac", name: "Điều hòa phòng khách" },
+  { suffix: "lamp", name: "Đèn phòng khách", simulated: true },
+  { suffix: "fan", name: "Quạt phòng khách", simulated: true },
+  { suffix: "curtain", name: "Rèm cửa phòng khách", simulated: true },
+  { suffix: "ac", name: "Điều hòa phòng khách", simulated: false },
 ] as const;
 
 async function findOwner(conn: PoolClient, email: string): Promise<number> {
@@ -319,6 +321,10 @@ function applianceUid(nodeUid: string, suffix: string): string {
 
 interface ApplianceSpec {
   uid: string;
+  /** Hậu tố của uid, đồng thời là giá trị devices.appliance. */
+  appliance: (typeof LIVING_ROOM_APPLIANCES)[number]["suffix"];
+  /** true = relay mô phỏng (simulator ack); false = thiết bị thật (lệnh đi MQTT). */
+  simulated: boolean;
   name: string;
   roomId: number;
   roomName: string;
@@ -326,9 +332,11 @@ interface ApplianceSpec {
 }
 
 /**
- * Upsert một relay MÔ PHỎNG của phòng khách (LIVING_ROOM_APPLIANCES). Lần đầu: sinh secret ngẫu nhiên (cột NOT NULL,
- * relay mô phỏng không ký gì, không bao giờ in ra), power_state = FALSE để UI có công tắc. Chạy lại: giữ secret, tên
- * khách đã đặt và trạng thái bật/tắt; chỉ gắn lại nhà/phòng/gateway. Đã thuộc nhà khác → như upsertDevice.
+ * Upsert một relay của phòng khách (LIVING_ROOM_APPLIANCES). Lần đầu: sinh secret ngẫu nhiên (cột NOT NULL, relay không
+ * tự ký gì — lệnh ký bằng secret gateway — và secret không bao giờ in ra), power_state = FALSE để UI có công tắc. Chạy lại:
+ * giữ secret, tên khách đã đặt, trạng thái bật/tắt và ac_setpoint; gắn lại nhà/phòng/gateway/appliance. Chế độ mô phỏng
+ * chỉ đổi một chiều mô phỏng → thật (điều hoà đang mô phỏng từ bản cũ được chuyển sang thật), không bao giờ bật lại mô
+ * phỏng cho dòng đã thật. Đã thuộc nhà khác → như upsertDevice.
  */
 async function upsertAppliance(
   conn: PoolClient,
@@ -346,21 +354,34 @@ async function upsertAppliance(
     if (!force) throw new DeviceInOtherHomeError(spec.uid, existing.home_id);
     console.warn(`[hw:register] --force: ${spec.uid} đang thuộc nhà id=${existing.home_id}, chuyển sang nhà id=${homeId}`);
   }
-  // Đã chuyển sang phần cứng thật (is_simulated = FALSE) thì không bật lại chế độ mô phỏng
+  // Dòng thật (simulated = FALSE) mới tạo có last_seen NULL = offline cho tới khi telemetry của Node cha tới
   const row = await queryOne<{ id: number; device_name: string; is_simulated: boolean }>(
     `INSERT INTO devices
        (device_id, device_name, device_type, secret_key, status, location, fail_count, created_by,
-        home_id, room_id, gateway_device_id, category, power_state, provision_status, is_simulated, sim_online)
-     VALUES (?, ?, 'sensor', ?, 'active', ?, 0, ?, ?, ?, ?, 'relay', FALSE, 'provisioned', TRUE, TRUE)
+        home_id, room_id, gateway_device_id, category, appliance, power_state, provision_status, is_simulated, sim_online)
+     VALUES (?, ?, 'sensor', ?, 'active', ?, 0, ?, ?, ?, ?, 'relay', ?, FALSE, 'provisioned', ?, TRUE)
      ON CONFLICT (device_id) DO UPDATE SET
        category = 'relay',
+       appliance = EXCLUDED.appliance,
+       is_simulated = CASE WHEN EXCLUDED.is_simulated = FALSE THEN FALSE ELSE devices.is_simulated END,
        location = EXCLUDED.location,
        home_id = EXCLUDED.home_id,
        room_id = EXCLUDED.room_id,
        gateway_device_id = EXCLUDED.gateway_device_id,
        power_state = COALESCE(devices.power_state, FALSE)
      RETURNING id, device_name, is_simulated`,
-    [spec.uid, spec.name, crypto.randomBytes(16).toString("hex"), spec.roomName, ownerId, homeId, spec.roomId, spec.gatewayDbId],
+    [
+      spec.uid,
+      spec.name,
+      crypto.randomBytes(16).toString("hex"),
+      spec.roomName,
+      ownerId,
+      homeId,
+      spec.roomId,
+      spec.gatewayDbId,
+      spec.appliance,
+      spec.simulated,
+    ],
     conn
   );
   if (!row) throw new Error("Upsert returned no row");
@@ -368,7 +389,7 @@ async function upsertAppliance(
     uid: spec.uid,
     id: row.id,
     name: row.device_name,
-    category: row.is_simulated ? "relay (mô phỏng)" : "relay",
+    category: row.is_simulated ? "relay (mô phỏng)" : "relay (thật)",
     roomName: spec.roomName,
     unblocked: false,
   };
@@ -437,6 +458,8 @@ async function main(): Promise<void> {
         devices.push(
           await upsertAppliance(conn, home.id, ownerId, {
             uid: applianceUid(livingNode.uid, appliance.suffix),
+            appliance: appliance.suffix,
+            simulated: appliance.simulated,
             name: appliance.name,
             roomId: livingRoomId,
             roomName: LIVING_ROOM.name,

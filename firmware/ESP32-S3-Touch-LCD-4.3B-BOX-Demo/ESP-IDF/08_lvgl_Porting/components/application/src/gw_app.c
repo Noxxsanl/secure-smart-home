@@ -52,6 +52,8 @@ static const char *TAG = "gw_app";
 #define LINK_BOOT_GRACE_US (60 * 1000 * 1000LL)   /* sau khởi động: thiết bị chưa gửi gói vẫn tính "đang kết nối" */
 #define HEARTBEAT_US ((int64_t)CONFIG_GW_HEARTBEAT_INTERVAL_S * 1000 * 1000)
 #define ACK_TIMEOUT_US ((int64_t)CONFIG_GW_NODE_ACK_TIMEOUT_MS * 1000)
+/* Học mã IR (learn_off, learn_t<NN>): node chờ người dùng bấm remote tới 10 s rồi mới ack (Server chờ 15 s). */
+#define LEARN_ACK_TIMEOUT_US ((int64_t)14000 * 1000)
 #define MOTION_WAIT_US ((int64_t)CONFIG_GW_MOTION_SNAPSHOT_WAIT_S * 1000 * 1000)
 #define LOCAL_TZ "<+07>-7"        /* giờ Việt Nam cho màn hình; giờ hệ thống và HMAC vẫn là UTC */
 #define LIVE_REOPEN_MIN_US (5 * 1000 * 1000LL)    /* luồng hỏng hẳn: thử mở lại sau 5 s, */
@@ -144,6 +146,7 @@ typedef struct {
     bool used;
     char command_id[ID_MAX + 1];
     char home[GW_HOME_ID_MAX + 1];
+    char device_id[ID_MAX + 1];   /* UID trong topic lệnh — ack trả về topic này (node hoặc "<node>-ac") */
     size_t idx;
     int64_t deadline_us;
 } pending_t;
@@ -529,7 +532,7 @@ static void handle_cmd_ack(const app_event_t *ev)
         pending_t *p = &s_pending[i];
         /* Khớp cả command_id lẫn thiết bị: node khác không ack thay được. */
         if (p->used && p->idx == ev->ack.idx && strcmp(p->command_id, ev->ack.command_id) == 0) {
-            publish_ack(p->home, dev->device_id, p->command_id, ev->ack.ok, ev->ack.power);
+            publish_ack(p->home, p->device_id, p->command_id, ev->ack.ok, ev->ack.power);
             p->used = false;
             return;
         }
@@ -563,6 +566,43 @@ static void handle_snapshot(const app_event_t *ev)
     }
 }
 
+/*
+ * Thiết bị nhận lệnh: UID của node/camera đã ghép nối, hoặc "<node_id>-<thiết bị con>" — thiết bị node điều khiển
+ * (Server tạo các dòng này: register-hardware.ts, applianceUid). Thiết bị con chỉ thuộc node, không thuộc camera.
+ */
+static int find_cmd_target(const char *device_id, const char **target)
+{
+    *target = NULL;
+    int idx = gw_registry_find_id(device_id);
+    if (idx >= 0) {
+        return idx;
+    }
+    static const char *const subs[] = {"lamp", "fan", "curtain", "ac"};
+    const char *dash = strrchr(device_id, '-');
+    if (dash == NULL || dash == device_id) {
+        return -1;
+    }
+    for (size_t i = 0; i < sizeof(subs) / sizeof(subs[0]); i++) {
+        if (strcmp(dash + 1, subs[i]) != 0) {
+            continue;
+        }
+        char base[ID_MAX + 1];
+        size_t len = (size_t)(dash - device_id);
+        if (len >= sizeof(base)) {
+            return -1;
+        }
+        memcpy(base, device_id, len);
+        base[len] = '\0';
+        idx = gw_registry_find_id(base);
+        if (idx < 0 || gw_registry_get((size_t)idx)->kind != GW_DEV_NODE) {
+            return -1;
+        }
+        *target = subs[i];
+        return idx;
+    }
+    return -1;
+}
+
 static void handle_device_cmd(const app_event_t *ev)
 {
     const char *home = ev->dcmd.home;
@@ -571,7 +611,8 @@ static void handle_device_cmd(const app_event_t *ev)
     const char *action = ev->dcmd.action;
     learn_home(home);
 
-    int idx = gw_registry_find_id(dev_id);
+    const char *target = NULL;
+    int idx = find_cmd_target(dev_id, &target);
     if (idx < 0) {
         ESP_LOGW(TAG, "command %s: device %s is not paired with this gateway", cmd, dev_id);
         publish_ack(home, dev_id, cmd, false, -1);
@@ -596,14 +637,16 @@ static void handle_device_cmd(const app_event_t *ev)
         publish_ack(home, dev_id, cmd, false, -1);
         return;
     }
-    if (gw_espnow_send_cmd((size_t)idx, cmd, action, now) != ESP_OK) {
+    if (gw_espnow_send_cmd((size_t)idx, cmd, action, target, now) != ESP_OK) {
         ESP_LOGW(TAG, "command %s: %s unreachable over ESP-NOW", cmd, dev_id);
         publish_ack(home, dev_id, cmd, false, -1);
         return;
     }
-    *slot = (pending_t){.used = true, .idx = (size_t)idx, .deadline_us = esp_timer_get_time() + ACK_TIMEOUT_US};
+    const int64_t wait_us = strncmp(action, "learn_", 6) == 0 ? LEARN_ACK_TIMEOUT_US : ACK_TIMEOUT_US;
+    *slot = (pending_t){.used = true, .idx = (size_t)idx, .deadline_us = esp_timer_get_time() + wait_us};
     strlcpy(slot->command_id, cmd, sizeof(slot->command_id));
     strlcpy(slot->home, home, sizeof(slot->home));
+    strlcpy(slot->device_id, dev_id, sizeof(slot->device_id));   /* ack về đúng UID Server đã gửi (kể cả "-ac") */
     ESP_LOGI(TAG, "command %s → %s (%s), waiting CMD_ACK", cmd, dev_id, action);
 }
 
@@ -721,9 +764,8 @@ static void tick(void)
         pending_t *p = &s_pending[i];
         if (p->used && now_us >= p->deadline_us) {
             const gw_device_info_t *dev = gw_registry_get(p->idx);
-            ESP_LOGW(TAG, "command %s: no CMD_ACK from %s within %d ms", p->command_id, dev->device_id,
-                     CONFIG_GW_NODE_ACK_TIMEOUT_MS);
-            publish_ack(p->home, dev->device_id, p->command_id, false, -1);
+            ESP_LOGW(TAG, "command %s: no CMD_ACK from %s within the ack timeout", p->command_id, dev->device_id);
+            publish_ack(p->home, p->device_id, p->command_id, false, -1);
             p->used = false;
         }
     }

@@ -4,7 +4,7 @@
 // UPDATE devices mà gọi các hàm "ghi trạng thái" bên dưới, truyền `db` khi đang trong transaction của mình.
 import type { Queryable } from "../../infrastructure/database/db";
 import type { DeviceRow } from "./domain/device.types";
-import { markProvisioned, updatePowerState } from "./infrastructure/device.repository";
+import { markProvisioned, orAcCodes, updateAcSetpoint, updatePowerState } from "./infrastructure/device.repository";
 
 // ── Đọc thiết bị (read model) ───────────────────────────────────────────────
 export {
@@ -61,3 +61,30 @@ export async function markDevicesProvisioned(rows: readonly DeviceRow[], db?: Qu
 export async function setDevicePowerState(deviceDbId: number, power: boolean, db?: Queryable): Promise<void> {
   await updatePowerState(deviceDbId, power, db);
 }
+
+/** Đánh dấu một ô mã IR đã học: ac_codes = COALESCE(ac_codes, 0) | mask (NULL coi như 0). */
+export async function setDeviceAcCodesBit(deviceDbId: number, mask: number, db?: Queryable): Promise<void> {
+  await orAcCodes(deviceDbId, mask, db);
+}
+
+/** Nhiệt độ đặt của điều hoà sau khi thiết bị ack lệnh set_temp. */
+export async function setDeviceAcSetpoint(deviceDbId: number, setpoint: number, db?: Queryable): Promise<void> {
+  await updateAcSetpoint(deviceDbId, setpoint, db);
+}
+
+// ── Điều hoà IR / relay thật của Node ───────────────────────────────────────
+export {
+  AC_SETPOINT_MAX,
+  AC_SETPOINT_MIN,
+  isValidAcCodes,
+  isValidAcSetpoint,
+  learnSlotMask,
+  parseLearnAction,
+  parseSetTempAction,
+  toLearnAction,
+  toSetTempAction,
+} from "./domain/appliance";
+export type { LearnSlot } from "./domain/appliance";
+/** Telemetry của Node → last_seen + trạng thái các relay thật của nó (điều hoà); dùng chung ingest HTTP + MQTT. */
+export { syncNodeAppliances } from "./domain/appliance-sync";
+export type { NodeApplianceReport } from "./domain/appliance-sync";

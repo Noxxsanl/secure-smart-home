@@ -6,7 +6,11 @@
  *                 {temperature, humidity} → Gateway (hiện ở trang Phòng khách, chuyển tiếp lên Server).
  *
  * Chưa cấp phát (NVS thiếu identity) hoặc chưa ghép nối (thiếu MAC Gateway / LMK): màn hình và cảm biến vẫn chạy,
- * góc phải màn hình báo "Chưa ghép nối Gateway". Lệnh CMD từ Gateway: chưa có relay/IR (chờ chốt GPIO) nên trả lỗi.
+ * góc phải màn hình báo "Chưa ghép nối Gateway".
+ *
+ * Điều hòa (node_ac): học mã remote bằng VS1838B, phát lại bằng LED IR — điều khiển trên màn hình (chạm ô Điều hòa)
+ * hoặc từ Server (CMD có params.target = "ac"). Trạng thái gửi kèm telemetry: ac (0/1), ac_temp (°C).
+ * Đèn/quạt/rèm: chưa có relay nên CMD tới chúng trả lỗi.
  */
 #pragma once
 

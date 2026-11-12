@@ -19,6 +19,7 @@ static const char *TAG = "drv_display";
 #define TASK_MAX_DELAY_MS 500
 
 static SemaphoreHandle_t s_lock;
+static drv_ili9488_handle_t s_lcd;   /* để chờ LCD rảnh trước khi đọc cảm ứng (chung bus SPI) */
 static lv_disp_draw_buf_t s_draw_buf;   /* LVGL giữ con trỏ tới các biến này suốt đời màn hình */
 static lv_disp_drv_t s_disp_drv;
 static lv_indev_drv_t s_touch_drv;
@@ -44,12 +45,16 @@ static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *colo
     lv_disp_flush_ready(drv);
 }
 
-/* Chạy trong task LVGL (đang giữ khoá) — nối tiếp với flush nên LCD và cảm ứng không tranh bus trong cùng task. */
+/*
+ * Chạy trong task LVGL (đang giữ khoá), nối tiếp với flush. flush_cb trả về khi các khúc màu còn đang truyền DMA,
+ * nên chờ LCD rảnh trước khi cảm ứng đọc bằng polling trên cùng bus SPI.
+ */
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
     int x = 0;
     int y = 0;
     bool pressed = false;
+    drv_ili9488_wait_idle(s_lcd);
     if (drv_xpt2046_read(drv->user_data, &x, &y, &pressed) == ESP_OK && pressed) {
         data->point.x = (lv_coord_t)x;
         data->point.y = (lv_coord_t)y;
@@ -161,6 +166,7 @@ esp_err_t drv_display_init(drv_ili9488_handle_t lcd, const drv_display_config_t 
     s_disp_drv.flush_cb = flush_cb;
     s_disp_drv.draw_buf = &s_draw_buf;
     s_disp_drv.user_data = drv_ili9488_panel(lcd);
+    s_lcd = lcd;
     disp = lv_disp_drv_register(&s_disp_drv);
     ESP_GOTO_ON_FALSE(disp, ESP_ERR_NO_MEM, err, TAG, "lv_disp_drv_register failed");
 

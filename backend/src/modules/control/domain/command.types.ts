@@ -1,6 +1,6 @@
 // Kiểu công khai của domain điều khiển (CONTRACT_V2 §4.2 commands, §5 Gateways, §7 MQTT).
 import type { RequestMeta } from "../../../core/http/request-meta";
-import type { DeviceAction, DeviceRow, GatewayAction } from "../../devices";
+import type { DeviceCommandAction, DeviceRow, GatewayAction } from "../../devices";
 import type { BehaviorSource } from "./behavior.types";
 
 export type CommandSource = "user" | "automation" | "operator";
@@ -8,7 +8,8 @@ export type CommandChannel = "mobile" | "web" | "dashboard" | "system";
 
 export interface SendDeviceCommandInput {
   deviceId: number;
-  action: DeviceAction;
+  /** turn_on | turn_off | set_temp_<16..30> | learn_off | learn_t<16..30> (3 loại sau chỉ điều hoà). */
+  action: DeviceCommandAction;
   /** users.id người ra lệnh (null khi automation/hệ thống). */
   issuedBy: number | null;
   source: CommandSource;
@@ -22,7 +23,7 @@ export interface SendDeviceCommandInput {
 /** Khớp CONTRACT §4.2: `command: { id, action, status: "acked", issued_at, acked_at }`. */
 export interface CommandSummary {
   id: number;
-  action: DeviceAction;
+  action: DeviceCommandAction;
   status: "acked";
   issued_at: string;
   acked_at: string;
@@ -36,7 +37,7 @@ export interface SendDeviceCommandResult {
 
 /** Lệnh gửi tới handler của simulator (thiết bị is_simulated=1 không đi qua MQTT). */
 export type SimulatedCommand =
-  | { kind: "device"; commandId: string; device: DeviceRow; action: DeviceAction }
+  | { kind: "device"; commandId: string; device: DeviceRow; action: DeviceCommandAction }
   | { kind: "gateway"; commandId: string; device: DeviceRow; action: GatewayAction };
 
 /** Handler trả ack như một thiết bị thật: simulator tự chờ 300–900 ms rồi resolve. */

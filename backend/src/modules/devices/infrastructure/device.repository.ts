@@ -76,3 +76,57 @@ export async function markProvisioned(deviceIds: readonly number[], db: Queryabl
 export async function updatePowerState(deviceDbId: number, power: boolean, db: Queryable = pool): Promise<void> {
   await runSql("UPDATE devices SET power_state = ? WHERE id = ?", [power, deviceDbId], db);
 }
+
+/** Nhiệt độ đặt của điều hoà sau khi thiết bị ack lệnh set_temp (CHECK 16..30 ở DB). */
+export async function updateAcSetpoint(deviceDbId: number, setpoint: number, db: Queryable = pool): Promise<void> {
+  await runSql("UPDATE devices SET ac_setpoint = ? WHERE id = ?", [setpoint, deviceDbId], db);
+}
+
+/** Bật thêm bit mã IR đã học: ac_codes = COALESCE(ac_codes, 0) | mask (một câu nguyên tử, NULL coi như 0). */
+export async function orAcCodes(deviceDbId: number, mask: number, db: Queryable = pool): Promise<void> {
+  await runSql("UPDATE devices SET ac_codes = COALESCE(ac_codes, 0) | ? WHERE id = ?", [mask, deviceDbId], db);
+}
+
+export interface NodeApplianceRow {
+  id: number;
+  appliance: string;
+  power_state: boolean | null;
+  ac_setpoint: number | null;
+  ac_codes: number | null;
+  last_seen: Date | null;
+}
+
+/**
+ * Các thiết bị THẬT (is_simulated = FALSE) gắn với một Node: cùng nhà và device_id = "<node_uid>-<appliance>"
+ * (quy ước của scripts/register-hardware.ts). Node là chủ của chúng nên telemetry của Node cũng là bằng chứng
+ * "còn sống" của các relay này (chúng không tự gửi gì lên backend).
+ */
+export async function listNodeAppliances(nodeDbId: number, db: Queryable = pool): Promise<NodeApplianceRow[]> {
+  return queryRows<NodeApplianceRow>(
+    `SELECT a.id, a.appliance, a.power_state, a.ac_setpoint, a.ac_codes, a.last_seen
+       FROM devices n
+       JOIN devices a ON a.home_id = n.home_id
+                     AND a.is_simulated = FALSE
+                     AND a.appliance IS NOT NULL
+                     AND a.device_id = n.device_id || '-' || a.appliance
+      WHERE n.id = ? AND n.home_id IS NOT NULL
+      ORDER BY a.id`,
+    [nodeDbId],
+    db
+  );
+}
+
+/** last_seen = NOW() cho một relay của Node, ghi kèm power_state/ac_setpoint/ac_codes (giữ nguyên giá trị cũ nếu truyền lại). */
+export async function touchAppliance(
+  deviceDbId: number,
+  power: boolean | null,
+  setpoint: number | null,
+  acCodes: number | null,
+  db: Queryable = pool
+): Promise<void> {
+  await runSql(
+    "UPDATE devices SET last_seen = NOW(), power_state = ?, ac_setpoint = ?, ac_codes = ? WHERE id = ?",
+    [power, setpoint, acCodes, deviceDbId],
+    db
+  );
+}

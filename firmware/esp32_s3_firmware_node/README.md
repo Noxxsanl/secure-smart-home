@@ -4,7 +4,7 @@ Firmware ESP-IDF v5.4.4 cho Node phòng khách: cảm biến I2C, mic INMP441, l
 
 Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.1, §4.3, §5.1, §6.1, §6.3, §7. Hợp đồng ESP-NOW: [API_DESIGN](../../docs/API_DESIGN.md) §11. Lệnh build/nạp chung: [ESP_IDF_BUILD](../../docs/guides/ESP_IDF_BUILD.md).
 
-> **Trạng thái:** đã có **thư viện** (`components/drivers`, `components/services`) và **luồng chính `components/application` (`node_app`)**: TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 + LVGL 8.4.0 (cùng bản Gateway), hiện 2 ô **nhiệt độ / độ ẩm từ SHT31** (mục [Cảm biến nhiệt độ, độ ẩm](#cảm-biến-nhiệt-độ-độ-ẩm-sht31)) cùng phần kiểm tra cảm ứng, tiếng Việt (mục [Màn hình](#màn-hình)). Nhiệt độ/độ ẩm gửi về Gateway qua **ESP-NOW** (TELEMETRY có HMAC, mục [Ghép nối Gateway](#ghép-nối-gateway-nạp-nvs-giai-đoạn-dev)), Gateway hiện ở trang Phòng khách. Chân màn hình và I2C chỉnh trong menuconfig, mặc định theo PCB. Relay, IR, âm thanh, cảm biến khác chưa khởi động, đợi chốt sơ đồ chân (mục [Khi chốt GPIO](#khi-chốt-gpio)). Đã biên dịch bằng ESP-IDF 5.4.4 (0 warning); thư viện chưa gọi tới đã kiểm link bằng `-Wl,-u` (67 hàm services/drivers). **Đã chạy trên PCB** (2026-11-09, COM8): màn hình, SHT31 OK; **đầu-cuối Node → Gateway đã chạy** (Gateway log `TELEMETRY node-living-01 verified` mỗi 10 s, hiện ở trang Phòng khách); cảm ứng chưa đọc được (T_DO luôn 0 khi SDO của LCD còn nối chung GPIO12; nay SDO để trống, GPIO12 chỉ nối T_DO — chưa thử lại trên board). Gateway chưa chuyển tiếp được lên Server (thiếu CA, `node-living-01` chưa có trên backend).
+> **Trạng thái:** đã có **thư viện** (`components/drivers`, `components/services`) và **luồng chính `components/application` (`node_app`)**: TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 + LVGL 8.4.0 (cùng bản Gateway), hiện 2 ô **nhiệt độ / độ ẩm từ SHT31** (mục [Cảm biến nhiệt độ, độ ẩm](#cảm-biến-nhiệt-độ-độ-ẩm-sht31)), 4 ô trạng thái Đèn/Quạt/Rèm cửa/Điều hòa cùng phần kiểm tra cảm ứng; **điều hòa qua hồng ngoại** (VS1838B GPIO1 học mã remote, LED IR GPIO2 phát lại; chạm ô Điều hòa để điều khiển / học mã, Server điều khiển qua Gateway — xem [Học mã IR điều hòa](../../docs/guides/HOC_MA_IR_DIEU_HOA.md)), tiếng Việt (mục [Màn hình](#màn-hình)). Nhiệt độ/độ ẩm gửi về Gateway qua **ESP-NOW** (TELEMETRY có HMAC, mục [Ghép nối Gateway](#ghép-nối-gateway-nạp-nvs-giai-đoạn-dev)), Gateway hiện ở trang Phòng khách. Chân màn hình và I2C chỉnh trong menuconfig, mặc định theo PCB. Relay, âm thanh, cảm biến khác chưa khởi động, đợi chốt sơ đồ chân (mục [Khi chốt GPIO](#khi-chốt-gpio)). Đã biên dịch bằng ESP-IDF 5.4.4 (0 warning); thư viện chưa gọi tới đã kiểm link bằng `-Wl,-u` (67 hàm services/drivers). **Đã chạy trên PCB** (2026-11-09, COM8): màn hình, SHT31 OK; **đầu-cuối Node → Gateway đã chạy** (Gateway log `TELEMETRY node-living-01 verified` mỗi 10 s, hiện ở trang Phòng khách); cảm ứng chưa đọc được (T_DO luôn 0 khi SDO của LCD còn nối chung GPIO12; nay SDO để trống, GPIO12 chỉ nối T_DO — chưa thử lại trên board). Gateway chưa chuyển tiếp được lên Server (thiếu CA, `node-living-01` chưa có trên backend).
 
 ## Cấu trúc
 
@@ -19,14 +19,15 @@ esp32_s3_firmware_node/
 │   ├── CMakeLists.txt
 │   └── app_main.c               # chỉ gọi node_app_start()
 └── components/
-    ├── application/             # node_app: NVS → màn hình → ESP-NOW; task climate (SHT31 → màn hình, TELEMETRY → Gateway)
+    ├── application/             # node_app: NVS → màn hình → ESP-NOW; task climate (SHT31 → màn hình, TELEMETRY → Gateway); node_ac: điều hòa IR
     │   └── Kconfig.projbuild    # menu "Node S3: ứng dụng": chu kỳ gửi về Gateway
     ├── board/                   # chỗ DUY NHẤT có số chân GPIO
     │   ├── Kconfig.projbuild    # menu "Node S3: màn hình" (chân, hướng, xung nhịp, hiệu chuẩn cảm ứng) + "cảm biến I2C"
     │   ├── include/             # board_display.h, board_sensors.h
     │   └── src/
     │       ├── board_display.c  # SPI2 → ILI9488 → LVGL → XPT2046 (như gw_display của Gateway)
-    │       └── board_sensors.c  # I2C0 (SDA 15, SCL 7) → SHT31, tự tìm 0x44/0x45
+    │       ├── board_sensors.c  # I2C0 (SDA 15, SCL 7) → SHT31, tự tìm 0x44/0x45
+    │       └── board_ir.c       # VS1838B (RMT RX + DMA, GPIO1) + LED IR 940 nm (RMT TX 38 kHz, GPIO2)
     ├── drivers/                 # phần cứng, chia theo THIẾT BỊ; chân GPIO truyền qua *_config_t
     │   ├── idf_component.yml    # lvgl/lvgl ~8.4.0 từ ESP Registry (cùng bản Gateway)
     │   ├── include/             # drv_bus.h, drv_sht3x.h, drv_aht20.h, drv_bh1750.h, drv_mic.h,
@@ -40,7 +41,7 @@ esp32_s3_firmware_node/
     │   └── src/
     └── ui/                      # giao diện LVGL (như components/ui của Gateway)
         ├── include/node_ui.h
-        ├── src/node_ui.c        # ô nhiệt độ/độ ẩm + phần kiểm tra cảm ứng (chấm theo ngón tay, toạ độ, nút bấm thử)
+        ├── src/node_ui.c        # ô nhiệt độ/độ ẩm, 4 ô thiết bị (đèn, quạt, rèm, điều hòa), kiểm tra cảm ứng (chấm + toạ độ)
         └── fonts/               # node_font_vi_16/24.c (tiếng Việt có dấu) + gen_fonts.sh
 
 ../common/                       # dùng chung với Gateway/Camera
@@ -48,7 +49,7 @@ esp32_s3_firmware_node/
 └── espnow_proto/                # khung ESP-NOW {ver, type, seq, body JSON} ≤ 250 byte
 ```
 
-`board` hiện có màn hình và SHT31. Sau khi chốt GPIO sẽ thêm chân các thiết bị còn lại vào `board`, nối vào `application` (mục [Khi chốt GPIO](#khi-chốt-gpio)).
+`board` hiện có màn hình, SHT31 và hồng ngoại. Sau khi chốt GPIO sẽ thêm chân các thiết bị còn lại vào `board`, nối vào `application` (mục [Khi chốt GPIO](#khi-chốt-gpio)).
 
 ### Khác với cấu trúc đề xuất ban đầu, và lý do
 
@@ -167,7 +168,7 @@ Các chân này không phải chân IOMUX của SPI2 (10–13) nên tín hiệu 
 - *LCD*: hướng (mặc định **ngang 480×320**), xung nhịp SPI (40 MHz; ảnh có sọc thì hạ 26/20), BGR, đảo màu, độ sáng đèn nền.
 - *Cảm ứng*: bật/tắt, đổi trục X/Y, 4 số hiệu chuẩn, ngưỡng áp lực, log số đo thô.
 
-Sau khi nạp, màn hình hiện **màn hình kiểm tra**: tiêu đề "Node phòng khách", nút "Bấm thử" có đếm, thanh dưới hiện toạ độ chạm, chấm xanh chạy theo ngón tay.
+Sau khi nạp, màn hình (ngang 480×320) hiện: tiêu đề "Node phòng khách" + kết nối Gateway ở góc phải; 2 ô nhiệt độ / độ ẩm; hàng **4 ô thiết bị Đèn, Quạt, Rèm cửa, Điều hòa** (BẬT/TẮT, rèm MỞ/ĐÓNG hoặc "Mở 45%", điều hòa kèm "Đặt 26°C"; ô đang bật/mở nền xanh; "--" + "Chưa lắp" khi chưa có thiết bị); thanh dưới hiện toạ độ chạm, chấm xanh chạy theo ngón tay. Trạng thái đẩy vào bằng `node_ui_set_device(NODE_UI_DEV_*, state)` (−1 chưa biết, 0 tắt/đóng, 1 bật/mở, rèm 2..100 = %) và `node_ui_set_ac_setpoint`, cùng quy ước khoá `lamp/fan/curtain/ac/ac_temp` mà trang Phòng khách của Gateway đọc. Hiện chưa có relay/IR nên 4 ô đứng ở "--".
 
 ### Hiệu chuẩn cảm ứng (lần đầu lắp)
 
@@ -260,8 +261,8 @@ Tổng khoảng 19–21 chân.
 1. Thêm vào `components/board/` (đã có màn hình + bus I2C/SHT31): chân cảm biến khác, relay, IR, âm thanh vào `Kconfig.projbuild` (hoặc `board_pins.h`) + hàm khởi tạo driver, trả các handle. Đây là chỗ **duy nhất** có số chân.
 2. `components/application/` (đã có `node_app`: màn hình, SHT31, ESP-NOW, gửi `temperature`/`humidity`):
    - Task `climate`: thêm `light` khi có BH1750.
-   - `on_cmd` (hiện trả lỗi mọi lệnh vì chưa có thiết bị chấp hành): `turn_on`/`turn_off` → `drv_relay_set` → `node_link_send_cmd_ack(..., power)`; `ir_send` → `node_ir_store_load` → `drv_ir_tx_send_raw`; `ir_learn` → `drv_ir_rx_receive` → `node_ir_store_save`.
-   - Màn hình: thay màn hình kiểm tra trong `node_ui` bằng màn hình thật (nhiệt độ, độ ẩm, trạng thái relay, kết nối Gateway đã có ở góc phải), dữ liệu đẩy vào qua `node_ui_set_*` như `gw_ui`. Nút trên màn hình gọi ngược lên application (callback), `ui` không gọi thẳng driver relay.
+   - `on_cmd`: lệnh có `params.target = "ac"` đã chuyển sang `node_ac` (phát mã IR đã học, ack kèm `power`). Còn lại: relay đèn/quạt/rèm (`target` = `lamp`/`fan`/`curtain`) → `drv_relay_set` → `node_link_send_cmd_ack(..., power)`.
+   - Màn hình: 4 ô thiết bị đã có — sau mỗi `drv_relay_set` / lệnh IR thành công, application gọi `node_ui_set_device` (và `node_ui_set_ac_setpoint` cho điều hòa). Muốn bấm ô để bật/tắt tại chỗ: thêm callback từ `ui` lên application, `ui` không gọi thẳng driver relay.
 3. Khởi tạo board còn lại trong `node_app_start` (sau `board_display_init`).
 
 Phác thảo nối thư viện (chân là chỗ giữ chỗ `BOARD_*`):

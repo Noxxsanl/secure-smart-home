@@ -35,7 +35,12 @@ static drv_ili9488_handle_t s_lcd;
 static bool s_touch_on;
 
 #if CONFIG_NODE_TOUCH_ENABLE
-static esp_err_t touch_init(int width, int height)
+/*
+ * Tạo cảm ứng + tự kiểm tra đấu dây. Gọi TRƯỚC drv_display_init: lúc đó chưa có task LVGL nên bus SPI2 chỉ có
+ * task này dùng. Gọi sau (khi LVGL đã đẩy khung đầu lên LCD bằng DMA) từng gây
+ * "assert failed: spi_hal_setup_trans ... spi_ll_get_running_cmd(hw) == 0" → khởi động lại liên tục, màn đen.
+ */
+static esp_err_t touch_create(int width, int height, drv_xpt2046_handle_t *out)
 {
     drv_xpt2046_config_t tc = {
         .host = LCD_SPI_HOST,
@@ -58,11 +63,8 @@ static esp_err_t touch_init(int width, int height)
     drv_xpt2046_handle_t tp;
     ESP_RETURN_ON_ERROR(drv_xpt2046_init(&tc, &tp), TAG, "XPT2046");
     drv_xpt2046_self_test(tp, SPI_PIN_MISO);   /* chỉ in chẩn đoán đấu dây, lỗi vẫn gắn cảm ứng */
-    esp_err_t err = drv_display_add_touch(tp, NULL);
-    if (err != ESP_OK) {
-        drv_xpt2046_del(tp);
-    }
-    return err;
+    *out = tp;
+    return ESP_OK;
 }
 #endif
 
@@ -97,25 +99,44 @@ esp_err_t board_display_init(void)
     };
     drv_ili9488_handle_t lcd;
     ESP_RETURN_ON_ERROR(drv_ili9488_init(&lc, &lcd), TAG, "ILI9488");
-    err = drv_ili9488_set_rotation(lcd, LCD_ROTATION);
-    if (err == ESP_OK) {
-        err = drv_display_init(lcd, NULL, NULL);   /* lấy kích thước sau khi xoay */
-    }
+    err = drv_ili9488_set_rotation(lcd, LCD_ROTATION);   /* lệnh tham số: chờ mọi khúc màu đang truyền xong */
     if (err != ESP_OK) {
+        drv_ili9488_del(lcd);
+        ESP_LOGE(TAG, "LCD rotation failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    int width = 0;
+    int height = 0;
+    drv_ili9488_get_size(lcd, &width, &height);   /* kích thước sau khi xoay */
+
+#if CONFIG_NODE_TOUCH_ENABLE
+    drv_xpt2046_handle_t tp = NULL;
+    esp_err_t touch_err = touch_create(width, height, &tp);   /* trước LVGL — xem touch_create */
+#endif
+
+    err = drv_display_init(lcd, NULL, NULL);
+    if (err != ESP_OK) {
+#if CONFIG_NODE_TOUCH_ENABLE
+        if (tp != NULL) {
+            drv_xpt2046_del(tp);
+        }
+#endif
         drv_ili9488_del(lcd);
         ESP_LOGE(TAG, "LVGL init failed: %s", esp_err_to_name(err));
         return err;
     }
     s_lcd = lcd;
 
-    int width = 0;
-    int height = 0;
-    drv_ili9488_get_size(lcd, &width, &height);
 #if CONFIG_NODE_TOUCH_ENABLE
-    err = touch_init(width, height);
-    s_touch_on = (err == ESP_OK);
+    if (touch_err == ESP_OK) {
+        touch_err = drv_display_add_touch(tp, NULL);   /* từ đây cảm ứng chỉ được đọc trong task LVGL */
+        if (touch_err != ESP_OK) {
+            drv_xpt2046_del(tp);
+        }
+    }
+    s_touch_on = (touch_err == ESP_OK);
     if (!s_touch_on) {
-        ESP_LOGW(TAG, "touch disabled: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "touch disabled: %s", esp_err_to_name(touch_err));
     }
 #endif
     ESP_LOGI(TAG, "display %dx%d ready, touch %s", width, height, s_touch_on ? "on" : "off");

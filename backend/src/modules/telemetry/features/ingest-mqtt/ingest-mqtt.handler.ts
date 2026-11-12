@@ -130,7 +130,7 @@ export async function handleGatewayData(raw: string): Promise<void> {
   const resolvedGwIp = typeof gateway_ip === "string" && gateway_ip ? gateway_ip : null;
   const resolvedSnIp = typeof sensor_ip  === "string" && sensor_ip  ? sensor_ip  : null;
 
-  await markGatewayAndSensorSeen(gateway.id, resolvedGwIp, sensor.id, resolvedSnIp);
+  await markGatewayAndSensorSeen(gateway.id, resolvedGwIp, sensor.id, resolvedSnIp, data);
 
   await logDataRecvWithPrune(sensor.id, null, null, {
     gateway_id: gateway.device_id,

@@ -1,8 +1,15 @@
 // Sổ "ack đang chờ" (pending-request registry): mỗi lệnh gửi tới thiết bị thật đăng ký một mục TRƯỚC khi publish
-// (để không lỡ ack về cực nhanh), features/command-ack resolve khi ack hợp lệ về, hoặc hết ACK_TIMEOUT_MS thì timeout.
+// (để không lỡ ack về cực nhanh), features/command-ack resolve khi ack hợp lệ về, hoặc hết thời gian chờ (ackTimeoutMs) thì timeout.
 import type { GatewaySigner } from "../../devices";
 
 export const ACK_TIMEOUT_MS = 5000;
+/** Lệnh học mã IR (learn_off / learn_t<NN>): Node chờ người dùng bấm remote tối đa 10 s RỒI mới ack → backend chờ 15 s. */
+export const LEARN_ACK_TIMEOUT_MS = 15000;
+
+/** Thời gian chờ ack theo action — chỉ lệnh learn_* dài hơn; mọi lệnh khác giữ 5 s. */
+export function ackTimeoutMs(action: string): number {
+  return action === "learn_off" || action.startsWith("learn_t") ? LEARN_ACK_TIMEOUT_MS : ACK_TIMEOUT_MS;
+}
 
 export type AckOutcome =
   | { kind: "ack"; status: "ok" | "error"; power: boolean | null }
@@ -23,7 +30,8 @@ const pendingAcks = new Map<string, PendingAck>();
 
 export function registerPending(
   commandUuid: string,
-  entry: Omit<PendingAck, "resolve" | "badHmacLogged">
+  entry: Omit<PendingAck, "resolve" | "badHmacLogged">,
+  timeoutMs: number = ACK_TIMEOUT_MS
 ): { promise: Promise<AckOutcome>; cancel: () => void } {
   let settle: (outcome: AckOutcome) => void = () => undefined;
   const promise = new Promise<AckOutcome>((resolve) => {
@@ -32,7 +40,7 @@ export function registerPending(
   const timer = setTimeout(() => {
     pendingAcks.delete(commandUuid);
     settle({ kind: "timeout", errorCode: "ACK_TIMEOUT" });
-  }, ACK_TIMEOUT_MS);
+  }, timeoutMs);
   pendingAcks.set(commandUuid, {
     ...entry,
     badHmacLogged: false,

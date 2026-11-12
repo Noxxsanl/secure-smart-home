@@ -132,3 +132,18 @@ esp_err_t node_ir_store_erase(const char *name)
     nvs_close(h);
     return err == ESP_ERR_NVS_NOT_FOUND ? ESP_ERR_NOT_FOUND : err;
 }
+
+bool node_ir_store_exists(const char *name)
+{
+    if (!node_ir_store_valid_name(name)) {
+        return false;
+    }
+    nvs_handle_t h;
+    if (nvs_open(NS_IR, NVS_READONLY, &h) != ESP_OK) {
+        return false;   /* namespace chưa có = chưa học mã nào */
+    }
+    size_t size = 0;
+    esp_err_t err = nvs_get_blob(h, name, NULL, &size);
+    nvs_close(h);
+    return err == ESP_OK && size > sizeof(ir_blob_header_t);
+}

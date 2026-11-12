@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "node_ac.h"
 #include "node_config.h"
 #include "node_link.h"
 #include "node_telemetry.h"
@@ -41,12 +42,22 @@ static int64_t s_last_sent_ts;
 
 /* ---- ESP-NOW ------------------------------------------------------------------------------------------ */
 
-/* Node chưa có relay/IR (chờ chốt GPIO): trả lỗi ngay để Gateway không phải chờ hết 3 s. */
+/*
+ * Lệnh cho thiết bị con có params.target (Gateway thêm khi Server gửi tới UID "<node_id>-<target>"). Hiện chỉ có
+ * điều hòa ("ac", node_ac tự ack sau khi phát IR); đèn/quạt/rèm chưa có relay → trả lỗi ngay để Gateway khỏi chờ 3 s.
+ */
 static void on_cmd(const char *command_id, const char *action, const cJSON *params, void *ctx)
 {
-    (void)params;
     (void)ctx;
-    ESP_LOGW(TAG, "CMD %s action=%s: no actuator wired yet, replying error", command_id, action);
+    const cJSON *target = params ? cJSON_GetObjectItemCaseSensitive(params, "target") : NULL;
+    if (cJSON_IsString(target) && strcmp(target->valuestring, "ac") == 0) {
+        if (!node_ac_post_command(command_id, action)) {
+            node_link_send_cmd_ack(command_id, false, NODE_POWER_UNKNOWN);
+        }
+        return;
+    }
+    ESP_LOGW(TAG, "CMD %s action=%s target=%s: no actuator for it, replying error", command_id, action,
+             cJSON_IsString(target) ? target->valuestring : "-");
     node_link_send_cmd_ack(command_id, false, NODE_POWER_UNKNOWN);
 }
 
@@ -102,14 +113,31 @@ static void refresh_link_ui(void)
 static void maybe_send(float temperature, float humidity)
 {
     int64_t now_us = esp_timer_get_time();
-    if (!s_paired || !node_link_is_online() || !node_time_is_synced() || now_us < s_next_send_us) {
+    if (!s_paired || !node_link_is_online() || !node_time_is_synced()) {
         return;
     }
-    const node_metric_t metrics[] = {
+    /* Điều hòa vừa đổi trạng thái (bấm trên màn hình / lệnh Server): gửi ngay để Gateway + Server cập nhật.
+     * Lấy cờ 1 lần mỗi vòng; gửi lỗi thì giữ lại để vòng sau gửi tiếp. */
+    bool ac_changed = node_ac_take_changed();
+    if (now_us < s_next_send_us && !ac_changed) {
+        return;
+    }
+    node_metric_t metrics[5] = {
         {.key = "temperature", .value = temperature, .decimals = 1},
         {.key = "humidity", .value = humidity, .decimals = 1},
     };
-    esp_err_t err = node_telemetry_send(&s_cfg, metrics, sizeof(metrics) / sizeof(metrics[0]));
+    size_t count = 2;
+    bool ac_on;
+    int ac_temp;
+    if (node_ac_get_state(&ac_on, &ac_temp)) {   /* chưa phát mã nào từ lúc khởi động = chưa biết → không gửi */
+        metrics[count++] = (node_metric_t){.key = "ac", .value = ac_on ? 1.0f : 0.0f, .decimals = 0};
+        metrics[count++] = (node_metric_t){.key = "ac_temp", .value = (float)ac_temp, .decimals = 0};
+    }
+    uint32_t ac_codes;
+    if (node_ac_get_codes(&ac_codes)) {   /* mã đã học — web vẽ lưới 16 ô theo bitmask này */
+        metrics[count++] = (node_metric_t){.key = "ac_codes", .value = (float)ac_codes, .decimals = 0};
+    }
+    esp_err_t err = node_telemetry_send(&s_cfg, metrics, count);
     if (err == ESP_OK) {
         s_next_send_us = now_us + TELEMETRY_INTERVAL_US;
         node_time_now(&s_last_sent_ts);
@@ -117,6 +145,9 @@ static void maybe_send(float temperature, float humidity)
     } else {
         /* Không ack tầng MAC: thử lại ở lần đọc sau; node_link tự dò lại kênh sau vài lần lỗi liên tiếp. */
         ESP_LOGW(TAG, "telemetry not sent: %s", esp_err_to_name(err));
+        if (ac_changed) {
+            s_next_send_us = 0;   /* cờ điều hòa đã lấy: ép vòng sau gửi lại thay vì chờ hết chu kỳ */
+        }
     }
 }
 
@@ -197,6 +228,7 @@ esp_err_t node_app_start(void)
     start_display();
     if (nvs_err == ESP_OK) {
         start_link();
+        node_ac_start();   /* mã IR nằm trong NVS; điều khiển tại chỗ chạy được cả khi chưa ghép nối Gateway */
     } else {
         ESP_LOGE(TAG, "nvs_flash_init: %s — re-flash the NVS image (README, Ghép nối Gateway)",
                  esp_err_to_name(nvs_err));

@@ -29,6 +29,9 @@ esp_err_t node_ir_store_load(const char *name, uint32_t *carrier_hz, uint16_t *d
 
 esp_err_t node_ir_store_erase(const char *name);
 
+/** Đã có mã tên này trong NVS chưa (chỉ đọc kích thước, không tải blob). */
+bool node_ir_store_exists(const char *name);
+
 #ifdef __cplusplus
 }
 #endif

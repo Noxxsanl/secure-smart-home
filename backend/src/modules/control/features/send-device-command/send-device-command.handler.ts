@@ -1,11 +1,11 @@
-// Lệnh bật/tắt relay (CONTRACT_V2 §4.2 commands, §6 Command service, §7 MQTT).
+// Lệnh bật/tắt relay + đặt nhiệt độ điều hoà IR (CONTRACT_V2 §4.2 commands, §6 Command service, §7 MQTT).
 //
 //   commandDevice      use case của khách (portal/mobile): quyền (404/403) → nhà suspended (409) → sendDeviceCommand.
-//   sendDeviceCommand  bật/tắt một relay, chờ ack ≤ 5 s → { command, device } hoặc ném HttpError.
+//   sendDeviceCommand  bật/tắt (hoặc set_temp_<NN> / learn_off / learn_t<NN> với điều hoà) một relay, chờ ack ≤ 5 s (learn_*: ≤ 15 s) → { command, device } hoặc ném HttpError.
 //                      Cũng được automation engine gọi (qua control.facade).
 //
 // Chữ ký lệnh/ack là HMAC-SHA256 bằng secret của GATEWAY (CONTRACT §7). secret_key chỉ được SELECT trong module
-// devices (getGatewaySigner — chỉ nhận hàm sign/verify); bộ ký giữ ở RAM tối đa 5 s cho tới khi ack về, KHÔNG BAO GIỜ log hay trả ra
+// devices (getGatewaySigner — chỉ nhận hàm sign/verify); bộ ký giữ ở RAM tối đa 5 s (learn_*: 15 s) cho tới khi ack về, KHÔNG BAO GIỜ log hay trả ra
 // ngoài (invariant 1, 2).
 import type { RequestMeta } from "../../../../core/http/request-meta";
 import type { AuthContext } from "../../../../core/auth/auth-context";
@@ -20,12 +20,17 @@ import { assertHomeWritable } from "../../../homes";
 import {
   getDeviceRow,
   getGatewaySigner,
+  learnSlotMask,
+  parseLearnAction,
+  parseSetTempAction,
   requireDeviceAccess,
+  setDeviceAcCodesBit,
+  setDeviceAcSetpoint,
   setDevicePowerState,
   toCustomerDeviceOne,
   toDeviceStateEvent,
 } from "../../../devices";
-import type { CustomerDevice, DeviceAction, DeviceRow } from "../../../devices";
+import type { CustomerDevice, DeviceCommandAction, DeviceRow } from "../../../devices";
 import type { BehaviorSource } from "../../domain/behavior.types";
 import { gatewayBaseTopic } from "../../domain/command-topics";
 import type {
@@ -35,7 +40,7 @@ import type {
   SendDeviceCommandInput,
   SendDeviceCommandResult,
 } from "../../domain/command.types";
-import { registerPending, type AckOutcome } from "../../domain/pending-acks";
+import { ackTimeoutMs, registerPending, type AckOutcome } from "../../domain/pending-acks";
 import { getSimulatedHandler, runSimulated } from "../../domain/simulated-command";
 import { isCommandBrokerConnected, publishJson } from "../../infrastructure/command-mqtt.client";
 import { logBehavior } from "../../infrastructure/behavior-log.repository";
@@ -51,7 +56,11 @@ function powerLabel(on: boolean | null): string | null {
   return on === null ? null : on ? "ON" : "OFF";
 }
 
-async function runMqttDeviceCommand(device: DeviceRow, action: DeviceAction, commandUuid: string, rowId: number): Promise<AckOutcome> {
+function tempLabel(setpoint: number | null): string | null {
+  return setpoint === null ? null : `${setpoint}°C`;
+}
+
+async function runMqttDeviceCommand(device: DeviceRow, action: DeviceCommandAction, commandUuid: string, rowId: number): Promise<AckOutcome> {
   if (device.gateway_device_id === null || device.gateway_uid === null || device.home_id === null) {
     return { kind: "timeout", errorCode: "NO_GATEWAY" };
   }
@@ -73,7 +82,7 @@ async function runMqttDeviceCommand(device: DeviceRow, action: DeviceAction, com
     gatewayUid: device.gateway_uid,
     deviceUid: device.device_id,
     signer,
-  });
+  }, ackTimeoutMs(action));
   const topic = `${gatewayBaseTopic(device.home_id, device.gateway_uid)}/device/${device.device_id}/command`;
   if (!(await publishJson(topic, payload))) {
     waiter.cancel();
@@ -84,22 +93,32 @@ async function runMqttDeviceCommand(device: DeviceRow, action: DeviceAction, com
 }
 
 /**
- * Gửi lệnh bật/tắt tới một relay và chờ ack (≤ 5 s).
+ * Gửi lệnh bật/tắt tới một relay và chờ ack (≤ 5 s; lệnh học mã learn_* ≤ 15 s vì Node chờ người dùng bấm remote tối đa 10 s).
  *
  * Kiểm tra theo thứ tự: không tồn tại/chưa gán nhà → 404 · không phải relay → 400 NOT_CONTROLLABLE ·
- * bị chặn → 409 DEVICE_BLOCKED · nhà tạm ngưng → 409 HOME_SUSPENDED · không active hoặc offline
+ * set_temp_<NN> / learn_off / learn_t<NN> mà không phải điều hoà (appliance <> 'ac') → 400 NOT_CONTROLLABLE · bị chặn → 409 DEVICE_BLOCKED · nhà tạm ngưng → 409 HOME_SUSPENDED · không active hoặc offline
  * (last_seen > 90 s) → 409 DEVICE_OFFLINE. Quyền của người dùng với thiết bị KHÔNG kiểm ở đây —
  * người gọi phải gọi requireDeviceAccess(auth, id, "control_device") trước.
  *
- * Thành công: cập nhật power_state, device_commands → acked, phát bus `device_state`, ghi
- * user_behavior_logs và audit DEVICE_COMMAND. Thất bại: device_commands → timeout/failed, audit
- * DEVICE_COMMAND_FAILED rồi ném 504 TIMEOUT (không ack trong 5 s / broker không sẵn sàng) hoặc 502
+ * Thành công: cập nhật power_state (set_temp: ack.power ?? true, kèm ac_setpoint), device_commands → acked, phát bus
+ * `device_state`, ghi user_behavior_logs và audit DEVICE_COMMAND. Riêng learn_*: KHÔNG đổi power_state/ac_setpoint
+ * (chỉ bật bit mã tương ứng trong ac_codes) và KHÔNG ghi user_behavior_logs. Thất bại: device_commands → timeout/failed, audit
+ * DEVICE_COMMAND_FAILED rồi ném 504 TIMEOUT (không ack trong 5 s, learn_*: 15 s / broker không sẵn sàng) hoặc 502
  * COMMAND_FAILED (thiết bị báo lỗi).
  */
 export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<SendDeviceCommandResult> {
   const device = await getDeviceRow(input.deviceId);
   if (!device || device.device_type === "gateway") throw notFound("Device not found");
   if (device.category !== "relay") throw new HttpError(400, "NOT_CONTROLLABLE", "Device is not a relay");
+  // set_temp_<NN> / learn_off / learn_t<NN>: chỉ điều hoà IR; chuỗi lạ (không thuộc các dạng trên) là lỗi gọi hàm
+  const setpoint = parseSetTempAction(input.action);
+  const learnSlot = parseLearnAction(input.action);
+  if (learnSlot === null && setpoint === null && input.action !== "turn_on" && input.action !== "turn_off") {
+    throw new HttpError(400, "INVALID_INPUT", "Unsupported command action");
+  }
+  if ((setpoint !== null || learnSlot !== null) && device.appliance !== "ac") {
+    throw new HttpError(400, "NOT_CONTROLLABLE", "set_temp and learn_code are only supported by air conditioners");
+  }
   if (device.home_id === null) throw notFound("Device is not assigned to a home");
   if (device.status === "blocked") throw new HttpError(409, "DEVICE_BLOCKED", "Device is blocked");
   if (device.home_status === "suspended") throw new HttpError(409, "HOME_SUSPENDED", "Home is suspended");
@@ -115,7 +134,14 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
       ? await runSimulated(simulatedHandler, { kind: "device", commandId: commandUuid, device, action: input.action })
       : await runMqttDeviceCommand(device, input.action, commandUuid, rowId);
 
-  const verb = input.action === "turn_on" ? "Bật" : "Tắt";
+  // Tên hành động trong thông báo lỗi (chữ thường) và trong audit khi thành công
+  const failVerb = learnSlot !== null ? "học mã remote" : setpoint !== null ? "đặt nhiệt độ" : input.action === "turn_on" ? "bật" : "tắt";
+  const successMessage =
+    learnSlot !== null
+      ? `Học mã remote "${device.device_name}" ${learnSlot === "off" ? "mã TẮT" : `${learnSlot}°C`}`
+      : setpoint !== null
+      ? `Đặt điều hòa "${device.device_name}" ${setpoint}°C`
+      : `${input.action === "turn_on" ? "Bật" : "Tắt"} "${device.device_name}"`;
   const failureBase = {
     homeId: device.home_id,
     deviceId: device.id,
@@ -129,7 +155,7 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
     await logEvent({
       ...failureBase,
       eventType: "DEVICE_COMMAND_FAILED",
-      message: `Lệnh ${verb.toLowerCase()} "${device.device_name}" không được thiết bị phản hồi`,
+      message: `Lệnh ${failVerb} "${device.device_name}" không được thiết bị phản hồi`,
       details: { command_id: rowId, action: input.action, reason: outcome.errorCode, source: input.source, channel: input.channel },
     });
     throw new HttpError(504, "TIMEOUT", "Device did not acknowledge the command in time");
@@ -139,7 +165,7 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
     await logEvent({
       ...failureBase,
       eventType: "DEVICE_COMMAND_FAILED",
-      message: `Thiết bị "${device.device_name}" báo lỗi khi thực hiện lệnh ${verb.toLowerCase()}`,
+      message: `Thiết bị "${device.device_name}" báo lỗi khi thực hiện lệnh ${failVerb}`,
       details: { command_id: rowId, action: input.action, reason: "DEVICE_ERROR", source: input.source, channel: input.channel },
     });
     throw new HttpError(502, "COMMAND_FAILED", "Device reported an error while executing the command");
@@ -147,10 +173,18 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
 
   // Ack ok: ghi trạng thái mới
   const ackedAt = new Date();
-  const newPower = outcome.power ?? (input.action === "turn_on");
-  // power_state (bảng devices, qua facade) + device_commands → acked: cùng thành công hoặc cùng huỷ (invariant 9)
+  // set_temp: điều hoà nhận lệnh đặt độ nghĩa là đang chạy → mặc định bật; turn_on/turn_off không đụng ac_setpoint
+  const newPower = outcome.power ?? (setpoint !== null ? true : input.action === "turn_on");
+  // power_state + ac_setpoint (bảng devices, qua facade) + device_commands → acked: cùng thành công hoặc cùng huỷ (invariant 9)
+  // learn_*: ack ok = Node đã học + lưu mã xong → chỉ bật bit của ô đó trong ac_codes; KHÔNG đụng power_state/ac_setpoint
+  // (học mã không bật/tắt điều hoà thật, nên bỏ qua `power` trong ack)
   await withTransaction(async (conn) => {
-    await setDevicePowerState(device.id, newPower, conn);
+    if (learnSlot !== null) {
+      await setDeviceAcCodesBit(device.id, learnSlotMask(learnSlot), conn);
+    } else {
+      await setDevicePowerState(device.id, newPower, conn);
+      if (setpoint !== null) await setDeviceAcSetpoint(device.id, setpoint, conn);
+    }
     await markCommandAcked(rowId, ackedAt, conn);
   });
 
@@ -158,23 +192,27 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
   const stateEvent = toDeviceStateEvent(updated);
   if (stateEvent) eventBus.emit("device_state", stateEvent);
 
-  await logBehavior({
-    homeId: device.home_id,
-    timezone: device.home_timezone ?? "Asia/Ho_Chi_Minh",
-    userId: input.issuedBy,
-    roomId: device.room_id,
-    deviceId: device.id,
-    deviceCategory: device.category,
-    action: input.action === "turn_on" ? "TURN_ON" : "TURN_OFF",
-    previousState: powerLabel(device.power_state === null ? null : toBool(device.power_state)),
-    newState: powerLabel(newPower),
-    source: input.behaviorSource ?? defaultBehaviorSource(input.source, input.channel),
-    at: ackedAt,
-  });
+  // Học mã remote không phải hành vi dùng thiết bị → không ghi user_behavior_logs (khỏi làm bẩn gợi ý thói quen)
+  if (learnSlot === null) {
+    await logBehavior({
+      homeId: device.home_id,
+      timezone: device.home_timezone ?? "Asia/Ho_Chi_Minh",
+      userId: input.issuedBy,
+      roomId: device.room_id,
+      deviceId: device.id,
+      deviceCategory: device.category,
+      action: setpoint !== null ? "SET_TEMP" : input.action === "turn_on" ? "TURN_ON" : "TURN_OFF",
+      previousState:
+        setpoint !== null ? tempLabel(device.ac_setpoint) : powerLabel(device.power_state === null ? null : toBool(device.power_state)),
+      newState: setpoint !== null ? tempLabel(setpoint) : powerLabel(newPower),
+      source: input.behaviorSource ?? defaultBehaviorSource(input.source, input.channel),
+      at: ackedAt,
+    });
+  }
   await logEvent({
     ...failureBase,
     eventType: "DEVICE_COMMAND",
-    message: `${verb} "${device.device_name}"`,
+    message: successMessage,
     details: { command_id: rowId, action: input.action, source: input.source, channel: input.channel, device_uid: device.device_id },
   });
 
@@ -191,13 +229,13 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
 }
 
 /**
- * Use case của khách: gửi lệnh bật/tắt. Thứ tự: quyền (404/403) → nhà suspended (409) → sendDeviceCommand
+ * Use case của khách: gửi lệnh bật/tắt hoặc đặt nhiệt độ điều hoà. Thứ tự: quyền (404/403) → nhà suspended (409) → sendDeviceCommand
  * (400 NOT_CONTROLLABLE, 409 DEVICE_BLOCKED/DEVICE_OFFLINE, 504 TIMEOUT). Kênh quyết định nguồn behaviour log.
  */
 export async function commandDevice(
   auth: AuthContext,
   deviceId: number,
-  action: DeviceAction,
+  action: DeviceCommandAction,
   channel: CustomerChannel,
   meta: RequestMeta
 ): Promise<{ command: CommandSummary; device: CustomerDevice }> {

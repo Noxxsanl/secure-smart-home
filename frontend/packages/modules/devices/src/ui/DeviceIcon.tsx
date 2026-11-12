@@ -5,7 +5,7 @@ import type { CustomerDevice } from "@shh/api-client/portal";
 import { applianceKind } from "../model/appliance";
 
 type DeviceIconProps = {
-  device: Pick<CustomerDevice, "category" | "device_name" | "latest">;
+  device: Pick<CustomerDevice, "category" | "device_name" | "latest" | "appliance">;
   className?: string;
 };
 

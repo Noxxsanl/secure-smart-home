@@ -71,6 +71,13 @@ esp_err_t drv_ili9488_set_backlight(drv_ili9488_handle_t h, uint8_t percent);
 /** Tô 1 hình chữ nhật một màu (RGB565). Dùng để thử màn hình, xoá nền. */
 esp_err_t drv_ili9488_fill(drv_ili9488_handle_t h, int x, int y, int w, int hgt, uint16_t rgb565);
 
+/**
+ * Chờ mọi khúc màu đang truyền DMA (draw_bitmap/fill trả về trước khi truyền xong) xong hẳn, bằng 1 lệnh NOP.
+ * Gọi trước khi thiết bị khác CHUNG bus SPI (cảm ứng XPT2046) dùng polling — không thì có thể gặp
+ * "assert failed: spi_hal_setup_trans ... spi_ll_get_running_cmd(hw) == 0". Gọi từ task đang vẽ (task LVGL).
+ */
+esp_err_t drv_ili9488_wait_idle(drv_ili9488_handle_t h);
+
 esp_err_t drv_ili9488_del(drv_ili9488_handle_t h);
 
 /**

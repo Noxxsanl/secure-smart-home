@@ -141,14 +141,19 @@ esp_err_t gw_espnow_send_time_sync(size_t idx)
     return send_frame(idx, ESPNOW_MSG_TIME_SYNC, body, (size_t)n);
 }
 
-esp_err_t gw_espnow_send_cmd(size_t idx, const char *command_id, const char *action, int64_t ts)
+esp_err_t gw_espnow_send_cmd(size_t idx, const char *command_id, const char *action, const char *target, int64_t ts)
 {
     ESP_RETURN_ON_FALSE(gw_valid_id(command_id, COMMAND_ID_MAX), ESP_ERR_INVALID_ARG, TAG, "bad command_id");
     ESP_RETURN_ON_FALSE(gw_valid_token(action, ACTION_MAX), ESP_ERR_INVALID_ARG, TAG, "bad action");
+    ESP_RETURN_ON_FALSE(target == NULL || gw_valid_token(target, ACTION_MAX), ESP_ERR_INVALID_ARG, TAG, "bad target");
     /* Chuỗi đã kiểm ký tự nên ghép thẳng vào JSON được. ts để node kiểm cửa sổ ±30 s (chống phát lại). */
     char body[ESPNOW_PROTO_MAX_BODY + 1];
-    int n = snprintf(body, sizeof(body), "{\"command_id\":\"%s\",\"action\":\"%s\",\"ts\":%" PRId64 "}", command_id,
-                     action, ts);
+    int n = target == NULL
+                ? snprintf(body, sizeof(body), "{\"command_id\":\"%s\",\"action\":\"%s\",\"ts\":%" PRId64 "}",
+                           command_id, action, ts)
+                : snprintf(body, sizeof(body),
+                           "{\"command_id\":\"%s\",\"action\":\"%s\",\"params\":{\"target\":\"%s\"},\"ts\":%" PRId64 "}",
+                           command_id, action, target, ts);
     ESP_RETURN_ON_FALSE(n > 0 && (size_t)n < sizeof(body), ESP_ERR_INVALID_SIZE, TAG, "CMD too long");
     return send_frame(idx, ESPNOW_MSG_CMD, body, (size_t)n);
 }

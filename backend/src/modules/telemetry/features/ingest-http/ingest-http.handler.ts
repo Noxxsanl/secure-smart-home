@@ -82,7 +82,7 @@ export async function ingestHttpData(input: IngestHttpInput): Promise<IngestHttp
   const resolvedGwIp  = (typeof input.gatewayIp === "string" && input.gatewayIp) ? input.gatewayIp : ip;
   const resolvedSnIp  = (typeof input.sensorIp === "string" && input.sensorIp) ? input.sensorIp : null;
 
-  await markGatewayAndSensorSeen(gateway.id, resolvedGwIp, sensor.id, resolvedSnIp);
+  await markGatewayAndSensorSeen(gateway.id, resolvedGwIp, sensor.id, resolvedSnIp, data);
 
   // Audit log
   await logDataRecvWithPrune(sensor.id, ip, userAgent, {

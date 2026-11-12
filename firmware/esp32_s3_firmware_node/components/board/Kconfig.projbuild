@@ -127,13 +127,13 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
             int "Số đo thô ở mép TRÊN"
             depends on NODE_TOUCH_ENABLE
             range 0 4095
-            default 300
+            default 3800
 
         config NODE_TOUCH_RAW_BOTTOM
             int "Số đo thô ở mép DƯỚI"
             depends on NODE_TOUCH_ENABLE
             range 0 4095
-            default 3800
+            default 300
 
         config NODE_TOUCH_Z_THRESHOLD
             int "Ngưỡng áp lực nhận là chạm"
@@ -171,4 +171,35 @@ menu "Node S3: cảm biến I2C (SHT31)"
         help
             Trở trong (~45 kΩ) chỉ đủ khi module cảm biến không có trở kéo lên. Module SHT31 bán sẵn thường đã có
             trở 4,7–10 kΩ; để bật cũng không sao.
+endmenu
+
+# Hồng ngoại: mắt thu VS1838B (học mã remote) + LED phát 940 nm (điều khiển điều hòa). Mặc định = cách nối của Node.
+menu "Node S3: hồng ngoại (điều hòa)"
+    config NODE_IR_ENABLE
+        bool "Bật thu/phát hồng ngoại"
+        default y
+
+    config NODE_IR_RX_GPIO
+        int "Chân OUT của mắt thu VS1838B"
+        depends on NODE_IR_ENABLE
+        range 0 48
+        default 1
+        help
+            VS1838B cấp 3V3 (cấp 5 V thì chân OUT lên 5 V, quá áp ESP32-S3). Ngõ ra mức THẤP khi có sóng 38 kHz.
+
+    config NODE_IR_TX_GPIO
+        int "Chân kích LED phát IR 940 nm"
+        depends on NODE_IR_ENABLE
+        range 0 48
+        default 2
+        help
+            Tốt nhất kích qua transistor NPN (S8050/2N2222, trở nền 1 kΩ, trở LED 22–47 Ω từ 5V): phát xa vài mét.
+            Nối thẳng GPIO qua trở 100 Ω chỉ ~15 mA, phát được khoảng 1 m — đủ thử khi đặt sát điều hòa.
+
+    config NODE_IR_TX_INVERT
+        bool "LED sáng khi chân ở mức THẤP"
+        depends on NODE_IR_ENABLE
+        default n
+        help
+            Để tắt với LED nối thẳng GPIO hoặc qua NPN/MOSFET kéo xuống. Bật khi dùng PNP / module kích mức thấp.
 endmenu

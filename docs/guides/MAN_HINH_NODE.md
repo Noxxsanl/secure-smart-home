@@ -122,7 +122,7 @@ File: `components/drivers/include/drv_display.h`, `components/drivers/src/lcd/dr
 
 ## 5. Giao diện và font tiếng Việt: `ui`
 
-- `components/ui/src/node_ui.c`: màn hình kiểm tra (chấm xanh theo ngón tay, toạ độ chạm, nút "Bấm thử" có đếm), cùng bảng màu với `gw_ui.c`. Dựng trong `drv_display_lock/unlock`.
+- `components/ui/src/node_ui.c`: 2 ô nhiệt độ/độ ẩm, 4 ô trạng thái thiết bị (Đèn, Quạt, Rèm cửa, Điều hòa — `node_ui_set_device`), kết nối Gateway ở góc phải, thanh toạ độ chạm + chấm xanh theo ngón tay để kiểm hiệu chuẩn; cùng bảng màu với `gw_ui.c`. Dựng trong `drv_display_lock/unlock`.
 - Font Montserrat có sẵn của LVGL **chỉ có ASCII**. UI tiếng Việt có dấu (bất biến 10) dùng `components/ui/fonts/node_font_vi_16.c` và `node_font_vi_24.c`, chép từ `gw_font_vi_16/24.c` của Gateway và chỉ đổi tên symbol.
 - Font gồm: ASCII, dấu độ, 134 chữ cái tiếng Việt, và 7 biểu tượng `LV_SYMBOL_` (HOME, OK, WIFI, WARNING, LIST, VIDEO, UPLOAD). Chữ hoặc biểu tượng ngoài bộ font hiện thành ô trống.
 - Thêm cỡ chữ, ký tự hoặc biểu tượng: sửa `components/ui/fonts/gen_fonts.sh` (danh sách `size`, `SYMBOLS`) rồi chạy bằng Git Bash. Script cần Node.js (`npx` tải `lv_font_conv@1.5.2` vào cache npm) và font nguồn trong `components/lvgl__lvgl/scripts/built_in_font/`. Cỡ mới phải thêm vào `ui/CMakeLists.txt` và `LV_FONT_DECLARE` trong code.
@@ -205,7 +205,7 @@ Khác hẳn SPI: framebuffer cả màn hình trong PSRAM, bounce buffer, chế �
 2. Driver panel (6.2/6.3) và driver cảm ứng (6.4) trong `drivers/`, thêm vào `drivers/CMakeLists.txt`.
 3. Sửa `board_display.c`: khởi tạo theo thứ tự bus → panel → xoay → `drv_display_init` → cảm ứng.
 4. Sửa `drv_display.c` nếu cách flush, thứ tự byte hoặc nguồn cảm ứng khác (6.2 bước 3–5, 6.4).
-5. Độ phân giải khác: kiểm bố cục `node_ui.c` (đang căn theo `lv_obj_get_width(scr)`, không cố định số điểm ảnh, trừ nút 220×60).
+5. Độ phân giải khác: kiểm bố cục `node_ui.c` (đang căn theo `lv_obj_get_width(scr)`, nhưng toạ độ dọc các hàng cố định theo chiều cao 320 — màn hình dọc 320×480 cần chỉnh `CLIMATE_Y`/`DEV_Y`).
 6. Build không cảnh báo, nạp, kiểm theo mục 8.
 7. Cập nhật mục *Màn hình* trong README của node và tài liệu này.
 
@@ -302,7 +302,7 @@ I app_main: display up (touch on); sensors/relay/ESP-NOW wait for the GPIO map
 | `components/drivers/CMakeLists.txt` | Nguồn driver, `REQUIRES lvgl__lvgl`, `-Wno-format` cho LVGL |
 | `components/board/Kconfig.projbuild` | Menu chân, hướng, hiệu chuẩn |
 | `components/board/src/board_display.c`, `include/board_display.h` | Ghép bus → panel → LVGL → cảm ứng |
-| `components/ui/src/node_ui.c`, `include/node_ui.h` | Màn hình (hiện là màn hình kiểm tra) |
+| `components/ui/src/node_ui.c`, `include/node_ui.h` | Màn hình (nhiệt độ/độ ẩm, 4 thiết bị, kết nối Gateway, kiểm tra cảm ứng) |
 | `components/ui/fonts/node_font_vi_16.c`, `node_font_vi_24.c`, `gen_fonts.sh` | Font tiếng Việt có dấu |
 | `main/app_main.c` | Thứ tự khởi động: màn hình → UI → đèn nền |
 | `.gitignore` (gốc repo) | Bỏ qua `components/*__*/` và `dependencies.lock` của node |

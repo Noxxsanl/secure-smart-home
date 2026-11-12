@@ -18,6 +18,10 @@ export interface DeviceStateSnapshot {
   last_seen: string | null;
   power: boolean | null;
   status: DeviceStatus;
+  /** Nhiệt độ đặt của điều hoà (16..30); null với thiết bị khác hoặc khi chưa biết. */
+  ac_setpoint: number | null;
+  /** Bitmask mã IR điều hoà đã học (bit 0 = TẮT, bit t−15 = BẬT ở t°C); null khi chưa học hoặc không phải điều hoà. */
+  ac_codes: number | null;
 }
 
 export interface CustomerNotification {

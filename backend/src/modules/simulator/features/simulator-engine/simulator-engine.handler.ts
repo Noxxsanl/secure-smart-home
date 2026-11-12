@@ -10,6 +10,7 @@
 // (heartbeat 20 s nằm ở domain/simulated-heartbeat.ts vì route power cũng dùng.)
 import type { SimulatedAck, SimulatedCommand } from "../../../control";
 import { logEvent } from "../../../audit";
+import { parseLearnAction, parseSetTempAction } from "../../../devices";
 import { notifyStaff } from "../../../notifications";
 import { isRestarting, simulateGatewayRestart } from "../../domain/gateway-restart";
 import { randomInt, sleep } from "../../domain/random";
@@ -54,6 +55,10 @@ export async function handleSimulatedCommand(command: SimulatedCommand): Promise
   }
   // Gateway của relay đang restart → relay không nhận được lệnh
   if (isRestarting(command.device.gateway_device_id)) return { status: "error" };
+  // learn_off / learn_t<NN> (điều hoà mô phỏng): "học" xong là ack ok, không đổi trạng thái bật/tắt
+  if (parseLearnAction(command.action) !== null) return { status: "ok" };
+  // set_temp_<NN> (điều hoà mô phỏng): đặt độ nghĩa là đang chạy → bật; turn_on/turn_off như cũ
+  if (parseSetTempAction(command.action) !== null) return { status: "ok", power: true };
   return { status: "ok", power: command.action === "turn_on" };
 }
 

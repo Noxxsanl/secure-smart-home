@@ -197,7 +197,7 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 | | GET | `/devices/:deviceId/telemetry` | `view` | Chuỗi số liệu `24h` / `7d` |
 | Camera | GET | `/devices/:deviceId/snapshots?limit=` | `view` | Ảnh gần đây của camera (`limit` 1–50, mặc định 20; mới nhất trước): `{device_id, items: [{id, trigger: "motion"\|"request", size_bytes, captured_at}]}`. Thiết bị không phải camera → 404. Chỉ liệt kê ảnh chụp khi camera đang ở nhà hiện tại (`home_id` ảnh = `home_id` camera) |
 | | GET | `/snapshots/:snapshotId/image` | `view` | Tải ảnh JPEG (`Cache-Control: private, max-age=86400, immutable`); không tồn tại / không có quyền / file mất / ảnh chụp ở nhà khác với nhà hiện tại của camera → 404 (ảnh chỉ thuộc về nhà lúc chụp). Web dùng thẳng `/api/portal/snapshots/<id>/image` trong `<img src>` (cookie `sh_user`), mobile gửi `Authorization: Bearer` |
-| | POST | `/devices/:deviceId/commands` | `control_device` | Bật/tắt (`turn_on` / `turn_off`), chờ ack ≤ 5 giây |
+| | POST | `/devices/:deviceId/commands` | `control_device` | Bật/tắt (`turn_on` / `turn_off`); điều hòa (`appliance = "ac"`) thêm `{action: "set_temp", temperature: 16..30}` → MQTT `set_temp_<NN>`; học mã remote IR `{action: "learn_code", slot: "off" \| 16..30}` → MQTT `learn_off` / `learn_t<NN>` (chỉ điều hòa, khác → 400 `NOT_CONTROLLABLE`; ack ok = đã học xong, chỉ bật bit trong `ac_codes`, không đổi `power`/`ac_setpoint`). Chờ ack ≤ 5 giây (`learn_*`: ≤ 15 giây — Node chờ người dùng bấm remote tối đa 10 giây). `CustomerDevice` có `appliance`, `ac_setpoint`, `ac_codes` (bitmask mã IR đã học: bit 0 = TẮT, bit `t−15` = BẬT ở t°C; `null` = chưa học/chưa biết) |
 | Tự động hoá | GET | `/homes/:homeId/automations` | `view_automation` | Danh sách luật |
 | | POST | `/homes/:homeId/automations` | `create_automation` | Tạo luật IF/THEN |
 | | PATCH | `/automations/:ruleId` | `create_automation` (+ chủ luật hoặc `manage_any_rule`) | Sửa, bật/tắt luật |
@@ -337,7 +337,7 @@ Broker 2 (`mosquitto`, cổng 8883 TLS; 1883 chỉ cho môi trường dev). Gate
 | Topic | Chiều | QoS | Payload | Code |
 |---|---|---|---|---|
 | `gateway/<gateway_id>/data` | GW → Server | 1 | `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload: {sensor_id, sn_timestamp, sn_hmac, data}}` | `modules/telemetry/features/ingest-mqtt/` |
-| `home/<home_id>/gateway/<gw>/device/<dev>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {turn_on, turn_off}` | `modules/control/` (`features/send-gateway-command`, `command-ack`) |
+| `home/<home_id>/gateway/<gw>/device/<dev>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {turn_on, turn_off, set_temp_16..set_temp_30, learn_off, learn_t16..learn_t30}` (set_temp và learn_* chỉ cho điều hòa; `learn_*` Node ack sau ≤ 10 giây nên Backend chờ ack ≤ 15 giây, lệnh khác 5 giây); `<dev>` có thể là thiết bị con `<node_id>-<lamp/fan/curtain/ac>` — Gateway chuyển xuống node đó kèm `params.target` | `modules/control/` (`features/send-gateway-command`, `command-ack`) |
 | `home/<home_id>/gateway/<gw>/device/<dev>/command/ack` | GW → Server | 1 | `{command_id, status: "ok"\|"error", power?, ts, hmac}`; Server chờ 5 giây | như trên |
 | `home/<home_id>/gateway/<gw>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {restart, factory_reset}` | như trên |
 | `home/<home_id>/gateway/<gw>/ota/command` | Server → GW | 1 | `{job_id, version, target_type, checksum_sha256, ts, hmac}` | như trên |
@@ -403,14 +403,14 @@ Chi tiết thông số luồng: [IoT Node Network](firmware/IOT_NODE_NETWORK.md)
 |---|---|---|---|
 | `TELEMETRY` | Node → GW | `{sensor_id, sn_timestamp, sn_hmac, data}` — y hệt `sensor_payload` | Kiểm HMAC lớp 1, bọc thành `gateway/+/data` |
 | `EVENT` | Node → GW | `{event: "motion"\|…, ts}` | Camera: chờ ảnh rồi publish `camera/event` |
-| `CMD` | GW → Node | `{command_id, action, params?}` | Gửi sau khi đã kiểm HMAC lệnh từ Server |
+| `CMD` | GW → Node | `{command_id, action, params?, ts}`; `params.target` = thiết bị con (`"ac"`) khi Server gửi tới UID `<node_id>-<target>` | Gửi sau khi đã kiểm HMAC lệnh từ Server |
 | `CMD_ACK` | Node → GW | `{command_id, status: "ok"\|"error", power?}` | Ký và publish `command/ack`; node im lặng 3 giây → ack `error` |
 | `HEARTBEAT` | Node → GW | `{uptime, rssi, fw_version, battery?}` mỗi 30 giây | Gom vào heartbeat Gateway |
 | `TIME_SYNC` | GW → Node | `{ts}` | Gửi sau ghép nối, khi nhận `PING`, kèm mỗi ack |
 | `PING` | Node → GW | `{}` | Dùng để dò kênh; trả `TIME_SYNC` |
 | `PAIR_REQUEST` · `PAIR_CHALLENGE` · `PAIR_RESPONSE` · `PAIR_RESULT` | 2 chiều | Theo [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) §9.1 | Chỉ trong cửa sổ ghép nối 60 giây; cấp LMK, với Camera cấp thêm thông tin Local AP |
 
-`action` của node phòng khách (`turn_on`, `turn_off`, có thể thêm theo phần cứng) chốt khi có chi tiết mạch ([IoT Node Network](firmware/IOT_NODE_NETWORK.md) §4.3). Camera: `snapshot`, `live_start`, `live_stop`.
+`action` của node phòng khách: điều hòa (`target: "ac"`, phát mã IR đã học — [Học mã IR điều hòa](guides/HOC_MA_IR_DIEU_HOA.md)) nhận `turn_on`, `turn_off`, `set_temp_<16..30>`, ack kèm `power`; `learn_off` / `learn_t<16..30>` học mã remote (ack sau khi học xong, bỏ qua `power`); node gửi trạng thái trong TELEMETRY (`ac` 0/1, `ac_temp`, `ac_codes` bitmask 0..65535 mã đã học), Backend đồng bộ vào dòng `<node_id>-ac` và tính online theo node. Relay đèn/quạt/rèm chốt khi có chi tiết mạch ([IoT Node Network](firmware/IOT_NODE_NETWORK.md) §4.3). Camera: `snapshot`, `live_start`, `live_stop`.
 
 ---
 

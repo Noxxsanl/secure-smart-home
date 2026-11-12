@@ -366,6 +366,13 @@ esp_err_t drv_ili9488_fill(drv_ili9488_handle_t h, int x, int y, int w, int hgt,
     return panel_fill(p, x, y, x + w, y + hgt, rgb565);
 }
 
+esp_err_t drv_ili9488_wait_idle(drv_ili9488_handle_t h)
+{
+    ESP_RETURN_ON_FALSE(h, ESP_ERR_INVALID_ARG, TAG, "null handle");
+    /* esp_lcd SPI: tx_param nhận lại kết quả mọi giao dịch màu còn treo trước khi gửi (polling). NOP vô hại. */
+    return esp_lcd_panel_io_tx_param(h->io, LCD_CMD_NOP, NULL, 0);
+}
+
 esp_err_t drv_ili9488_init(const drv_ili9488_config_t *cfg, drv_ili9488_handle_t *out)
 {
     ESP_RETURN_ON_FALSE(cfg && out, ESP_ERR_INVALID_ARG, TAG, "null arg");

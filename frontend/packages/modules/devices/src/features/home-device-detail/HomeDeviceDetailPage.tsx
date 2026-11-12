@@ -13,7 +13,9 @@ import DeviceIcon, { CATEGORY_LABELS } from "../../ui/DeviceIcon";
 import DeviceReading from "../../ui/DeviceReading";
 import OpenCloseButtons from "../../ui/OpenCloseButtons";
 import { useDevicePower } from "../../api/useDevicePower";
-import { APPLIANCE_TEXT, applianceKind } from "../../model/appliance";
+import AcControlPanel from "../../ui/AcControlPanel";
+import { useAcLearn } from "../../api/useAcLearn";
+import { APPLIANCE_TEXT, applianceKind, isAirConditioner } from "../../model/appliance";
 
 // Đường dẫn /devices/abc không phải số → coi như không tìm thấy, không gọi API.
 const NOT_FOUND = new FetchError(404, { error: "NOT_FOUND" });
@@ -41,6 +43,7 @@ export default function DeviceDetailPage({ renderTelemetry, renderCamera }: Home
   const { data, error, mutate } = useDevice(deviceId);
   const revalidate = useRevalidate();
   const power = useDevicePower({ homeSuspended: data?.home.status === "suspended" });
+  const acLearn = useAcLearn();
 
   if (deviceId === null) {
     return (
@@ -66,6 +69,8 @@ export default function DeviceDetailPage({ renderTelemetry, renderCamera }: Home
   const on = power.powerOf(device) === true;
   const blockedReason = power.blockReason(device);
   const kind = applianceKind(device);
+  // Điều hòa backend đã gán (appliance "ac") → bảng điều khiển chi tiết thay cho công tắc đơn.
+  const acPanel = kind === "ac" && isAirConditioner(device);
   const words = APPLIANCE_TEXT[kind ?? "switch"];
   const categoryLabel = kind ? words.label : CATEGORY_LABELS[device.category];
 
@@ -133,7 +138,7 @@ export default function DeviceDetailPage({ renderTelemetry, renderCamera }: Home
           )
         )}
 
-        {isRelay && (
+        {isRelay && !acPanel && (
           <div className="mt-5 flex items-center justify-between gap-4 rounded border border-gray-100 dark:border-slate-700 px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">{on ? words.on : words.off}</p>
@@ -157,25 +162,30 @@ export default function DeviceDetailPage({ renderTelemetry, renderCamera }: Home
         )}
 
         {kind === "ac" && (
-          // Backend mới có lệnh bật/tắt; nhiệt độ đặt + chế độ cần lệnh IR của node (chưa có) nên chỉ hiển thị.
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <div className="rounded border border-gray-100 dark:border-slate-700 px-4 py-3">
-              <p className="text-xs text-gray-400 dark:text-slate-500">Nhiệt độ phòng</p>
-              <p className="mt-1 inline-flex items-center gap-1.5 text-base font-semibold text-gray-900 dark:text-slate-100">
-                <Thermometer className="h-4 w-4 text-critical" />
-                {room?.has_climate_data ? formatTemperature(room.temperature) : "Chưa có số đo"}
-              </p>
+          // Nhiệt độ đặt, mã IR đã học và học mã: AcControlPanel (lệnh set_temp / learn_code đi qua Node bằng IR).
+          <>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div className="rounded border border-gray-100 dark:border-slate-700 px-4 py-3">
+                <p className="text-xs text-gray-400 dark:text-slate-500">Nhiệt độ phòng</p>
+                <p className="mt-1 inline-flex items-center gap-1.5 text-base font-semibold text-gray-900 dark:text-slate-100">
+                  <Thermometer className="h-4 w-4 text-critical" />
+                  {room?.has_climate_data ? formatTemperature(room.temperature) : "Chưa có số đo"}
+                </p>
+              </div>
+              {!acPanel && (
+                <div className="rounded border border-dashed border-gray-200 dark:border-slate-700 px-4 py-3">
+                  <p className="text-xs text-gray-400 dark:text-slate-500">Nhiệt độ đặt</p>
+                  <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">
+                    Thiết bị này chưa được khai báo là điều hòa nên chỉ bật/tắt được.
+                  </p>
+                </div>
+              )}
             </div>
-            <div className="rounded border border-dashed border-gray-200 dark:border-slate-700 px-4 py-3">
-              <p className="text-xs text-gray-400 dark:text-slate-500">Nhiệt độ đặt · Chế độ</p>
-              <p className="mt-1 text-sm text-gray-500 dark:text-slate-400">
-                Hiện chỉ bật/tắt được. Chỉnh nhiệt độ và chế độ sẽ mở khi Node phòng khách hỗ trợ điều khiển hồng ngoại.
-              </p>
-            </div>
-          </div>
+            {acPanel && <AcControlPanel device={device} power={power} learn={acLearn} />}
+          </>
         )}
 
-        {!isRelay && (
+        {!isRelay && !acPanel && (
           <div className="mt-5 rounded border border-gray-100 dark:border-slate-700 px-4 py-3">
             <DeviceReading device={device} size="lg" />
             {device.category === "camera" ? (

@@ -42,8 +42,11 @@ typedef struct {
 /** Cần gw_wifi_start và gw_registry_load trước. */
 esp_err_t gw_espnow_start(const gw_espnow_callbacks_t *cbs);
 
-/** CMD {command_id, action, ts} tới thiết bị idx. ESP_FAIL nếu thiết bị không ack ở tầng MAC (mất kết nối). */
-esp_err_t gw_espnow_send_cmd(size_t idx, const char *command_id, const char *action, int64_t ts);
+/**
+ * CMD {command_id, action, params?, ts} tới thiết bị idx. target != NULL (VD "ac"): thêm params.target — lệnh cho thiết
+ * bị con mà node điều khiển (Server gọi nó bằng UID "<node_id>-<target>"). ESP_FAIL nếu thiết bị không ack ở tầng MAC.
+ */
+esp_err_t gw_espnow_send_cmd(size_t idx, const char *command_id, const char *action, const char *target, int64_t ts);
 
 /** TIME_SYNC {ts}; ESP_ERR_INVALID_STATE nếu chính Gateway chưa có giờ. */
 esp_err_t gw_espnow_send_time_sync(size_t idx);

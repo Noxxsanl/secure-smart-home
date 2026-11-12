@@ -67,7 +67,15 @@ export type CustomerDevice = {
   latest: Reading | null;
   // relay && role cho phép (GUEST: thiết bị được chỉ định, chưa hết hạn). Không phụ thuộc online.
   can_control: boolean;
+  // Loại đồ vật do backend gán cho relay; null / thiếu (dữ liệu cũ) = chưa biết.
+  appliance?: DeviceAppliance | null;
+  // Nhiệt độ đặt của điều hòa (16..30); null / thiếu = chưa biết. Chỉ có ý nghĩa khi appliance === "ac".
+  ac_setpoint?: number | null;
+  // Bitmask mã IR điều hòa đã học: bit 0 = mã TẮT, bit (t − 15) = mã t°C (t = 16..30). null / thiếu = Node chưa báo.
+  ac_codes?: number | null;
 };
+
+export type DeviceAppliance = "lamp" | "fan" | "curtain" | "ac";
 
 export type MyHome = {
   home: Home;
@@ -113,10 +121,17 @@ export type DeviceDetail = {
 
 export type DeviceAction = "turn_on" | "turn_off";
 
+/** Thân POST /devices/:id/commands. `set_temp` chỉ dành cho điều hòa (appliance === "ac"). */
+export type DeviceCommandBody =
+  | { action: DeviceAction }
+  | { action: "set_temp"; temperature: number }
+  // Học mã IR: Node chờ người dùng bấm remote tối đa 10 s (server chờ ≤ 15 s) — dùng timeout riêng ≥ 20 s.
+  | { action: "learn_code"; slot: "off" | number };
+
 export type DeviceCommandResult = {
   command: {
     id: number;
-    action: DeviceAction;
+    action: DeviceAction | "set_temp" | "learn_code";
     status: "acked";
     issued_at: string;
     acked_at: string | null;

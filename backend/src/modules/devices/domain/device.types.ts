@@ -10,6 +10,14 @@ export type { DeviceStateSnapshot, Reading };
 export type ProvisionStatus = "pending" | "provisioned";
 /** Lệnh bật/tắt relay (device_commands.command). */
 export type DeviceAction = "turn_on" | "turn_off";
+/** Đặt nhiệt độ điều hoà: chuỗi lưu ở device_commands.command và gửi xuống gateway, VD `set_temp_24`. */
+export type SetTempAction = `set_temp_${number}`;
+/** Học mã IR remote điều hoà: `learn_off` (mã TẮT) hoặc `learn_t<NN>` (mã BẬT ở NN°C, VD `learn_t24`). */
+export type LearnAction = "learn_off" | `learn_t${number}`;
+/** Mọi lệnh gửi tới một relay (bật/tắt + đặt nhiệt độ + học mã IR của điều hoà). */
+export type DeviceCommandAction = DeviceAction | SetTempAction | LearnAction;
+/** devices.appliance — loại đồ gia dụng mà một relay của Node phòng khách đại diện (NULL = relay thường). */
+export type Appliance = "lamp" | "fan" | "curtain" | "ac";
 /** Lệnh quản trị gateway (CONTRACT §5 Gateways). */
 export type GatewayAction = "restart" | "factory_reset";
 
@@ -42,6 +50,11 @@ export interface DeviceRow {
   provision_status: ProvisionStatus;
   is_simulated: boolean;
   sim_online: boolean;
+  appliance: Appliance | null;
+  /** Nhiệt độ đặt của điều hoà (16..30); NULL khi chưa biết hoặc không phải điều hoà. */
+  ac_setpoint: number | null;
+  /** Bitmask mã IR điều hoà đã học (bit 0 = TẮT, bit t−15 = BẬT ở t°C); NULL = chưa học/chưa biết. */
+  ac_codes: number | null;
   // ── cột join ──
   home_name: string | null;
   home_status: HomeStatus | null;
@@ -68,6 +81,12 @@ export interface CustomerDevice {
   latest: Reading | null;
   /** relay && role cho phép — không phụ thuộc online. */
   can_control: boolean;
+  /** Đồ gia dụng của relay (đèn/quạt/rèm/điều hoà); null với thiết bị khác. */
+  appliance: Appliance | null;
+  /** Nhiệt độ đặt của điều hoà (16..30); null khi chưa biết hoặc không phải điều hoà. */
+  ac_setpoint: number | null;
+  /** Bitmask mã IR điều hoà đã học (bit 0 = TẮT, bit t−15 = BẬT ở t°C); null khi chưa học hoặc không phải điều hoà. */
+  ac_codes: number | null;
 }
 
 /** Thiết bị theo góc nhìn console (ADMIN/OPERATOR). */

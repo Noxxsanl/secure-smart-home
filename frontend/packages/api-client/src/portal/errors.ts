@@ -30,6 +30,7 @@ const MESSAGES: Record<string, string> = {
   NOT_CONTROLLABLE: "Thiết bị này chỉ đo đạc, không bật/tắt được.",
   DEVICE_OFFLINE: "Thiết bị đang offline nên không nhận lệnh. Kiểm tra nguồn điện và WiFi của thiết bị rồi thử lại.",
   DEVICE_BLOCKED: "Thiết bị đã bị khoá vì lý do bảo mật. Liên hệ bộ phận hỗ trợ để được kiểm tra.",
+  COMMAND_FAILED: "Thiết bị chưa thực hiện được lệnh. Kiểm tra thiết bị rồi thử lại; nếu vẫn lỗi, hãy liên hệ bộ phận hỗ trợ.",
   HOME_SUSPENDED: "Dịch vụ của nhà này đang tạm ngưng nên chưa điều khiển hay đổi tự động hoá được. Liên hệ bộ phận hỗ trợ.",
   // Thành viên (FR-6.x)
   CANNOT_INVITE_SELF: "Bạn không thể tự mời chính mình. Hãy nhập email của người cần mời.",
