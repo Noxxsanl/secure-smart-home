@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "cam_camera.h"
+#include "cam_led.h"
 #include "cam_time.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -24,6 +25,8 @@ static const char *TAG = "cam_stream";
 #define STREAM_BOUNDARY "\r\n--" PART_BOUNDARY "\r\n"
 #define STREAM_PART_HDR "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n"
 #define FRAME_INTERVAL_US (1000000LL / CONFIG_CAM_STREAM_MAX_FPS)
+#define STATS_PERIOD_US 5000000LL   /* log fps/kích thước khung TB mỗi 5 s */
+#define TICK_US (1000000LL / configTICK_RATE_HZ)
 
 typedef struct {
     httpd_req_t *req;   /* bản sao async, phải httpd_req_async_handler_complete() khi xong */
@@ -147,30 +150,62 @@ static void stream_task(void *arg)
         reply(req, "500 Internal Server Error", "camera not ready");
     }
 
+    if (chunked) {
+        cam_led_pause(true);   /* đèn flash cạnh ống kính làm khung lúc sáng lúc tối */
+    }
+
     uint32_t frames = 0;
+    uint32_t win_frames = 0;
+    uint64_t win_bytes = 0;
     int64_t started = esp_timer_get_time();
+    int64_t win_start = started;
+    int64_t next_due = started;   /* mốc tuyệt đối của khung kế: không cộng dồn sai số làm tròn tick */
     while (err == ESP_OK) {
-        int64_t t0 = esp_timer_get_time();
         camera_fb_t *fb = cam_camera_fb_get();
         if (fb == NULL) {
             ESP_LOGW(TAG, "frame grab failed");
             break;
         }
-        char part[64];
-        int hlen = snprintf(part, sizeof(part), STREAM_PART_HDR, (unsigned)fb->len);
-        err = httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY));
-        if (err == ESP_OK) {
+        /* Boundary + part header gộp 1 chunk (byte trên dây vẫn như cũ), JPEG là chunk thứ hai:
+         * ít gói TCP nhỏ hơn so với 3 chunk/khung. */
+        char part[128];
+        int hlen = snprintf(part, sizeof(part), STREAM_BOUNDARY STREAM_PART_HDR, (unsigned)fb->len);
+        if (hlen <= 0 || hlen >= (int)sizeof(part)) {
+            err = ESP_FAIL;
+        } else {
             err = httpd_resp_send_chunk(req, part, hlen);
         }
         if (err == ESP_OK) {
             err = httpd_resp_send_chunk(req, (const char *)fb->buf, fb->len);
         }
+        size_t flen = fb->len;
         cam_camera_fb_return(fb);
+        if (err != ESP_OK) {
+            break;
+        }
         frames++;
+        win_frames++;
+        win_bytes += flen;
 
-        int64_t wait_us = FRAME_INTERVAL_US - (esp_timer_get_time() - t0);
-        if (err == ESP_OK && wait_us > 1000) {
-            vTaskDelay(pdMS_TO_TICKS(wait_us / 1000));
+        int64_t now = esp_timer_get_time();
+        if (now - win_start >= STATS_PERIOD_US) {
+            uint32_t fps10 = (uint32_t)((uint64_t)win_frames * 10000000ULL / (uint64_t)(now - win_start));
+            ESP_LOGI(TAG, "sent %u.%u fps, avg frame %u B", (unsigned)(fps10 / 10), (unsigned)(fps10 % 10),
+                     (unsigned)(win_bytes / win_frames));
+            win_frames = 0;
+            win_bytes = 0;
+            win_start = now;
+        }
+
+        /* Giữ trần fps. Ngủ theo số tick nguyên làm tròn xuống (không bao giờ ngủ thừa); phần lẻ dưới 1 tick
+         * bỏ qua vì esp_camera_fb_get() vẫn chờ khung mới của cảm biến. Mạng chậm (now > next_due) thì không ngủ. */
+        next_due += FRAME_INTERVAL_US;
+        if (next_due < now - FRAME_INTERVAL_US) {
+            next_due = now;   /* tụt quá 1 khung → đặt lại mốc, không "đuổi" bằng cách bắn liên tiếp */
+        }
+        int64_t ticks = (next_due - now) / TICK_US;
+        if (ticks > 0) {
+            vTaskDelay((TickType_t)ticks);
         }
     }
 
@@ -183,6 +218,9 @@ static void stream_task(void *arg)
     }
     httpd_req_async_handler_complete(req);
     cam_camera_stream_end();
+    if (chunked) {
+        cam_led_pause(false);
+    }
     atomic_store(&s_busy, false);
     vTaskDelete(NULL);
 }

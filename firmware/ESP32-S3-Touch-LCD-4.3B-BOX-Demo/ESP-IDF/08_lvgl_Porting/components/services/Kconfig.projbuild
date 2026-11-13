@@ -57,8 +57,8 @@ menu "Gateway S3: services"
         prompt "Độ phân giải luồng camera trên màn hình"
         default GW_CAMERA_LIVE_FS_VGA
         help
-            IOT_NODE_NETWORK §5.4. ESP32-S3 không có bộ giải mã JPEG phần cứng: Gateway giải nén bằng TJpgDec
-            trong ROM, nên số khung/giây phụ thuộc chủ yếu vào độ phân giải.
+            IOT_NODE_NETWORK §5.4. ESP32-S3 không có bộ giải mã JPEG phần cứng: Gateway giải nén bằng phần mềm
+            (esp_new_jpeg, có tối ưu cho ESP32-S3), nên số khung/giây phụ thuộc chủ yếu vào độ phân giải.
 
         config GW_CAMERA_LIVE_FS_VGA
             bool "VGA 640x480 (nét, ít khung/giây hơn)"
@@ -70,6 +70,15 @@ menu "Gateway S3: services"
         int "Chất lượng JPEG của luồng (10-30, nhỏ hơn = đẹp hơn, khung nặng hơn)"
         range 10 30
         default 12
+
+    config GW_CAMERA_RELAY_MAX_FPS
+        int "Tốc độ tối đa gửi khung camera lên Server khi có người xem từ xa (khung/giây)"
+        range 1 25
+        default 15
+        help
+            Gateway chuyển tiếp khung JPEG nguyên vẹn của camera lên Server (WebSocket TLS, gw_camera_relay) khi Server gửi
+            lệnh live_start. Quá giới hạn này thì bỏ khung thừa (luôn giữ khung mới nhất). Server chấp nhận tối đa
+            25 khung/giây. VGA q=12 mỗi khung ~15-40 KB → 15 khung/giây ≈ 0,2-0,6 MB/s lên mạng nhà.
 
     choice GW_UI_START_PAGE
         prompt "Trang hiện khi khởi động"

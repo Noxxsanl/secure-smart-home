@@ -31,7 +31,7 @@ Màn hình 800×480, chữ tiếng Việt có dấu:
 
 | Trang | Nội dung |
 |---|---|
-| **Camera** | Hình trực tiếp 448×336 từ ESP32-CAM; góc phải hàng tiêu đề: chấm + chữ kết nối Camera ↔ Gateway (kèm số khung/giây khi có hình). Luồng chỉ chạy khi đang ở trang này |
+| **Camera** | Hình trực tiếp 448×336 từ ESP32-CAM; góc phải hàng tiêu đề: chấm + chữ kết nối Camera ↔ Gateway (kèm số khung/giây khi có hình). Luồng chạy khi đang ở trang này hoặc khi có người xem từ xa; góc trên trái khung hình có nhãn **"Đang được xem từ xa"** khi có phiên xem từ xa (mục 3.2) |
 | **Phòng khách** | Nhiệt độ, độ ẩm; trạng thái quạt, điều hoà, đèn, rèm cửa (chờ node gửi); kết nối node ↔ Gateway |
 | **Thiết bị** | Bảng các thiết bị đã ghép với Gateway — mục 2 |
 
@@ -132,6 +132,32 @@ Cách sửa (không đụng thư viện LVGL): sự kiện `LV_EVENT_DRAW_PART_B
 ## 3. Trang Camera và Phòng khách
 
 - Chấm kết nối ở góc phải dùng quy tắc mục 2.2. Riêng trang Camera khi đang có hình: xanh "Đã kết nối  3.3 khung/s"; đang mở luồng: vàng; luồng đứt đang thử lại: đỏ.
+### 3.1. Đường ống hình camera (2026-11-13)
+
+Trước đây một task `gw_live` vừa đọc luồng MJPEG vừa giải nén từng khung bằng TJpgDec (tuần tự, VGA ≈ 3,3 khung/s). Nay tách:
+
+| Task | Nhân / ưu tiên | Việc |
+|---|---|---|
+| `gw_live` | 0 / 3 | Chỉ đọc `GET /stream`, đưa mỗi khung vào 1 trong 4 bộ đệm JPEG PSRAM và trao **con trỏ** (không chép) |
+| `gw_decode` | 1 / 1 (dưới LVGL) | Chỉ lấy khung **mới nhất** (khung cũ chưa kịp giải nén bị bỏ, không xếp hàng), giải nén bằng `esp_new_jpeg` ra RGB565 vào bộ đệm LVGL không vẽ, rồi đổi nguồn ảnh dưới khoá LVGL |
+| `gw_relay` | 0 / 2 | Gửi khung lên Server khi có phiên xem từ xa (mục 3.2) |
+
+Thông lượng = max(nhận, giải nén). Giải nén chỉ chạy khi LCD đang ở trang Camera. Ô hiển thị vẫn **448×336**: VGA 640×480 × 0,7 = 448×336, cả hai cạnh là bội của 8 nên bộ giải nén thu nhỏ trong chính lần giải nén (không bước co giãn riêng); QVGA (320×240) được giải nén nguyên kích thước rồi phóng lên bằng điểm gần nhất. Tuỳ chọn dự phòng TJpgDec: menuconfig → *Gateway S3: ui*.
+
+Log mỗi 5 s để đo (ESP_LOGI):
+
+```
+gw_camera_live: rx <A> fps, <B> KB/s (<N> frames in <T> ms)           # nhận từ camera
+gw_live_view: shown <C> fps, decode avg <D> ms (max <E>), submitted <N>, dropped <M> (replaced), failed 0, lvgl lock timeouts 0
+gw_camera_relay: relay sent <F> fps, <G> KB/s, offered <N>, dropped <M>  # chỉ khi có phiên xem từ xa
+```
+
+(`<…>` là số đo thật khi chạy trên board; chưa có số đo nào được ghi lại.)
+
+### 3.2. Nhãn "Đang được xem từ xa"
+
+Server gửi lệnh MQTT `live_start` (command_id = session_id) tới camera → Gateway mở WebSocket TLS `/api/device/camera/live` và đẩy khung JPEG lên Server (≤ `CONFIG_GW_CAMERA_RELAY_MAX_FPS`, mặc định 15). Trong lúc phiên còn hiệu lực, trang Camera hiện nhãn "Đang được xem từ xa" (chấm đỏ trên nền đen mờ, góc trên trái khung hình, kể cả khi chưa có hình). Nhãn tắt khi `live_stop`, khi Server đóng, hoặc khi rớt mạng quá 3 lần nối lại (1, 2, 4 s). Rời trang Camera thì LCD không giải nén nữa nhưng luồng camera vẫn được kéo cho phiên xem từ xa. Chi tiết giao thức: README của Gateway, mục *Xem từ xa*.
+
 - Trạng thái quạt / điều hoà / đèn / rèm đọc từ trường `fan`, `ac`, `ac_temp`, `lamp`, `curtain` trong telemetry của node — **đề xuất**, node chưa gửi (README Gateway, mục *Giao diện và xem trực tiếp*).
 
 ## 4. Chữ tiếng Việt
@@ -140,7 +166,25 @@ LVGL hiển thị được tiếng Việt nếu font có glyph; font Montserrat 
 
 ---
 
-## 5. File đã đổi (lần sửa bảng Thiết bị, 2026-11-09)
+## 5. File đã đổi
+
+### 5.1. Pipeline camera + xem từ xa (2026-11-13)
+
+| File | Thay đổi |
+|---|---|
+| `components/services/src/gw_camera_live.c`, `include/gw_camera_live.h` | Chỉ đọc luồng (nhân 0); 4 bộ đệm khung PSRAM có đếm tham chiếu (`gw_live_frame_t`, `gw_live_frame_ref/release`); `on_frame` nhận con trỏ khung; log fps nhận |
+| `components/services/src/gw_camera_relay.c`, `include/gw_camera_relay.h` | **Mới**: WebSocket TLS (`esp_transport_ssl` + `esp_transport_ws`) lên `/api/device/camera/live`, giới hạn fps, 1 khung chờ, status/end, nối lại 1/2/4 s |
+| `components/services/src/gw_api.c`, `include/gw_api.h` | `gw_api_base_url()` để relay dựng URL cùng chính sách TLS |
+| `components/services/Kconfig.projbuild`, `CMakeLists.txt` | `CONFIG_GW_CAMERA_RELAY_MAX_FPS` (1–25, mặc định 15); `tcp_transport` |
+| `components/ui/src/gw_live_view.c/.h` | **Mới**: task `gw_decode`, ô chờ duy nhất, 2 bộ đệm RGB565, số đo |
+| `components/ui/src/gw_jpeg_esp.c`, `gw_jpeg.h` | **Mới**: giải nén bằng `esp_new_jpeg` (scale hoặc bộ đệm phụ + co điểm gần nhất); API `gw_jpeg_create/decode_fit` |
+| `components/ui/src/gw_jpeg_tjpgd.c` | Mã TJpgDec cũ (đổi tên từ `gw_jpeg.c`), dự phòng `CONFIG_GW_UI_JPEG_TJPGD` |
+| `components/ui/src/gw_ui.c`, `include/gw_ui.h` | `gw_ui_live_submit` thay `gw_ui_live_frame`; `gw_ui_set_remote_view` + nhãn "Đang được xem từ xa" |
+| `components/ui/idf_component.yml`, `Kconfig.projbuild`, `CMakeLists.txt` | Khai báo `espressif/esp_new_jpeg ^1.0.2`; chọn bộ giải nén |
+| `components/application/src/gw_app.c`, `include/gw_app.h` | Lệnh camera `live_start`/`live_stop` (không ack); một luồng cho LCD + relay; `live_sync` theo (trang Camera) HOẶC (phiên relay) |
+| `sdkconfig.defaults` | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT` / `WND_DEFAULT` = 11520 (mặc định 5760 dễ nghẽn ở 0,3–0,6 MB/s) — chỉ áp dụng khi sinh lại `sdkconfig` |
+
+### 5.2. Bảng Thiết bị (2026-11-09)
 
 | File | Thay đổi |
 |---|---|

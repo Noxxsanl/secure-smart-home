@@ -1,5 +1,5 @@
 // WebSocket hub cho Mobile (CONTRACT_V2 §4.3, invariant 7: mobile không nối MQTT trực tiếp).
-// main.ts gọi attachWsHub(server, app) sau khi server đã listen.
+// main.ts gọi attachWsHub(server, app, upgrades) sau khi server đã listen (upgrades = core/ws/upgrade-router).
 //
 // Giao thức:
 //   - client mở `GET /api/mobile/ws`, khung ĐẦU TIÊN trong 10 s phải là { type:"auth", token } — token
@@ -11,8 +11,8 @@
 // Token và nội dung khung không bao giờ được log (invariant 2).
 import type { Application } from "express";
 import type { IncomingMessage, Server } from "http";
-import type { Duplex } from "stream";
 import { WebSocketServer, WebSocket } from "ws";
+import { resolveUpgradeClientIp, type UpgradeRouter } from "../../../../core/ws/upgrade-router";
 import { eventBus, type HomeChangedEvent } from "../../../../shared/events/event-bus";
 import { listEffectiveMemberUserIds } from "../../../homes";
 import { authenticateAccessToken, findAuthUserById } from "../../../identity";
@@ -197,19 +197,6 @@ function attachBusListeners(): void {
   eventBus.on("home_changed", (event) => handleHomeChanged(event));
 }
 
-/**
- * IP client theo đúng cấu hình `trust proxy` của Express: dựng object kế thừa `app.request` (getter `ip`
- * dùng `trust proxy fn` của app) từ request nâng cấp, nên không tin X-Forwarded-For khi TRUST_PROXY=false.
- */
-function resolveClientIp(app: Application, req: IncomingMessage): string {
-  try {
-    const fake = Object.create((app as unknown as { request: object }).request, { headers: { value: req.headers }, socket: { value: req.socket } }) as { ip?: string };
-    return fake.ip || req.socket.remoteAddress || "unknown";
-  } catch {
-    return req.socket.remoteAddress || "unknown";
-  }
-}
-
 async function closeRevokedSessions(): Promise<void> {
   const byUser = new Map<number, Connection[]>();
   for (const conn of authedConnections()) {
@@ -230,21 +217,15 @@ async function closeRevokedSessions(): Promise<void> {
   }
 }
 
-export function attachWsHub(server: Server, app: Application): void {
+/**
+ * Đăng ký `/api/mobile/ws` vào bộ định tuyến upgrade dùng chung (core/ws/upgrade-router.ts — listener `upgrade` duy
+ * nhất; path lạ do router đóng socket). Hành vi hub giữ nguyên.
+ */
+export function attachWsHub(server: Server, app: Application, upgrades: UpgradeRouter): void {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES });
-  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => onConnection(ws, resolveClientIp(app, req)));
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => onConnection(ws, resolveUpgradeClientIp(app, req)));
 
-  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    let pathname = "";
-    try {
-      pathname = new URL(req.url ?? "", "http://localhost").pathname;
-    } catch {
-      // URL hỏng → từ chối bên dưới
-    }
-    if (pathname !== WS_PATH) {
-      socket.destroy();
-      return;
-    }
+  upgrades.on(WS_PATH, ({ req, socket, head }) => {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   });
 

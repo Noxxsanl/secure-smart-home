@@ -3,6 +3,7 @@
 export { controlModule } from "./control.module";
 export {
   publishOtaCommand,
+  publishSessionCommand,
   registerSimulatedCommandHandler,
   sendDeviceCommand,
   sendGatewayCommand,
@@ -12,6 +13,7 @@ export type {
   CommandSource,
   CommandSummary,
   PublishOtaCommandInput,
+  PublishSessionCommandInput,
   SendDeviceCommandInput,
   SendDeviceCommandResult,
   SendGatewayCommandInput,

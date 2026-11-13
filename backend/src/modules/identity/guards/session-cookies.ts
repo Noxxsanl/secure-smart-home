@@ -2,7 +2,8 @@
 // thêm Secure khi COOKIE_SECURE=true (mặc định bật ở production). Mỗi portal một tên cookie riêng
 // (`sh_admin` / `sh_operator` / `sh_user`) vì cookie KHÔNG phân biệt cổng: 3 app dev trên
 // localhost:3001/3002/3003 dùng chung host nên nếu cùng tên sẽ ghi đè phiên của nhau.
-import type { CookieOptions, Request, Response } from "express";
+import type { CookieOptions, Response } from "express";
+import type { IncomingMessage } from "http";
 import { env } from "../../../config/env";
 import type { PortalName } from "../../../core/auth/auth-context";
 
@@ -20,9 +21,9 @@ export function isPortalName(value: string): value is PortalName {
 
 /**
  * Đọc giá trị cookie theo tên. Parse tay (không thêm cookie-parser) giống modules/legacy/middleware/verify-jwt.ts;
- * so khớp đúng `name=` nên `sh_admin` không khớp nhầm `sh_admin_x`.
+ * so khớp đúng `name=` nên `sh_admin` không khớp nhầm `sh_admin_x`. Nhận cả request nâng cấp WebSocket (chỉ cần `headers`).
  */
-export function readCookie(req: Request, name: string): string | null {
+export function readCookie(req: Pick<IncomingMessage, "headers">, name: string): string | null {
   const header = req.headers.cookie;
   if (!header) return null;
   for (const part of header.split(";")) {

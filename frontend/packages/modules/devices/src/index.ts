@@ -11,4 +11,5 @@ export { GatewayDetailPage, type GatewayLogSlotProps } from "./features/gateway-
 export { HomeDeviceListPage } from "./features/home-device-list";
 export { HomeDeviceDetailPage } from "./features/home-device-detail";
 export { HomeCameraSnapshots, type HomeCameraSnapshotsProps } from "./features/home-camera-snapshots";
+export { HomeCameraLive, type HomeCameraLiveProps } from "./features/camera-live";
 export { DeviceGrid, type DeviceGridProps } from "./features/device-grid";

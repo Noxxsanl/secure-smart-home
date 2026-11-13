@@ -11,6 +11,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -19,3 +20,10 @@
  * Gọi 1 lần. Lỗi cấu hình LEDC hoặc thiếu bộ nhớ → trả lỗi, đèn tắt.
  */
 esp_err_t cam_led_blink_start(uint32_t period_ms, uint32_t on_ms, uint8_t brightness_pct);
+
+/**
+ * Tạm dừng (true) hoặc tiếp tục (false) nháy mà không dừng task: lúc tạm dừng đèn luôn tắt, chu kỳ giữ nguyên.
+ * Dùng khi phát luồng MJPEG — đèn cạnh ống kính làm các khung lúc sáng lúc tối. Không làm gì nếu chưa gọi
+ * cam_led_blink_start() thành công. An toàn gọi từ task bất kỳ.
+ */
+void cam_led_pause(bool pause);

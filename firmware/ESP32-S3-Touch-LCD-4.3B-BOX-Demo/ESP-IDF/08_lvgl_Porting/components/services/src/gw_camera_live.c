@@ -26,13 +26,14 @@ static const char *TAG = "gw_camera_live";
 #define LIVE_FS "vga"
 #endif
 
-#define LIVE_TASK_STACK 8192      /* esp_http_client + callback giải nén/LVGL chạy trên stack này */
-#define LIVE_TASK_PRIO 1          /* dưới task LVGL (2): giải nén không làm giật giao diện */
-#define LIVE_TASK_CORE 1          /* IOT_NODE_NETWORK §5.4: giải nén ở nhân 1, nhân 0 cho WiFi/ESP-NOW/MQTT */
+#define LIVE_TASK_STACK 6144      /* esp_http_client; không còn giải nén/LVGL trên stack này */
+#define LIVE_TASK_PRIO 3          /* dưới gw_app (4): chỉ đọc mạng, phần lớn thời gian chờ socket */
+#define LIVE_TASK_CORE 0          /* đọc mạng ở nhân 0 cùng WiFi; giải nén ở nhân 1 (gw_ui) — IOT_NODE_NETWORK §5.4 */
 #define LIVE_HTTP_TIMEOUT_MS 3000
 #define LIVE_HTTP_RX_BUF 4096
 #define LIVE_RETRY_MAX 3          /* thử lại sau 1, 2, 4 s (§5.4) */
-#define LIVE_YIELD_MS 2           /* nhường IDLE1 sau mỗi khung — task watchdog canh IDLE của cả 2 nhân */
+#define LIVE_YIELD_MS 1           /* nhường IDLE0 sau mỗi khung — task watchdog canh IDLE của cả 2 nhân */
+#define STATS_US (5 * 1000 * 1000LL)   /* chu kỳ log số đo (fps nhận) */
 #define PART_HDR_MAX 256
 #define PART_HDR_READ 64          /* đọc header từng ít một để không chờ sang khung sau */
 #define CLEN_DIGITS_MAX 7
@@ -48,8 +49,34 @@ typedef struct {
 static gw_camera_live_callbacks_t s_cbs;
 static TaskHandle_t s_task;
 static atomic_int s_want = -1;   /* camera đang được yêu cầu, -1 = dừng */
-static uint8_t *s_frame;          /* PSRAM, GW_CAMERA_LIVE_FRAME_MAX */
+static gw_live_frame_t s_pool[GW_LIVE_POOL_SIZE];   /* data: PSRAM, GW_CAMERA_LIVE_FRAME_MAX mỗi bộ */
 static reader_t s_rd;
+
+/* ---- bộ đệm khung dùng chung ----------------------------------------------------------------------------- */
+
+void gw_live_frame_ref(gw_live_frame_t *f)
+{
+    __atomic_add_fetch(&f->refs, 1, __ATOMIC_ACQ_REL);
+}
+
+void gw_live_frame_release(gw_live_frame_t *f)
+{
+    __atomic_sub_fetch(&f->refs, 1, __ATOMIC_ACQ_REL);
+}
+
+/*
+ * Bộ đệm không ai giữ. refs chỉ TĂNG trong task gw_live (on_frame) nên refs == 0 ở đây là ổn định: không ai giành
+ * được bộ đệm giữa lúc kiểm và lúc đọc vào.
+ */
+static gw_live_frame_t *pool_acquire(void)
+{
+    for (int i = 0; i < GW_LIVE_POOL_SIZE; i++) {
+        if (__atomic_load_n(&s_pool[i].refs, __ATOMIC_ACQUIRE) == 0) {
+            return &s_pool[i];
+        }
+    }
+    return NULL;
+}
 
 static void emit(int idx, gw_live_state_t st, gw_live_err_t err, int http_status)
 {
@@ -253,6 +280,8 @@ static gw_live_err_t run_stream(int idx, int *http_status, uint32_t *frames)
     s_rd.client = client;
     s_rd.pos = s_rd.len = 0;
     int64_t started_us = esp_timer_get_time();
+    int64_t win_us = started_us;
+    uint32_t win_frames = 0, win_bytes = 0;
     while (still_wanted(idx)) {
         size_t len = 0;
         if (!rd_part_header(&s_rd, &len)) {
@@ -265,18 +294,42 @@ static gw_live_err_t run_stream(int idx, int *http_status, uint32_t *frames)
             }
             continue;
         }
-        if (!rd_exact(&s_rd, s_frame, len)) {
+        gw_live_frame_t *f = pool_acquire();
+        if (f == NULL) {
+            /* Không xảy ra khi người dùng khung tuân thủ "mỗi nơi giữ tối đa 1 khung chờ + 1 đang xử lý". */
+            ESP_LOGW(TAG, "no free frame buffer — frame dropped");
+            if (!rd_exact(&s_rd, NULL, len)) {
+                break;
+            }
+            continue;
+        }
+        if (!rd_exact(&s_rd, f->data, len)) {
             break;
         }
-        if (len < 4 || s_frame[0] != 0xFF || s_frame[1] != 0xD8) {
+        if (len < 4 || f->data[0] != 0xFF || f->data[1] != 0xD8) {
             ESP_LOGW(TAG, "part is not a JPEG — dropped");
             continue;
         }
+        f->len = len;
         if (++*frames == 1) {
             emit(idx, GW_LIVE_STREAMING, GW_LIVE_ERR_NONE, status);
         }
+        win_frames++;
+        win_bytes += (uint32_t)len;
+        __atomic_store_n(&f->refs, 1, __ATOMIC_RELEASE);   /* tham chiếu của chính task đọc */
         if (s_cbs.on_frame) {
-            s_cbs.on_frame((size_t)idx, s_frame, len, s_cbs.ctx);
+            s_cbs.on_frame((size_t)idx, f, s_cbs.ctx);
+        }
+        gw_live_frame_release(f);
+        const int64_t now = esp_timer_get_time();
+        if (now - win_us >= STATS_US) {
+            const int64_t span_ms = (now - win_us) / 1000;
+            ESP_LOGI(TAG, "rx %u.%u fps, %u KB/s (%u frames in %u ms)", (unsigned)(win_frames * 10000 / span_ms / 10),
+                     (unsigned)(win_frames * 10000 / span_ms % 10), (unsigned)(win_bytes / 1024 * 1000 / span_ms),
+                     (unsigned)win_frames, (unsigned)span_ms);
+            win_us = now;
+            win_frames = 0;
+            win_bytes = 0;
         }
         vTaskDelay(pdMS_TO_TICKS(LIVE_YIELD_MS));
     }
@@ -347,15 +400,29 @@ esp_err_t gw_camera_live_init(const gw_camera_live_callbacks_t *cbs)
     ESP_RETURN_ON_FALSE(cbs != NULL, ESP_ERR_INVALID_ARG, TAG, "null callbacks");
     ESP_RETURN_ON_FALSE(s_task == NULL, ESP_ERR_INVALID_STATE, TAG, "already started");
     s_cbs = *cbs;
-    s_frame = heap_caps_malloc(GW_CAMERA_LIVE_FRAME_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    ESP_RETURN_ON_FALSE(s_frame != NULL, ESP_ERR_NO_MEM, TAG, "frame buffer (PSRAM)");
+    for (int i = 0; i < GW_LIVE_POOL_SIZE; i++) {
+        s_pool[i].refs = 0;
+        s_pool[i].len = 0;
+        s_pool[i].data = heap_caps_aligned_alloc(16, GW_CAMERA_LIVE_FRAME_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_pool[i].data == NULL) {
+            for (int j = 0; j < i; j++) {
+                free(s_pool[j].data);
+                s_pool[j].data = NULL;
+            }
+            ESP_LOGE(TAG, "frame buffers: no PSRAM for %d x %d KB", GW_LIVE_POOL_SIZE, GW_CAMERA_LIVE_FRAME_MAX / 1024);
+            return ESP_ERR_NO_MEM;
+        }
+    }
     if (xTaskCreatePinnedToCore(live_task, "gw_live", LIVE_TASK_STACK, NULL, LIVE_TASK_PRIO, &s_task,
                                 LIVE_TASK_CORE) != pdPASS) {
-        free(s_frame);
-        s_frame = NULL;
+        for (int i = 0; i < GW_LIVE_POOL_SIZE; i++) {
+            free(s_pool[i].data);
+            s_pool[i].data = NULL;
+        }
         return ESP_ERR_NO_MEM;
     }
-    ESP_LOGI(TAG, "ready (GET /stream?fs=" LIVE_FS "&q=%d)", CONFIG_GW_CAMERA_LIVE_QUALITY);
+    ESP_LOGI(TAG, "ready (GET /stream?fs=" LIVE_FS "&q=%d, %d frame buffers)", CONFIG_GW_CAMERA_LIVE_QUALITY,
+             GW_LIVE_POOL_SIZE);
     return ESP_OK;
 }
 

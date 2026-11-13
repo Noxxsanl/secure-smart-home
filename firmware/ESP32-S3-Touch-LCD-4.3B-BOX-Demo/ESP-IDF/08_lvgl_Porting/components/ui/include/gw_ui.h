@@ -12,8 +12,9 @@
  * camera). Tầng trên đổi trang bằng gw_ui_show_page (VD có chuyển động → trang Camera).
  *
  * Gọi được từ MỌI task: gw_ui_set_* chỉ ghi vào mô hình (có mutex); lv_timer trong task LVGL vẽ lại mỗi 500 ms.
- * Riêng khung hình (gw_ui_live_frame): giải nén JPEG ngay trong task gọi, rồi đổi ảnh dưới khoá LVGL (2 bộ đệm —
- * LVGL không bao giờ vẽ bộ đệm đang bị ghi). Gọi khi chưa gw_ui_start thì bỏ qua.
+ * Riêng khung hình (gw_ui_live_submit): chỉ trao con trỏ JPEG cho task giải nén riêng (nhân 1, ưu tiên dưới LVGL),
+ * task đó luôn lấy khung MỚI NHẤT (khung cũ chưa kịp giải nén bị bỏ) rồi đổi ảnh dưới khoá LVGL (2 bộ đệm — LVGL
+ * không bao giờ vẽ bộ đệm đang bị ghi). Gọi khi chưa gw_ui_start thì bỏ qua.
  *
  * Màn hình KHÔNG hiển thị secret, mật khẩu WiFi, token (bất biến 1, 2).
  *
@@ -98,14 +99,23 @@ void gw_ui_set_telemetry(const char *device_id, const char *payload, size_t len)
 
 void gw_ui_set_devices(const gw_ui_device_t *list, size_t n);
 
-/** Trạng thái luồng trực tiếp ở trang Camera. */
+/** Trạng thái luồng trực tiếp ở trang Camera. OFF = LCD không xem (khung gửi tới bị từ chối, không giải nén). */
 void gw_ui_set_live(gw_ui_live_state_t state);
 
+/** Hiện / ẩn nhãn "Đang được xem từ xa" trên trang Camera (có phiên relay lên Server). */
+void gw_ui_set_remote_view(bool active);
+
+/** Gọi khi giải nén xong, bị thay bằng khung mới hơn, hoặc bị bỏ: trả lại bộ đệm cho người gửi. Chạy trong task bất kỳ. */
+typedef void (*gw_ui_frame_release_t)(void *arg);
+
 /**
- * 1 khung của luồng trực tiếp: giải nén vừa 448x336 rồi đổi ảnh. Chặn trong lúc giải nén (~0,2–0,3 s với VGA).
- * Bỏ qua (ESP_ERR_INVALID_STATE) khi luồng đang tắt. Chỉ gọi từ 1 task.
+ * Trao 1 khung JPEG của luồng trực tiếp để giải nén vừa ô 448x336 (giữ tỉ lệ) và hiển thị. KHÔNG chặn, KHÔNG chép dữ liệu:
+ * jpeg phải còn nguyên tới khi release(arg) được gọi. Chỉ giữ 1 khung chờ — khung mới hơn thay khung cũ (release khung cũ).
+ *
+ * Trả ESP_OK → ui đã nhận khung và sẽ gọi release; lỗi (ESP_ERR_INVALID_STATE khi luồng đang tắt hoặc ui chưa chạy) →
+ * người gọi vẫn giữ khung và tự trả.
  */
-esp_err_t gw_ui_live_frame(const uint8_t *jpeg, size_t len);
+esp_err_t gw_ui_live_submit(const uint8_t *jpeg, size_t len, gw_ui_frame_release_t release, void *arg);
 
 #ifdef __cplusplus
 }

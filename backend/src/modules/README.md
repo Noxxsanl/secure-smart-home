@@ -8,13 +8,14 @@ Mỗi domain là một module; trong module, mỗi use case là một feature. Q
 
 ```
 backend/src/
-├── main.ts              # bootstrap: migrate → demo seed → listen → attachWsHub → worker của mọi module
+├── main.ts              # bootstrap: migrate → demo seed → listen → createUpgradeRouter → attachWsHub + attachCameraLive → worker của mọi module
 ├── app.ts               # helmet/cors/json/log → rate limit → /api (app.module) → 404 → error filter
 ├── app.module.ts        # APP_MODULES + gắn module vào các kênh API; không chứa nghiệp vụ
 ├── config/env.ts        # nạp .env, kiểm biến bắt buộc lúc boot
 ├── core/                # cross-cutting, không phụ thuộc module
 │   ├── auth/            # auth-context.ts (AuthContext, getAuth, req.auth), roles.ts (requireAdmin)
 │   ├── http/            # request-meta.ts (IP, user agent), rate-limit.ts, request-logger.ts
+│   ├── ws/              # upgrade-router.ts — MỘT listener `upgrade`; module đăng ký route WebSocket theo pathname, path lạ → destroy
 │   ├── filters/         # error.filter.ts — HttpError → { error, detail?, …extra }; lỗi lạ → 500
 │   └── health/
 ├── shared/              # shared kernel: errors/http-error.ts, validation/validate.ts, types/domain.ts, crypto.ts,
@@ -52,8 +53,8 @@ cùng handler, tham số `channel`), `service` (`/api/service/**`, dịch vụ n
 | `homes` | smart_homes, rooms, smart_home_members, member_device_access, operator_home_access, activation_tokens, activation_logs | list-my-homes, get-home-overview, update-home, get-room, rename-room, list/invite/update/remove-member, leave-home, list/accept/decline-invitation, claim-home · list/create/get/update-smart-home, register-gateway (phần cứng thật → tài khoản khách), assign-owner, issue-activation-code, revoke-activation-codes, request-home-access, list/grant/revoke-operator-grant | — |
 | `devices` | devices, device_tokens | get-device-detail, rename-device, list-console-devices, get-console-device-detail, set-device-status, update-device, remove-device, list-gateways, get-gateway-detail, list-gateway-sensors, presence-monitor, track-device-ip, gateway-heartbeat (MQTT `home/+/gateway/+/heartbeat`) | deviceMonitor, gatewayHeartbeat, mqttTracker |
 | `telemetry` | sensor_data | ingest-http, ingest-mqtt, get-device-telemetry, purge-old-telemetry | mqttDataService, retentionJob |
-| `camera` | camera_snapshots | ingest-snapshot (`POST /api/device/camera/snapshot`), list-camera-snapshots, get-snapshot-image, camera-event (MQTT `…/camera/event` → thông báo `CAMERA_MOTION`), purge-old-snapshots | cameraEventConsumer, snapshotRetention |
-| `control` | device_commands, user_behavior_logs | send-device-command, send-gateway-command, publish-ota-command, command-ack | commandAckListener |
+| `camera` | camera_snapshots | ingest-snapshot (`POST /api/device/camera/snapshot`), list-camera-snapshots, get-snapshot-image, camera-event (MQTT `…/camera/event` → thông báo `CAMERA_MOTION`), purge-old-snapshots, live-relay (WebSocket: uplink gateway `/api/device/camera/live` + viewer web `/api/portal/cameras/:deviceId/live`, phiên trong RAM; `attachCameraLive` gọi từ main.ts) | cameraEventConsumer, snapshotRetention |
+| `control` | device_commands, user_behavior_logs | send-device-command, send-gateway-command, publish-ota-command, publish-session-command (lệnh phiên camera live_start/live_stop, không ack), command-ack | commandAckListener |
 | `automation` | automation_rules, automation_history | list/create/update/delete-automation, get-automation-history, list-console-automations, toggle-automation, run-automation-engine | automationEngine |
 | `recommendations` | recommendation_history, user_feedback | list-suggestions, accept-suggestion, dismiss-suggestion, run-habit-suggestions | habitSuggestionJob |
 | `notifications` | notifications | list-notifications, mark-notifications-read, list-staff-notifications, mark-staff-notifications-read | — |
@@ -61,12 +62,12 @@ cùng handler, tham số `channel`), `service` (`/api/service/**`, dịch vụ n
 | `audit` | audit_log | list-logs, delete-logs · `logEvent` cho mọi module | — |
 | `stats` | — | get-badges, get-operator-stats, get-admin-stats | — |
 | `ai-usage` | ai_usage_logs, ai_model_prices, ai_usage_settings | ingest-usage (`POST /api/service/ai-usage`), get-usage-summary, list-usage-calls, list-model-prices, save-model-price, delete-model-price, sync-model-prices (kho giá LiteLLM), update-usage-settings · facade `recordAiUsage` (Agent chạy trong backend) | — |
-| `realtime` | — | mobile-ws (`attachWsHub`, WebSocket `/api/mobile/ws`, gọi từ main.ts) | — |
+| `realtime` | — | mobile-ws (`attachWsHub`, WebSocket `/api/mobile/ws`, đăng ký vào upgrade router, gọi từ main.ts) | — |
 | `simulator` | — (miễn T1/T2) | get-simulator-status, simulate-device-power, simulate-door, simulator-engine | simulator |
 | `legacy` | — (miễn T1/T2) | route Prototype `/api/{auth,devices,audit-log,users,notifications}` giữ cho `tests/security/attack_demo*.sh`; không tách feature, không phát triển thêm | — |
 
 Camera: ảnh chụp (snapshot) đã có ở module `camera` + port lưu ảnh `infrastructure/storage` (`docs/DESIGN_PATTERNS.md` §3.2c;
-thư mục `SNAPSHOT_STORAGE_DIR`); xem trực tiếp (live) chưa hiện thực. `recommendations` là gợi ý thói quen thống kê, KHÔNG phải AI agent của
+thư mục `SNAPSHOT_STORAGE_DIR`); xem trực tiếp (live) = feature `live-relay` (relay khung JPEG gateway → backend → web, chỉ RAM, không ghi đĩa; `domain/live-session.ts` là sổ phiên, `domain/gateway-auth.ts` là xác thực gateway dùng chung với ingest-snapshot). `recommendations` là gợi ý thói quen thống kê, KHÔNG phải AI agent của
 `docs/proposals/DE_XUAT_AI_AGENT.md` (draft).
 
 ## 3. Quy tắc phụ thuộc (`npm run check:arch`)

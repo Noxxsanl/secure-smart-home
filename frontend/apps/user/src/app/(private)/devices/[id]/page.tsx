@@ -1,14 +1,19 @@
 "use client";
 
-import { HomeCameraSnapshots, HomeDeviceDetailPage } from "@shh/devices";
+import { HomeCameraLive, HomeCameraSnapshots, HomeDeviceDetailPage } from "@shh/devices";
 import { HomeDeviceTelemetry } from "@shh/telemetry";
 
-// Thiết bị (@shh/devices) + biểu đồ cảm biến nhiệt/ẩm (@shh/telemetry) + ảnh camera (@shh/devices).
+// Thiết bị (@shh/devices) + biểu đồ cảm biến nhiệt/ẩm (@shh/telemetry) + camera: xem trực tiếp rồi ảnh đã chụp (@shh/devices).
 export default function Page() {
   return (
     <HomeDeviceDetailPage
       renderTelemetry={(p) => <HomeDeviceTelemetry {...p} />}
-      renderCamera={(p) => <HomeCameraSnapshots {...p} />}
+      renderCamera={(p) => (
+        <>
+          <HomeCameraLive {...p} />
+          <HomeCameraSnapshots {...p} />
+        </>
+      )}
     />
   );
 }

@@ -381,6 +381,26 @@ flowchart TD
 | **SQL Injection** | Parameter binding nhất quán 100% (loại bỏ hoàn toàn pattern nội suy chuỗi như `devices.ts:139`) |
 | **Response Envelope** | Không rò rỉ stack trace/chi tiết lỗi nội bộ ra response production (hiện tại error handler `app.ts:70-77` trả `err.message` trực tiếp — cần ẩn message chi tiết ở production, chỉ log server-side) |
 
+### 9.1. Xem trực tiếp camera (live view) — hiện trạng 2026-11-13
+
+Luồng: Camera —HTTP MJPEG trong Local AP (WPA2)→ Gateway —WSS `/api/device/camera/live`→ Backend —WSS `/api/portal/cameras/:deviceId/live`→ trình duyệt. Hợp đồng chi tiết: [API](API_DESIGN.md) §5.1, §8, §9.1. Code: `backend/src/modules/camera/features/live-relay/`, `backend/src/core/ws/upgrade-router.ts`.
+
+| Mối đe doạ | Kiểm soát đã có |
+|---|---|
+| Chiếm phiên xem qua trang web lạ (CSWSH — WebSocket xác thực bằng cookie, trình duyệt tự gửi cookie) | Bắt buộc header `Origin`: host phải trùng `Host`/`X-Forwarded-Host` hoặc nằm trong `FRONTEND_URL`; sai/thiếu → 403 trước upgrade. Cookie `sh_user` là `HttpOnly`, `SameSite=strict` |
+| Xem camera của nhà khác / leo thang quyền | Kiểm sau upgrade bằng mã đóng: không thuộc nhà → `4404` (không lộ sự tồn tại, bất biến 6), role GUEST → `4403`; Admin/Operator không có endpoint xem live (quyền riêng tư). Kiểm lại phiên + quyền nhà mỗi 30 giây (`4401`/`4403` khi token đổi, khoá tài khoản, mất quyền) |
+| Giả mạo gateway đẩy hình lên | HMAC gateway trên `<gateway_id>:<ts>:<device_id>:<session_id>` (bất biến 5), `ts` ±300 giây, **và** `session_id` do Backend tạo (UUID v4) phải khớp camera + gateway; sai → dùng chung đường audit + đếm lần sai/khoá gateway với `POST /device/camera/snapshot` |
+| Replay yêu cầu upgrade trong cửa sổ ±300 giây | Giảm nhẹ, không loại bỏ: uplink thứ hai của cùng phiên chỉ thay được uplink đang chạy khi uplink đó đã im ≥ 3 giây (409 `LIVE_UPLINK_BUSY`), nên kẻ phát lại không chiếm được luồng thật đang chạy; replay còn cần `session_id` đang sống (404 nếu không) |
+| Dò/brute force, làm nghẽn upgrade (upgrade không đi qua rate limit của Express) | Giới hạn theo IP đếm **trước** mọi truy vấn DB: uplink 30 upgrade/phút/IP, viewer 60 upgrade/phút/IP (429); mỗi user tối đa 2 luồng và 10 lần mở/phút (`4429`); mỗi camera tối đa 4 người xem (`4409`) |
+| Lộ hình ảnh lưu trữ | Backend chỉ chuyển tiếp trong RAM, không ghi khung xuống đĩa/DB; khung lớn hơn 200 KB bị bỏ; người xem chậm bị bỏ khung (bộ đệm ≤ 256 KB) |
+| Chối bỏ / truy vết | Audit `CAMERA_LIVE_VIEW_START` / `CAMERA_LIVE_VIEW_END` (`{duration_s, reason}`); log không chứa chữ ký, secret, `session_id` |
+| Nghe lén chặng trong nhà | Camera → Gateway là HTTP thường nhưng chạy trong WPA2 Local AP của Gateway, mỗi yêu cầu `/stream` ký HMAC bằng secret camera; Gateway → Backend là TLS với CA nội bộ, không tắt kiểm chứng (bất biến 3) |
+
+**Rủi ro còn lại:**
+- Broker MQTT chưa có ACL (`allow_anonymous true`, [MQTT TLS](guides/MQTT_TLS.md)): kẻ có thể publish vào broker có thể gửi `live_start` giả. Lệnh vẫn phải qua kiểm HMAC + `ts` của Gateway; nếu qua, Gateway chỉ mở uplink tới **Backend thật**, và Backend từ chối (404 `LIVE_SESSION_NOT_FOUND`) vì không có phiên khớp `session_id` — hình không rời nhà tới nơi khác, nhưng Gateway bị buộc kéo luồng camera tạm thời (tốn tài nguyên). Hết rủi ro khi có ACL theo topic.
+- Bộ đếm giới hạn, sổ phiên và cửa sổ kiểm nằm trong RAM của **1 process** backend: chạy nhiều instance thì giới hạn nhân lên và phiên không chia sẻ được — cần Redis/định tuyến theo camera trước khi scale ngang (cùng vấn đề với rate limit ở bảng trên).
+- Replay trong ±300 giây chỉ giảm nhẹ như trên; chặn hẳn cần nonce một lần dùng cho chữ ký uplink.
+
 ---
 
 ## 10. SECRET MANAGEMENT

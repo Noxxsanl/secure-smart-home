@@ -36,7 +36,9 @@ static camera_config_t s_cfg = {
     .pixel_format = PIXFORMAT_JPEG,
     .frame_size = SNAPSHOT_FRAMESIZE,
     .jpeg_quality = 12,
-    .fb_count = 2,
+    /* 3 bộ đệm: cảm biến chụp khung kế khi khung trước đang gửi qua WiFi. JPEG SVGA mỗi bộ đệm chỉ
+     * rộng*cao/5 = 96000 byte (+ nửa bộ đệm DMA) trong esp32-camera → 3 bộ ≈ 300 KB trên 4 MB PSRAM. */
+    .fb_count = 3,
     .fb_location = CAMERA_FB_IN_PSRAM,
     .grab_mode = CAMERA_GRAB_LATEST,   /* luôn lấy khung mới nhất, bỏ khung cũ khi mạng chậm */
 };

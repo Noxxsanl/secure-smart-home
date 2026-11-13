@@ -5,71 +5,35 @@
 //        → device_type gateway (403) + active (403) → camera thuộc gateway (404) + active (403).
 //   2. express.raw (≤ 204800 byte, vượt → 413) — gắn ở camera.module.ts.
 //   3. verifySnapshotSignature — kiểm HMAC bằng getGatewaySigner (secret không rời module devices, invariant 1, 2).
-// Lỗi xác thực (gateway lạ, ts quá hạn, HMAC sai) cùng đường với telemetry (invariant 4): audit authFailureEventType
-// (ts quá hạn = REPLAY_ATTACK), registerAuthFailure → đủ 5 lần sai thì gateway bị khoá, trả 401 GATEWAY_AUTH_FAIL.
-// Không còn dùng verifyGatewayHMAC (chuỗi ngắn "<gw>:<ts>") cho route này. Không log chữ ký/secret.
+// Các bước kiểm + xử lý lỗi xác thực (gateway lạ, ts quá hạn, HMAC sai → audit authFailureEventType, registerAuthFailure,
+// khoá gateway sau 5 lần sai, 401 GATEWAY_AUTH_FAIL) nằm ở camera/domain/gateway-auth.ts, DÙNG CHUNG với uplink WebSocket
+// camera live (invariant 4: một logic xác thực). Không còn dùng verifyGatewayHMAC (chuỗi ngắn "<gw>:<ts>") cho route này.
+// Không log chữ ký/secret.
 import type { NextFunction, Request, Response } from "express";
 import { requestMeta } from "../../../../core/http/request-meta";
 import { HttpError } from "../../../../shared/errors/http-error";
-import { log } from "../../../audit";
-import { getDeviceRowByUid, getGatewaySigner, isTimestampValid, registerAuthFailure } from "../../../devices";
-import { authFailureEventType } from "../../../telemetry";
+import { precheckGatewayCamera, verifyGatewaySignature } from "../../domain/gateway-auth";
 import {
   buildSnapshotSigningString,
   parseSnapshotHeaders,
   type PendingSnapshotAuth,
-  type SnapshotHeaders,
   type VerifiedSnapshotRequest,
 } from "./ingest-snapshot.dto";
 
 export const VERIFIED_LOCAL = "verifiedSnapshot";
 const PENDING_LOCAL = "pendingSnapshotAuth";
-
-type AuthFailureReason = "NOT_FOUND" | "TIMESTAMP_EXPIRED" | "HMAC_MISMATCH";
-
-/** Audit + đếm lần sai + 401 GATEWAY_AUTH_FAIL (luôn ném). gatewayDbId null khi gateway không tồn tại. */
-async function failAuth(
-  req: Request,
-  headers: SnapshotHeaders,
-  gatewayDbId: number | null,
-  reason: AuthFailureReason
-): Promise<never> {
-  const { ip, userAgent } = requestMeta(req);
-  await log(authFailureEventType("gateway", reason), gatewayDbId, ip, userAgent, {
-    gateway_id: headers.gatewayUid,
-    reason,
-    source: "http_snapshot",
-  });
-  if (gatewayDbId !== null) {
-    const failure = await registerAuthFailure(gatewayDbId);
-    if (failure.blocked) {
-      await log("DEVICE_BLOCKED", gatewayDbId, ip, userAgent, {
-        gateway_id: headers.gatewayUid,
-        fail_count: failure.failCount,
-      });
-    }
-  }
-  throw new HttpError(401, "GATEWAY_AUTH_FAIL", undefined, { reason });
-}
+const AUTH_SOURCE = "http_snapshot";
 
 export async function precheckSnapshotRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
   const headers = parseSnapshotHeaders(req);
 
-  const gateway = await getDeviceRowByUid(headers.gatewayUid);
-  if (!gateway) return failAuth(req, headers, null, "NOT_FOUND");
-  if (!isTimestampValid(headers.timestamp)) return failAuth(req, headers, gateway.id, "TIMESTAMP_EXPIRED");
-
-  if (gateway.device_type !== "gateway") {
-    throw new HttpError(403, "INVALID_DEVICE_TYPE", "X-Gateway-Id must be a gateway device");
-  }
-  if (gateway.status === "blocked") throw new HttpError(403, "DEVICE_BLOCKED", "Gateway is blocked");
-  if (gateway.status !== "active") throw new HttpError(403, "DEVICE_NOT_ACTIVE", "Gateway is not active");
-
-  const camera = await getDeviceRowByUid(headers.cameraUid);
-  if (!camera || camera.category !== "camera" || camera.gateway_device_id !== gateway.id) {
-    throw new HttpError(404, "CAMERA_NOT_FOUND", "Camera not found for this gateway");
-  }
-  if (camera.status !== "active") throw new HttpError(403, "DEVICE_INACTIVE", "Camera is not active");
+  const { gateway, camera } = await precheckGatewayCamera(
+    requestMeta(req),
+    AUTH_SOURCE,
+    headers.gatewayUid,
+    headers.cameraUid,
+    headers.timestamp
+  );
 
   const pending: PendingSnapshotAuth = { headers, gatewayDbId: gateway.id, camera };
   res.locals[PENDING_LOCAL] = pending;
@@ -85,11 +49,14 @@ export async function verifySnapshotSignature(req: Request, res: Response, next:
     throw new HttpError(400, "INVALID_IMAGE", "Body must be a JPEG image (Content-Type: image/jpeg)");
   }
 
-  const signer = await getGatewaySigner(gatewayDbId);
-  if (!signer) return failAuth(req, headers, gatewayDbId, "NOT_FOUND");
-  if (!signer.verify(buildSnapshotSigningString(headers, body), headers.signature)) {
-    return failAuth(req, headers, gatewayDbId, "HMAC_MISMATCH");
-  }
+  await verifyGatewaySignature(
+    requestMeta(req),
+    AUTH_SOURCE,
+    headers.gatewayUid,
+    gatewayDbId,
+    buildSnapshotSigningString(headers, body),
+    headers.signature
+  );
 
   const verified: VerifiedSnapshotRequest = {
     gatewayDbId,

@@ -100,7 +100,11 @@ services:
       - MQTT_HOST=mqtt-broker
       - MQTT_PORT=8883
       - MQTT_CA_FILE=/certs/mqtt-ca.crt
-      - FRONTEND_URL=http://localhost
+      # Origin được phép (CORS + kiểm Origin của WebSocket xem camera, chống CSWSH). Dev: 3 app Next mở thẳng ở
+      # :3001/:3002/:3003 — Next dev chuyển tiếp WebSocket /api/* sang backend nhưng đổi Host thành backend:5000, nên
+      # Origin http://localhost:3003 phải có trong danh sách, nếu không backend trả 403 ORIGIN_NOT_ALLOWED. Qua nginx
+      # (http://user.localhost) là cùng origin, không cần khai báo. Prod (compose.prod.yaml) chỉ giữ origin thật.
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost,http://localhost:3001,http://localhost:3002,http://localhost:3003}
     depends_on:
       postgres:
         condition: service_healthy

@@ -96,7 +96,7 @@ export default function Page() {
 }
 ```
 
-Các slot hiện có: thiết bị ← số đo (`renderTelemetry`, console + khách); chi tiết thiết bị của khách ← ảnh camera (`renderCamera`, `HomeCameraSnapshots`); gateway ← bảng log và Smart Home ← tab Log (`renderLogs`); Tổng quan/Phòng của khách ← `DeviceGrid` (`renderDevices`); Thành viên ← lời mời của tôi (`invitationsSlot`); màn hình "chưa có nhà" của `HomeGate` ← lời mời (`CurrentHomeProvider noHomeSlot`, ở `apps/user/src/app/(private)/layout.tsx`). Trang không cần ghép thì chỉ re-export: `export { DevicesPage as default } from "@shh/devices";`.
+Các slot hiện có: thiết bị ← số đo (`renderTelemetry`, console + khách); chi tiết thiết bị của khách ← camera (`renderCamera`: `HomeCameraLive` xem trực tiếp + `HomeCameraSnapshots` ảnh chụp); gateway ← bảng log và Smart Home ← tab Log (`renderLogs`); Tổng quan/Phòng của khách ← `DeviceGrid` (`renderDevices`); Thành viên ← lời mời của tôi (`invitationsSlot`); màn hình "chưa có nhà" của `HomeGate` ← lời mời (`CurrentHomeProvider noHomeSlot`, ở `apps/user/src/app/(private)/layout.tsx`). Trang không cần ghép thì chỉ re-export: `export { DevicesPage as default } from "@shh/devices";`.
 
 **Lựa chọn có chủ đích** (để giữ R3/R4 mà không chép code):
 
@@ -136,7 +136,7 @@ npm run build               # next build cả 3 app
 - **Header `X-Portal: admin|operator|user`** do `packages/api-client/src/http.ts` gắn vào MỌI request. Backend dùng nó để chọn cookie của đúng cổng, đồng thời coi đó là lớp chống CSRF: request ghi (POST/PUT/PATCH/DELETE) thiếu header bị từ chối `403 CSRF_CHECK_FAILED`.
 - **Lỗi** ném `FetchError(status, body)`, `body.error` là mã lỗi backend. UI luôn đổi sang câu hướng dẫn tiếng Việt (`errorMessage` / `portalErrorMessage` của `@shh/api-client/dashboard|portal`, lỗi đăng nhập ở `packages/modules/auth/src/model/errors.ts`), không hiện mã thô. `401` ở request thường → `AuthProvider` kết thúc phiên và đưa về `/login?reauth=expired`.
 - **`src/proxy.ts`** (Next 16 `proxy`, dùng `createSessionProxy` từ `@shh/auth/proxy`) là cổng UX: chưa có cookie phiên mà vào trang riêng tư → chuyển `/login`; đã có cookie mà vào `/login` (hoặc `/register` ở cổng khách) → chuyển trang chủ; bỏ qua `/api`, `/_next` và file tĩnh. Proxy **không xác thực** — backend kiểm tra JWT ở mọi request `/api/**`; cookie giả/hết hạn vẫn nhận 401 và bị đưa về trang đăng nhập (`?reauth=` chặn vòng lặp chuyển hướng).
-- **Không có WebSocket trên web.** Dữ liệu cập nhật bằng polling SWR: tổng quan nhà / thiết bị 5 s, thông báo 15 s, log 30 s, danh sách console 10 s. Mobile mới dùng WebSocket.
+- **WebSocket chỉ dùng cho xem trực tiếp camera** (`@shh/devices` → `HomeCameraLive`, WS `/api/portal/cameras/:deviceId/live`, khung JPEG vẽ lên canvas, chỉ mở khi người dùng bấm; dev có thể đặt `NEXT_PUBLIC_LIVE_WS_ORIGIN=ws://localhost:5000` vì Next rewrites có thể không chuyển tiếp WS; khi đặt như vậy phải thêm origin của web (vd `http://localhost:3003`) vào `FRONTEND_URL` của backend, nếu không backend trả 403 Origin; lỗi 401/403/429 trước upgrade trình duyệt chỉ thấy mã 1006 nên web hiện "Không kết nối được máy chủ. Hãy tải lại trang hoặc đăng nhập lại." sau 3 lần thử lại). Còn lại cập nhật bằng polling SWR: tổng quan nhà / thiết bị 5 s, thông báo 15 s, log 30 s, danh sách console 10 s. Mobile dùng WebSocket cho sự kiện realtime.
 - Cổng khách: cache SWR riêng cho mỗi lần đăng nhập (`PortalSwrProvider` của `@shh/auth`) để tài khoản đăng nhập sau không thấy dữ liệu của tài khoản trước.
 
 ### Tài khoản demo (backend seed)

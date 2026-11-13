@@ -219,12 +219,35 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 | Hồ sơ | GET · PATCH | `/me/profile` | — | Xem / sửa hồ sơ |
 | | POST | `/me/password` | — | Đổi mật khẩu |
 
+#### WebSocket xem trực tiếp camera — chỉ kênh Portal
+
+`GET /api/portal/cameras/:deviceId/live` (WebSocket, `modules/camera/features/live-relay/live-viewer.controller.ts`). **Đã có** cho web khách hàng; **không** có trên `/api/mobile` (xem 5.2) và **không** có cho Admin/Operator (quyền riêng tư, [IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.5). Phía Gateway đẩy khung lên: mục 8, "WebSocket `/api/device/camera/live`".
+
+- **Trước upgrade** (lỗi → HTTP thô rồi đóng socket): quá 60 upgrade/phút/IP → `429`; thiếu/sai `Origin` → `403 ORIGIN_NOT_ALLOWED` (host của `Origin` phải trùng `Host`/`X-Forwarded-Host`, hoặc nằm trong `FRONTEND_URL`, danh sách phân tách dấu phẩy); cookie `sh_user` thiếu/sai/hết hạn hoặc không phải role USER → `401`.
+- **Sau upgrade** — trình duyệt không đọc được HTTP status nên backend đóng bằng mã ứng dụng:
+
+| Close code | Nghĩa |
+|---|---|
+| `4401` | Phiên đăng nhập hết hạn, `token_version` đổi hoặc tài khoản bị khoá (kiểm lại mỗi 30 giây) |
+| `4403` | Role trong nhà là GUEST (chỉ OWNER, CONTROLLER, VIEWER được xem), hoặc mất quyền giữa chừng |
+| `4404` | Camera không tồn tại / không thuộc nhà của user / không phải camera / id > 2147483647 (bất biến 6: không lộ sự tồn tại) |
+| `4408` | Camera không phản hồi: chưa có luồng sau 20 giây, hoặc luồng mất quá 15 giây |
+| `4409` | Camera đã đủ 4 người xem |
+| `4429` | User đã mở 2 luồng, hoặc mở quá 10 lần/phút |
+| `4501` | Camera mô phỏng (`is_simulated`) — không hỗ trợ |
+| `1000` | Kết thúc bình thường |
+
+- **Server → client:** tin **nhị phân** = đúng 1 khung JPEG chuyển tiếp nguyên vẹn (người xem chậm: `bufferedAmount` > 256 KB thì bỏ khung, luôn giữ khung mới nhất; người xem mới nhận ngay khung cuối nếu < 2 giây tuổi); tin **văn bản** `{"type":"state","state":"connecting"|"live"|"reconnecting"|"camera_unavailable"}`. Client không cần gửi gì (`maxPayload` 1 KB); server ping mỗi 30 giây, không pong thì đóng.
+- **Phiên do Backend làm chủ** (chỉ trong RAM, không ghi đĩa/DB): người xem đầu tiên mở → tạo `session_id` (UUID v4) + gửi MQTT `live_start` (mục 9.1); người xem cuối rời → chờ 10 giây rồi `live_stop` và đóng luồng lên. Chưa có luồng sau 10 giây → gửi lại `live_start` 1 lần.
+- **Audit:** `CAMERA_LIVE_VIEW_START` khi qua kiểm quyền, `CAMERA_LIVE_VIEW_END` kèm `{duration_s, reason}`.
+- Web: `frontend/packages/modules/devices/src/features/camera-live/`; dev nối thẳng backend bằng `NEXT_PUBLIC_LIVE_WS_ORIGIN` ([Lên Server](guides/LEN_SERVER.md) §6, "Xem trực tiếp camera trên web").
+
 ### 5.2. Dự kiến
 
 | Nhóm | Method | Path | Quyền | Mô tả | Nguồn thiết kế |
 |---|---|---|---|---|---|
 | Camera | POST | `/devices/:deviceId/commands` với `action: "snapshot"` | `control_device` | Yêu cầu chụp ngay (mở rộng `DeviceAction`) | §6.3 của tài liệu đó |
-| | WS | `/cameras/:deviceId/live` | `view`, role ≠ GUEST | Xem trực tiếp, khung JPEG nhị phân, gia hạn 30 giây | §5.5 của tài liệu đó (tuỳ chọn) |
+| | WS | `/api/mobile/cameras/:deviceId/live` | JWT Bearer, role ≠ GUEST | Xem trực tiếp trên Mobile — **vẫn dự kiến**; kênh Portal đã có (mục 5.1), Mobile cần cách xác thực WebSocket bằng Bearer (không đặt token trong URL) | §5.5 của tài liệu đó (tuỳ chọn) |
 | Provisioning | POST | `/provision/start` | OWNER | Bắt đầu phiên đưa Gateway lên mạng | [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) §15.2 |
 | | GET | `/provision/status` | OWNER | Trạng thái phiên | như trên |
 | | POST | `/pair-node` · GET `/pair-node/status` | OWNER | Bật chế độ ghép nối node, xem kết quả | như trên |
@@ -253,7 +276,7 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 
 Khung tối đa 4 KB. Server ping định kỳ; client không phản hồi pong bị đóng. Mất kết nối → client thử lại 1, 2, 4, 8, 16 giây rồi 30 giây, trong lúc đó poll REST.
 
-Thông báo chuyển động đi qua tin `notification` (`type: "CAMERA_MOTION"`). Live video **không** đi qua kênh này (mục 5.2).
+Thông báo chuyển động đi qua tin `notification` (`type: "CAMERA_MOTION"`). Live video **không** đi qua kênh này — có WebSocket riêng (mục 5.1, "WebSocket xem trực tiếp camera").
 
 ---
 
@@ -334,9 +357,21 @@ Tiền tố `/api/device`. Gateway gọi qua HTTPS, kiểm chứng chứng chỉ
 | POST | `/device/data` | HMAC 2 lớp trong body | `{gateway_id, gw_timestamp, gw_hmac, sensor_payload: {sensor_id, sn_timestamp, sn_hmac, data}}` — **cùng payload với MQTT** `gateway/+/data`, dùng làm đường dự phòng khi MQTT lỗi | Đã có (`modules/telemetry/features/ingest-http/`) |
 | GET | `/device/sensors` | HMAC gateway trên query `gateway_id, gw_timestamp, gw_hmac` | Trả danh sách sensor **kèm secret** để gateway kiểm HMAC lớp 1 | Đã có — **lỗ hổng đã biết** ([Bảo mật](SECURITY_ARCHITECTURE.md) §2). Thay bằng cấp secret lúc ghép nối (mục 14, Q1) |
 | POST | `/device/camera/snapshot` | Header `X-Gateway-Id`, `X-Timestamp`, `X-Signature` = `HMAC-SHA256(secret gateway, "<gateway_id>:<ts>:<device_id>:<trigger>:<command_id>:<sha256_hex(body)>")` hex thường (`<command_id>` rỗng nếu không có `X-Command-Id`) | Body `image/jpeg` ≤ 200 KB; header `X-Device-Id` (camera), `X-Trigger: motion\|request`, `X-Command-Id?`; `X-Gateway-Id`/`X-Device-Id`/`X-Command-Id` khớp `^[A-Za-z0-9_.:-]{1,64}$`. Thứ tự kiểm: header → gateway tồn tại → `ts` ±300 s → gateway đúng loại + active → camera thuộc gateway + active → đọc body (≤ 200 KB) → HMAC → JPEG hợp lệ → camera đã gán nhà. Trả `201 {snapshot_id}` (chuỗi). Lỗi: `400 MISSING_GATEWAY_FIELDS`/`MISSING_FIELDS`/`INVALID_INPUT`/`INVALID_IMAGE`, `401 GATEWAY_AUTH_FAIL {reason: NOT_FOUND\|TIMESTAMP_EXPIRED\|HMAC_MISMATCH}`, `403 INVALID_DEVICE_TYPE`/`DEVICE_BLOCKED`/`DEVICE_NOT_ACTIVE`/`DEVICE_INACTIVE`, `404 CAMERA_NOT_FOUND`, `409 CAMERA_NOT_ASSIGNED` (camera chưa gán nhà, không lưu), `413 PAYLOAD_TOO_LARGE`; giới hạn 30 yêu cầu/phút | Đã có (`modules/camera/features/ingest-snapshot/`) |
-| WS | `/device/camera/live` | HMAC gateway khi mở kết nối | Tin nhị phân = 1 khung JPEG; tin văn bản `{type:"end"}` khi dừng | Dự kiến, tuỳ chọn |
+| WS | `/device/camera/live` | Header `X-Gateway-Id`, `X-Device-Id`, `X-Session-Id`, `X-Timestamp`, `X-Signature` (chi tiết bên dưới) | Tin nhị phân = 1 khung JPEG; tin văn bản JSON `status` / `end` | Đã có (`modules/camera/features/live-relay/`) |
 
 `modules/telemetry/features/ingest-http/` (HTTP) và `modules/telemetry/features/ingest-mqtt/` (MQTT) phải giữ **cùng logic xác thực** (bất biến 4): cả hai gọi chung hàm HMAC của `modules/devices` và `telemetry/domain/ingest-common.ts`.
+
+#### WebSocket `/api/device/camera/live` (Gateway → Backend, xem trực tiếp)
+
+Gateway mở khi nhận lệnh MQTT `live_start` (mục 9.1) cho một camera, qua cùng base URL với các API trên (`https` → `wss://<host>/api/device/camera/live` qua nginx :443, kiểm chứng chứng chỉ bằng CA nội bộ; không bao giờ tắt kiểm chứng TLS — bất biến 3). Phía Gateway: `components/services/src/gw_camera_relay.c`. Phía web xem: mục 5.1.
+
+- **Header** của yêu cầu upgrade: `X-Gateway-Id` (UID gateway), `X-Device-Id` (UID camera), `X-Session-Id` (= `command_id` của `live_start`), `X-Timestamp` (unix giây), `X-Signature` = `HMAC-SHA256(secret gateway, "<gateway_id>:<ts>:<device_id>:<session_id>")` hex thường. Mọi id khớp `^[A-Za-z0-9_.:-]{1,64}$`.
+- **Thứ tự kiểm** (trước upgrade; lỗi → HTTP thô rồi đóng socket): quá 30 upgrade/phút/IP → `429 RATE_LIMITED` (kiểm trước cả header) → header đủ/đúng định dạng (`400 INVALID_INPUT`) → gateway tồn tại (`401 GATEWAY_AUTH_FAIL {reason: NOT_FOUND}`) → `ts` ±300 giây (`401 … TIMESTAMP_EXPIRED`) → gateway đúng loại + active (`403`) → camera thuộc gateway + đúng loại camera (`404`) + active (`403`) → HMAC (`401 … HMAC_MISMATCH`) → phiên tồn tại và khớp camera + gateway (`404 LIVE_SESSION_NOT_FOUND`) → uplink cũ của phiên đã im ≥ 3 giây hoặc chưa có (`409 LIVE_UPLINK_BUSY`). Lỗi xác thực dùng chung hàm kiểm và đường audit/khoá gateway với `POST /device/camera/snapshot` (`modules/camera/domain/gateway-auth.ts`, `source: "ws_camera_live"`). Không log chữ ký, secret, `session_id`.
+- **Gateway → Server, nhị phân** = đúng 1 khung JPEG (bắt đầu `FF D8`), ≤ 200 KB (`maxPayload` 256 KB; khung sai hoặc quá cỡ bị bỏ, không rớt kết nối). Quá 25 khung/giây → bỏ khung thừa.
+- **Gateway → Server, văn bản** JSON: `{"type":"status","state":"connecting"|"streaming"|"camera_unavailable"}` (khi đổi trạng thái và mỗi 5 giây nếu không có khung), `{"type":"end"}` trước khi tự đóng.
+- **Server → Gateway:** không gửi gì bắt buộc; Server đóng (1000) = dừng. Server không ping; uplink không có tin nào 15 giây → Server đóng.
+- **Nối lại:** rớt mạng giữa phiên → Gateway thử lại cùng `session_id` sau 1, 2, 4 giây (ký lại `ts` mới); Server giữ phiên chờ 15 giây. Server đóng chủ động hoặc trả 400/401/403/404 → **không** nối lại. `409`/`429` → thử lại theo backoff. Uplink thứ hai của cùng phiên chỉ thay được uplink cũ khi cũ đã im ≥ 3 giây (chống replay chiếm uplink thật).
+- Chỉ trong RAM: backend không ghi khung xuống đĩa/DB.
 
 ---
 
@@ -350,6 +385,7 @@ Broker MQTT (`mqtt-broker`, chỉ cổng 8883 TLS). Gateway là client MQTT duy 
 |---|---|---|---|---|
 | `gateway/<gateway_id>/data` | GW → Server | 1 | `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload: {sensor_id, sn_timestamp, sn_hmac, data}}` | `modules/telemetry/features/ingest-mqtt/` |
 | `home/<home_id>/gateway/<gw>/device/<dev>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {turn_on, turn_off, set_temp_16..set_temp_30, learn_off, learn_t16..learn_t30}` (set_temp và learn_* chỉ cho điều hòa; `learn_*` Node ack sau ≤ 10 giây nên Backend chờ ack ≤ 15 giây, lệnh khác 5 giây); `<dev>` có thể là thiết bị con `<node_id>-<lamp/fan/curtain/ac>` — Gateway chuyển xuống node đó kèm `params.target` | `modules/control/` (`features/send-gateway-command`, `command-ack`) |
+| `home/<home_id>/gateway/<gw>/device/<camera>/command` với `action ∈ {live_start, live_stop}` | Server → GW | 1, không retain | Cùng định dạng `{command_id, action, ts, hmac}` và cùng chuỗi ký `command_id:device_id:action:ts` như lệnh thiết bị, nhưng **`command_id` = `session_id`** của phiên xem trực tiếp (UUID v4). Gateway kiểm HMAC + `ts` ±300 giây, bỏ lệnh trùng, **không publish ack** (Backend không chờ ack; bộ nhận ack bỏ qua `command_id` lạ), **không ghi `device_commands`** (đây là điều khiển phiên, không phải lệnh người dùng) — thay vào đó có audit `CAMERA_LIVE_VIEW_START/END`. `live_start` với session mới khi đang có session khác của camera → Gateway đóng luồng lên cũ, mở luồng mới; `live_stop` đúng session → đóng luồng lên, ngừng kéo luồng camera nếu LCD cũng không xem. Gateway mở WebSocket `/api/device/camera/live` (mục 8) sau `live_start` | `modules/camera/features/live-relay/` (gửi qua `control.publishSessionCommand`) |
 | `home/<home_id>/gateway/<gw>/device/<dev>/command/ack` | GW → Server | 1 | `{command_id, status: "ok"\|"error", power?, ts, hmac}`; Server chờ 5 giây | như trên |
 | `home/<home_id>/gateway/<gw>/command` | Server → GW | 1 | `{command_id, action, ts, hmac}`; `action ∈ {restart, factory_reset}` | như trên |
 | `home/<home_id>/gateway/<gw>/ota/command` | Server → GW | 1 | `{job_id, version, target_type, checksum_sha256, ts, hmac}` | như trên |
@@ -365,7 +401,7 @@ Theo [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) §10.2, rút gọn ch
 | Topic | Chiều | QoS / Retain | Payload |
 |---|---|---|---|
 | `home/<h>/gateway/<gw>/device/<dev>/status` | GW → Server | 1, **retain** | `{power?, online, source: "gateway_local"\|"node"\|"command", ts, hmac}` — trạng thái cuối, gồm cả thao tác trên màn hình Gateway |
-| `home/<h>/gateway/<gw>/device/<dev>/command` mở rộng | Server → GW | 1 | Thêm `action ∈ {snapshot, live_start, live_stop}` cho camera |
+| `home/<h>/gateway/<gw>/device/<dev>/command` mở rộng | Server → GW | 1 | Thêm `action = snapshot` cho camera (`live_start`/`live_stop` đã có, mục 9.1) |
 | `home/<h>/gateway/<gw>/ota/progress` · `ota/result` | GW → Server | 0 · 1 | `{job_id, percent}` · `{job_id, status, version, ts, hmac}` |
 | `home/<h>/gateway/<gw>/provision/<event>` | GW → Server | 1 | `event ∈ {wifi_status, node_pair_result}` |
 | `home/<h>/gateway/<gw>/device/<dev>/telemetry` | GW → Server | 1 | Thay `gateway/+/data` khi chuyển topic sang dạng có `home_id` (mục 13) |
@@ -437,8 +473,9 @@ Chi tiết thông số luồng: [IoT Node Network](firmware/IOT_NODE_NETWORK.md)
 | Bật/tắt thiết bị | `POST /devices/:id/commands` → MQTT `.../command` → ESP-NOW `CMD` → `CMD_ACK` → MQTT `.../command/ack` → HTTP 200 + WS `device_state` | Backend đã có; firmware dự kiến |
 | Thao tác trên màn hình Gateway | ESP-NOW `CMD`/`CMD_ACK` → MQTT `.../status` (`source: gateway_local`) → WS `device_state` | Dự kiến |
 | Chuyển động → ảnh | ESP-NOW `EVENT` → `POST /local/camera/snapshot` → `POST /api/device/camera/snapshot` → MQTT `camera/event` → thông báo `CAMERA_MOTION` + WS `camera_snapshot` | Backend đã có (module `camera`); firmware Gateway đã gửi |
-| Xem trực tiếp trên Gateway | `GET /stream` (Camera) → hiển thị LCD | Firmware Gateway + Camera đã viết, chưa chạy trên board |
-| Xem trực tiếp trên Mobile | WS `/api/mobile/cameras/:id/live` → MQTT `command {live_start}` → `GET /stream` → WS `/api/device/camera/live` → Mobile | Dự kiến, tuỳ chọn |
+| Xem trực tiếp trên Gateway | `GET /stream` (Camera) → hiển thị LCD | Đã chạy trên board (2026-11-08, VGA q=12 ≈ 3,3 fps); pipeline 2 task + `esp_new_jpeg` (2026-11-13) đã build, chưa đo lại trên board |
+| Xem trực tiếp trên Web (user) | WS `/api/portal/cameras/:deviceId/live` → MQTT `command {live_start}` → `GET /stream` (Camera) → WS `/api/device/camera/live` (Gateway) → khung JPEG tới canvas của web; người xem cuối rời + 10 giây → MQTT `live_stop` | Backend + web đã có (module `camera`, `@shh/devices`); firmware Gateway + Camera đã viết, chưa thử đầu-cuối |
+| Xem trực tiếp trên Mobile | WS `/api/mobile/cameras/:id/live` → MQTT `command {live_start}` → `GET /stream` → WS `/api/device/camera/live` → Mobile | **Dự kiến**, tuỳ chọn — Mobile chưa làm; endpoint `/api/mobile/…/live` chưa có |
 | Đưa Gateway lên mạng | `POST /api/mobile/provision/start` → BLE/SoftAP `/local/gateway/*` → MQTT `provision/wifi_status` | Dự kiến |
 | OTA | Dashboard `POST /firmware` → `POST /ota/deployments` → MQTT `ota/command` → `ota/progress`, `ota/result` | Backend đã có phần phát lệnh; firmware dự kiến |
 
@@ -461,5 +498,5 @@ Chi tiết thông số luồng: [IoT Node Network](firmware/IOT_NODE_NETWORK.md)
 | Q1 | Bỏ `GET /api/device/sensors` (trả secret sensor cho gateway) bằng cách nào | Gateway nhận secret node trong lúc ghép nối (mã hoá), lưu NVS mã hoá; endpoint chỉ trả danh sách `device_id` + trạng thái |
 | Q2 | Chuỗi ký HMAC cho heartbeat, status, camera/event, ota/result | Theo mẫu `<khoá chính>:<giá trị chính>:<ts>` như lệnh và ack; chốt khi hiện thực |
 | Q3 | Telemetry đệm khi mất Internet bị từ chối vì quá 300 giây | Xem [IoT Node Network](firmware/IOT_NODE_NETWORK.md) §10 Q3 |
-| Q4 | Thêm `action` mới (`snapshot`, `live_start`, `live_stop`, dimmer…) vào `DeviceAction` | Thêm khi làm camera và khi có chi tiết node phòng khách |
+| Q4 | Thêm `action` mới (`snapshot`, dimmer…) vào `DeviceAction` | Thêm khi làm camera và khi có chi tiết node phòng khách. `live_start`/`live_stop` **đã chốt**: gửi riêng qua `publishSessionCommand`, không thuộc `DeviceAction`, không ghi `device_commands` (mục 9.1) |
 | Q5 | Có cần Portal (`/api/portal`) cho các API dự kiến không | Không ở V2 — Portal ngoài phạm vi PRD; API dự kiến chỉ làm cho Mobile |

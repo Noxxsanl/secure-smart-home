@@ -287,47 +287,50 @@ X-Signature: HMAC-SHA256(secret_camera, "<device_id>:<unix_ts>")
 |---|---|---|
 | Độ phân giải | VGA 640×480 | Vừa màn hình 800×480 của Gateway, còn 160 px bên cạnh cho nút điều khiển; không phải co giãn ảnh |
 | Chất lượng JPEG | 12–15 | Khung khoảng 15–30 KB |
-| Số khung/giây | Mục tiêu 10 fps trên màn hình Gateway | Giới hạn thực tế thường nằm ở khâu giải nén JPEG trên Gateway, không phải WiFi |
+| Số khung/giây | **Đo gốc** (2026-11-08, VGA q=12, trước khi tối ưu, giải nén bằng TJpgDec): ≈ **3,3 fps**. **Mục tiêu** sau khi tách 2 task + `esp_new_jpeg`: 12–15 fps — **chưa đo lại trên board** | Giới hạn thực tế nằm ở khâu giải nén JPEG trên Gateway, không phải WiFi |
 | Băng thông | ~1,2–2,4 Mbps (15–30 KB × 10 fps) | Thấp so với WiFi 2.4 GHz; chỉ chạy trong Local AP, không tốn Internet của khách |
 | Bộ đệm camera | `fb_count = 2`, `grab_mode = CAMERA_GRAB_LATEST` | Luôn gửi khung mới nhất, bỏ khung cũ khi mạng chậm thay vì dồn trễ |
 
 **Phía Gateway hiển thị:**
-- ESP32-S3 **không có bộ giải mã JPEG phần cứng**, nên giải nén bằng phần mềm, xuất RGB565 rồi đưa vào `lv_image`/canvas của LVGL. Bản đầu dùng TJpgDec có sẵn trong ROM S3 (bộ mà `esp_jpeg`/`esp32-camera` dùng, không thêm thư viện); nếu đo trên board không đạt số khung/giây thì chuyển sang `esp_new_jpeg` (tối ưu SIMD cho S3).
-- Hai bộ đệm RGB565 640×480 (~600 KB mỗi bộ) trong PSRAM: giải nén vào bộ này trong khi LVGL vẽ bộ kia. Tổng PSRAM cho luồng + framebuffer LCD khoảng 3 MB / 8 MB.
-- Giải nén chạy ở task riêng trên nhân 1. Nếu giải nén không kịp, bỏ khung — không xếp hàng.
+- ESP32-S3 **không có bộ giải mã JPEG phần cứng**, nên giải nén bằng phần mềm, xuất RGB565 rồi đưa vào `lv_image`/canvas của LVGL. Bản đầu dùng TJpgDec trong ROM S3 và chỉ đạt ≈ 3,3 fps (đo gốc, mục trên), nên **đã chuyển sang `esp_new_jpeg`** (`espressif/esp_new_jpeg`, tối ưu cho S3; `components/ui/src/gw_jpeg_esp.c`). Khung VGA được bộ giải nén tự thu nhỏ thẳng vào ô hiển thị 448×336 (không bước co giãn riêng); chỉ khi không thu nhỏ được mới giải nén đủ kích thước rồi co giãn.
+- **Pipeline 2 task**: `gw_live` (`gw_camera_live.c`, nhân 0) **chỉ đọc** luồng MJPEG và giữ khung mới nhất; `gw_decode` (`gw_live_view.c`, nhân 1, ưu tiên dưới LVGL) giải nén khung mới nhất rồi đưa vào LVGL. Đọc mạng và giải nén chạy song song nên giải nén không còn chặn việc nhận khung. Ước tính bộ đệm RGB565 trong PSRAM theo thiết kế ban đầu (2 bộ 640×480, ~600 KB mỗi bộ) có thể đã đổi theo cách thu nhỏ ở trên — xem code khi cần số chính xác.
+- Nếu giải nén không kịp, bỏ khung — không xếp hàng (khung mới ghi đè khung chưa kịp giải nén; log `dropped … (replaced)`).
+- Số đo thực tế: log mỗi ~5 giây ở Camera và Gateway (xem [Lên Server](../guides/LEN_SERVER.md) §6, "Xem trực tiếp camera trên web"). Chưa ghi số đo sau tối ưu vào tài liệu này — chỉ ghi khi đã đo trên board.
 
-### 5.5. Xem từ xa trên Mobile (mở rộng tuỳ chọn)
+### 5.5. Xem từ xa trên Web user (đã hiện thực, 2026-11-13) và Mobile (dự kiến)
 
-Gateway **chuyển tiếp nguyên khung JPEG** lên Backend (không giải nén, không nén lại), Backend phát lại cho Mobile. WebRTC hay RTSP không phù hợp vì ESP32 không đủ tài nguyên mã hoá H.264, và Backend không thể kết nối ngược vào mạng nhà.
+Gateway **chuyển tiếp nguyên khung JPEG** lên Backend (không giải nén, không nén lại), Backend phát lại cho người xem. WebRTC hay RTSP không phù hợp vì ESP32 không đủ tài nguyên mã hoá H.264, và Backend không thể kết nối ngược vào mạng nhà. **Đã có** cho **web user** (`/api/portal/cameras/:deviceId/live`); **Mobile vẫn dự kiến** (`/api/mobile/cameras/:deviceId/live` chưa có). Hợp đồng chi tiết: [API](../API_DESIGN.md) §5.1, §8, §9.1; kiểm soát bảo mật: [Bảo mật](../SECURITY_ARCHITECTURE.md) §9.1. Trạng thái: Backend + web + firmware đã viết, **chưa thử đầu-cuối** với phần cứng.
 
 ```mermaid
 sequenceDiagram
-    participant M as Mobile
+    participant W as Web user (Mobile: dự kiến)
     participant S as Backend
     participant G as Gateway S3
     participant C as ESP32-CAM
 
-    M->>S: Mở WebSocket xem trực tiếp (JWT, kiểm role trong nhà)
-    S->>G: MQTT .../device/{cam}/command {action: "live_start"}
+    W->>S: Mở WebSocket xem trực tiếp (cookie sh_user + Origin, kiểm role trong nhà)
+    S->>G: MQTT .../device/{cam}/command {command_id = session_id, action: "live_start"}
     G->>C: GET /stream (HMAC) nếu chưa kéo luồng
-    G->>S: Mở WebSocket TLS /api/device/camera/live (HMAC gateway)
-    loop Mỗi khung (giảm còn ~3–5 fps)
+    G->>S: Mở WebSocket TLS /api/device/camera/live (HMAC gateway + session_id)
+    loop Mỗi khung (tối đa 15 fps, Kconfig)
         C-->>G: Khung JPEG
         G-->>S: Khung JPEG (nhị phân)
-        S-->>M: Khung JPEG
+        S-->>W: Khung JPEG
     end
-    M->>S: Đóng màn hình (hoặc hết 60 s không gia hạn)
+    W->>S: Đóng màn hình (người xem cuối rời, chờ 10 s)
     S->>G: MQTT {action: "live_stop"}
     G->>G: Đóng WebSocket; ngừng kéo luồng nếu màn hình Gateway cũng không xem
 ```
 
-| Hạng mục | Đề xuất |
+| Hạng mục | Thiết kế / hiện trạng |
 |---|---|
-| Khung hình | Gateway chỉ gửi lên ~3–5 fps (bỏ bớt khung), có thể hạ xuống QVGA nếu mạng chậm — băng thông tải lên của nhà thường hạn chế |
-| Endpoint Gateway → Backend **(đề xuất)** | WebSocket TLS `/api/device/camera/live`, header HMAC gateway giống `/api/device/data`, tin nhắn nhị phân = 1 khung JPEG |
-| Endpoint Mobile **(đề xuất)** | WebSocket `/api/mobile/cameras/:deviceId/live`, JWT; nhà không thuộc quyền → 404, role không được xem → 403 (bất biến 6). Tách khỏi `/api/mobile/ws` vì dữ liệu nhị phân dung lượng lớn |
-| Phiên xem | Mobile gia hạn mỗi 30 giây; Backend gửi `live_stop` khi người xem cuối cùng rời hoặc hết hạn 60 giây |
-| Ai được xem | OWNER, CONTROLLER, VIEWER. GUEST và Web Dashboard (Admin/Operator) **không** xem live camera của khách — quyền riêng tư; cần chốt ở mục 10 |
+| Khung hình | Gateway gửi lên tối đa **15 fps** (`CONFIG_GW_CAMERA_RELAY_MAX_FPS`, Kconfig 1–25, mặc định 15; Backend nhận tối đa 25 khung/giây, bỏ khung thừa); trước đây đề xuất 3–5 fps. VGA q=12 mỗi khung ~15–40 KB → 15 fps ≈ 0,2–0,6 MB/s tải lên (số ước tính trong Kconfig, chưa đo). Có thể hạ QVGA (`GW_CAMERA_LIVE_FRAMESIZE`) nếu mạng nhà chậm |
+| Endpoint Gateway → Backend | WebSocket TLS `/api/device/camera/live`, header HMAC gateway `<gateway_id>:<ts>:<device_id>:<session_id>`, tin nhị phân = 1 khung JPEG — **đã có** |
+| Endpoint Web user | WebSocket `/api/portal/cameras/:deviceId/live`, cookie `sh_user` + kiểm `Origin`; không thuộc nhà → close `4404`, role không được xem → `4403` (bất biến 6) — **đã có**. Tách khỏi `/api/mobile/ws` vì dữ liệu nhị phân dung lượng lớn |
+| Endpoint Mobile **(dự kiến)** | `/api/mobile/cameras/:deviceId/live`, JWT — chưa làm |
+| Phiên xem | **Backend làm chủ phiên** (chỉ trong RAM): người xem đầu tiên mở → tạo `session_id`, gửi `live_start` (`command_id` = `session_id`, Gateway không ack); người xem cuối rời → chờ 10 giây rồi `live_stop` + đóng uplink. Tối đa 4 người xem/camera, 2 luồng/user. Thay cho cơ chế gia hạn 30/60 giây ban đầu (không còn cần) |
+| Trên LCD Gateway | Trang Camera hiện nhãn **"Đang được xem từ xa"** khi có phiên relay. Một luồng camera duy nhất cho cả LCD và relay: kéo khi (LCD đang ở trang Camera) **hoặc** (có phiên relay); chỉ giải nén khi LCD đang xem |
+| Ai được xem (**Q7, đã chốt**) | OWNER, CONTROLLER, VIEWER. GUEST và Web Dashboard (Admin/Operator) **không** xem live camera của khách — quyền riêng tư; Backend không có endpoint live cho Dashboard. Camera mô phỏng (`is_simulated`) → close `4501` |
 | Không lưu | Backend chỉ chuyển tiếp trong RAM, không ghi luồng xuống đĩa. Ghi hình là tính năng khác, ngoài phạm vi V2 |
 
 ### 5.6. Server → Client
@@ -452,7 +455,7 @@ Khi mất Internet:
 | 4 | Giao diện LVGL trên màn hình Gateway | Xem số liệu, điều khiển tại chỗ |
 | 5 | Camera: ESP-NOW + Local AP + HTTP gửi ảnh tới Gateway; backend thêm endpoint ảnh | FR-5.8 (snapshot), FR-4.6 (camera không giữ WiFi thật) |
 | 5b | Luồng MJPEG Camera → Gateway, hiển thị trên màn hình Gateway (mục 5.4) | Xem trực tiếp tại chỗ, đo fps thật |
-| 5c | *(Tuỳ chọn)* Chuyển tiếp luồng lên Backend và Mobile (mục 5.5) | FR-5.8 phần live view (COULD) |
+| 5c | *(Tuỳ chọn)* Chuyển tiếp luồng lên Backend và web/Mobile (mục 5.5) | FR-5.8 phần live view (COULD). **Web user: đã hiện thực (2026-11-13), chưa thử đầu-cuối**; Mobile: chưa làm |
 | 6 | Node phòng khách trên mạch thật (sau khi có mục 4.3) | Thay node thử ở bước 2 |
 | 7 | Ghép nối ECDH, provisioning BLE/SoftAP, OTA | Theo [WiFi Provisioning](SMART_HOME_WIFI_PROVISIONING.md), [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md) §12–14 |
 
@@ -469,9 +472,9 @@ Bước 1–3 không đổi hợp đồng backend. Bước 5 cần backend thêm
 | Q3 | Dữ liệu đệm khi mất Internet bị backend từ chối vì quá cửa sổ 300 giây | Thêm trường `buffered: true` và cho backend nhận với cửa sổ riêng, kèm chống trùng theo `seq` — cần thống nhất với [Bảo mật](../SECURITY_ARCHITECTURE.md) trước khi làm |
 | Q4 | Có dùng DI/DO của Gateway (còi, tiếp điểm cửa có dây) không | Chưa dùng ở V2 |
 | Q5 | Thao tác trên màn hình Gateway có cần mã PIN | Không ở V2, có ghi audit log |
-| Q6 | Xem trực tiếp từ xa trên Mobile có làm ở V2 không | Làm xem trực tiếp trên màn hình Gateway trước (bước 5b); xem từ xa (bước 5c) chỉ làm nếu còn thời gian |
-| Q7 | Ai được xem live camera | OWNER, CONTROLLER, VIEWER; không cho GUEST và Admin/Operator trên Web Dashboard |
-| Q8 | fps thực tế khi giải nén VGA trên ESP32-S3 | Đo ở bước 5b; không đạt ~10 fps thì hạ xuống QVGA hoặc giảm chất lượng JPEG |
+| Q6 | Xem trực tiếp từ xa có làm ở V2 không | Làm xem trực tiếp trên màn hình Gateway trước (bước 5b); xem từ xa (bước 5c): **web user đã làm (2026-11-13)**, Mobile chỉ làm nếu còn thời gian |
+| Q7 | Ai được xem live camera | **Đã chốt**: OWNER, CONTROLLER, VIEWER; không cho GUEST và Admin/Operator trên Web Dashboard |
+| Q8 | fps thực tế khi giải nén VGA trên ESP32-S3 | Đo gốc 3,3 fps (TJpgDec); đã chuyển `esp_new_jpeg` + 2 task, mục tiêu 12–15 fps — **cần đo lại trên board** (bước 5b); không đạt thì hạ xuống QVGA hoặc giảm chất lượng JPEG |
 
 ---
 

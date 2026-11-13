@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "gw_display.h"
-#include "gw_jpeg.h"
+#include "gw_live_view.h"
 #include "lvgl.h"
 
 static const char *TAG = "gw_ui";
@@ -52,8 +53,6 @@ static const char *TAG = "gw_ui";
 #define ACT_Y (TITLE_H + CLIMATE_H + GAP)        /* 186 */
 #define INFO_Y (ACT_Y + ACT_H + 16)              /* 324 */
 
-#define LIVE_LOCK_MS 100      /* không lấy kịp khoá LVGL → bỏ khung, không xếp hàng (§5.4) */
-#define DECODE_WARN_EVERY 100
 #define STATE_UNKNOWN (-1)
 
 /*
@@ -114,25 +113,14 @@ typedef struct {
     gw_ui_live_state_t live_state;
     bool live_has_frame;       /* đã có khung của lần mở này (không hiện khung cũ của lần trước) */
     uint16_t live_fps_x10;
-    uint32_t live_session;     /* tăng mỗi lần mở → đếm khung/giây lại từ đầu */
+    bool remote_view;          /* đang có phiên xem từ xa (relay lên Server) */
 } model_t;
 
 static SemaphoreHandle_t s_lock;
 static model_t s_model;
 static bool s_dirty;
 static bool s_started;
-
-/* ---- khung hình: 2 bộ đệm RGB565 trong PSRAM — giải nén vào bộ LVGL không vẽ, rồi đổi dưới khoá LVGL ----- */
-
-typedef struct {
-    uint16_t *buf[2];
-    lv_img_dsc_t dsc[2];
-    int front;                 /* bộ đệm LVGL đang vẽ, -1 = chưa có ảnh; chỉ đổi khi giữ khoá LVGL */
-    uint16_t max_w, max_h;
-    gw_jpeg_decoder_t dec;     /* vùng làm việc TJpgDec (SRAM) — chỉ task gw_live giải nén */
-} frame_slot_t;
-
-static frame_slot_t s_live_slot;
+static atomic_bool s_live_on;   /* live_state != OFF — đọc không khoá từ task đẩy khung (gw_live_view_submit) */
 
 /* ---- widget (chỉ task LVGL truy cập sau khi tạo, hoặc task khác khi giữ khoá LVGL) ---------------------- */
 
@@ -149,7 +137,7 @@ static lv_obj_t *s_page_obj[GW_UI_PAGE_COUNT];
 static gw_ui_page_t s_shown_page = GW_UI_PAGE_CAMERA;
 /* trang Camera */
 static link_ind_t s_cam_link;
-static lv_obj_t *s_live_img, *s_live_wait;
+static lv_obj_t *s_live_img, *s_live_wait, *s_remote_badge;
 /* trang Phòng khách */
 static link_ind_t s_room_link;
 static lv_obj_t *s_climate_val[2];
@@ -184,61 +172,33 @@ static void fmt_hms(int64_t ts, char *buf, size_t cap)
     strftime(buf, cap, "%H:%M:%S", &tm);
 }
 
-/* ---- bộ đệm khung hình ---------------------------------------------------------------------------------- */
+/* ---- khung hình camera: đường ống giải nén ở gw_live_view.c; 3 hàm dưới là cầu nối sang LVGL + mô hình ---------- */
 
-static bool slot_init(frame_slot_t *s, uint16_t max_w, uint16_t max_h)
+static bool live_is_on(void)
 {
-    s->front = -1;
-    s->max_w = max_w;
-    s->max_h = max_h;
-    const size_t bytes = (size_t)max_w * max_h * sizeof(uint16_t);
-    for (int i = 0; i < 2; i++) {
-        s->buf[i] = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (s->buf[i] == NULL) {
-            free(s->buf[0]);
-            s->buf[0] = s->buf[1] = NULL;
-            ESP_LOGE(TAG, "no PSRAM for %ux%u image buffers", max_w, max_h);
-            return false;
-        }
-    }
-    return true;
+    return atomic_load(&s_live_on);
 }
 
-/*
- * Giải nén vào bộ đệm sau (LVGL không đọc) trong task gọi, rồi đổi nguồn ảnh dưới khoá LVGL. LVGL chỉ vẽ trong
- * lv_timer_handler (giữ khoá), nên sau khi đổi, bộ đệm cũ không còn được đọc và lần sau ghi vào được.
- */
-static esp_err_t slot_show(frame_slot_t *s, lv_obj_t *img, lv_obj_t *placeholder, const uint8_t *jpeg, size_t len,
-                           int lock_ms)
+/* Đang giữ khoá LVGL (gw_live_view đổi ảnh). */
+static void live_present(const lv_img_dsc_t *dsc)
 {
-    if (s->buf[0] == NULL || img == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-    const int back = (s->front == 0) ? 1 : 0;
-    uint16_t w = 0, h = 0;
-    esp_err_t err = gw_jpeg_decode_fit(&s->dec, jpeg, len, s->buf[back], s->max_w, s->max_h, &w, &h);
-    if (err != ESP_OK) {
-        return err;
-    }
-    lv_img_dsc_t *d = &s->dsc[back];
-    memset(d, 0, sizeof(*d));
-    d->header.cf = LV_IMG_CF_TRUE_COLOR;
-    d->header.w = w;
-    d->header.h = h;
-    d->data_size = (uint32_t)w * h * sizeof(lv_color_t);
-    d->data = (const uint8_t *)s->buf[back];
+    lv_img_set_src(s_live_img, dsc);
+    lv_obj_clear_flag(s_live_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_live_wait, LV_OBJ_FLAG_HIDDEN);
+}
 
-    if (!gw_display_lock(lock_ms)) {
-        return ESP_ERR_TIMEOUT;
+static void live_shown(uint16_t fps_x10, bool fps_updated)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool changed = !s_model.live_has_frame || (fps_updated && s_model.live_fps_x10 != fps_x10);
+    s_model.live_has_frame = true;
+    if (fps_updated) {
+        s_model.live_fps_x10 = fps_x10;
     }
-    lv_img_set_src(img, d);
-    lv_obj_clear_flag(img, LV_OBJ_FLAG_HIDDEN);
-    if (placeholder != NULL) {
-        lv_obj_add_flag(placeholder, LV_OBJ_FLAG_HIDDEN);
+    if (changed) {
+        s_dirty = true;   /* chỉ vẽ lại chữ khi có thay đổi — không vẽ lại cả màn hình mỗi khung */
     }
-    s->front = back;
-    gw_display_unlock();
-    return ESP_OK;
+    xSemaphoreGive(s_lock);
 }
 
 /* ---- khối dựng ------------------------------------------------------------------------------------------ */
@@ -372,6 +332,14 @@ static void build_camera_page(lv_obj_t *page)
     s_live_img = lv_img_create(video);
     lv_obj_center(s_live_img);
     lv_obj_add_flag(s_live_img, LV_OBJ_FLAG_HIDDEN);
+
+    /* Huy hiệu "đang được xem từ xa" ở góc trên trái khung hình (tạo sau ảnh nên nằm trên). */
+    s_remote_badge = make_box(video, 10, 10, 214, 28, lv_color_black(), LV_OPA_60);
+    lv_obj_set_style_radius(s_remote_badge, 14, 0);
+    lv_obj_t *dot = make_box(s_remote_badge, 12, 8, 12, 12, COLOR_BAD, LV_OPA_COVER);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+    make_label(s_remote_badge, FONT_TEXT, 32, 4, "Đang được xem từ xa", COLOR_TEXT);
+    lv_obj_add_flag(s_remote_badge, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_room_page(lv_obj_t *page)
@@ -761,6 +729,11 @@ static void render_camera(const model_t *m)
     } else {
         wait = "Chờ camera trực tuyến...";
     }
+    if (m->remote_view) {
+        lv_obj_clear_flag(s_remote_badge, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_remote_badge, LV_OBJ_FLAG_HIDDEN);
+    }
     if (cam != NULL && m->live_has_frame && m->live_state != GW_UI_LIVE_OFF) {
         lv_obj_clear_flag(s_live_img, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_live_wait, LV_OBJ_FLAG_HIDDEN);
@@ -926,7 +899,10 @@ esp_err_t gw_ui_start(void)
     strlcpy(s_model.status, "Đang khởi động...", sizeof(s_model.status));
 
     /* Thiếu PSRAM thì màn hình vẫn chạy, chỉ không hiện được hình camera. */
-    slot_init(&s_live_slot, LIVE_W, LIVE_H);
+    static const gw_live_view_ops_t view_ops = {.is_on = live_is_on, .present = live_present, .shown = live_shown};
+    if (gw_live_view_start(LIVE_W, LIVE_H, &view_ops) != ESP_OK) {
+        ESP_LOGE(TAG, "live view pipeline not started — camera image will not be shown");
+    }
 
     if (!gw_display_lock(-1)) {
         return ESP_FAIL;
@@ -1080,67 +1056,31 @@ void gw_ui_set_live(gw_ui_live_state_t state)
     model_update_begin();
     if (state != GW_UI_LIVE_PLAYING && state != GW_UI_LIVE_RETRY) {
         /* Mở lại / chờ camera: không hiện khung cũ của lần xem trước, đếm khung/giây lại từ đầu. */
-        s_model.live_session++;
         s_model.live_has_frame = false;
         s_model.live_fps_x10 = 0;
     }
     s_model.live_state = state;
     model_update_end();
+    atomic_store(&s_live_on, state != GW_UI_LIVE_OFF);
+    if (state == GW_UI_LIVE_OFF) {
+        gw_live_view_flush();   /* rời trang Camera: khung đang chờ giải nén không còn cần */
+    }
 }
 
-esp_err_t gw_ui_live_frame(const uint8_t *jpeg, size_t len)
+void gw_ui_set_remote_view(bool active)
 {
-    /* Chỉ 1 task gọi (gw_live) → biến tĩnh không cần khoá. */
-    static uint32_t session;
-    static int64_t window_us;
-    static uint32_t window_frames;
-    static uint32_t failures;
+    if (!s_started) {
+        return;
+    }
+    model_update_begin();
+    s_model.remote_view = active;
+    model_update_end();
+}
 
+esp_err_t gw_ui_live_submit(const uint8_t *jpeg, size_t len, gw_ui_frame_release_t release, void *arg)
+{
     if (!s_started) {
         return ESP_ERR_INVALID_STATE;
     }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    const bool on = s_model.live_state != GW_UI_LIVE_OFF;
-    const uint32_t cur = s_model.live_session;
-    xSemaphoreGive(s_lock);
-    if (!on) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (cur != session) {
-        session = cur;
-        window_us = 0;
-        window_frames = 0;
-    }
-
-    const int64_t t0 = esp_timer_get_time();
-    esp_err_t err = slot_show(&s_live_slot, s_live_img, s_live_wait, jpeg, len, LIVE_LOCK_MS);
-    if (err != ESP_OK) {
-        if (failures++ % DECODE_WARN_EVERY == 0) {
-            ESP_LOGW(TAG, "live frame (%u bytes) not shown: %s", (unsigned)len, esp_err_to_name(err));
-        }
-        return err;
-    }
-    const int64_t now = esp_timer_get_time();
-    ESP_LOGD(TAG, "live frame %u bytes decoded+shown in %d ms", (unsigned)len, (int)((now - t0) / 1000));
-
-    if (window_us == 0) {
-        window_us = now;
-    }
-    window_frames++;
-    const int64_t span = now - window_us;
-
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool changed = !s_model.live_has_frame;
-    s_model.live_has_frame = true;
-    if (span >= 1000000) {
-        s_model.live_fps_x10 = (uint16_t)((int64_t)window_frames * 10000000 / span);
-        window_us = now;
-        window_frames = 0;
-        changed = true;
-    }
-    if (changed) {
-        s_dirty = true;   /* chỉ vẽ lại chữ khi có thay đổi — không vẽ lại cả màn hình mỗi khung */
-    }
-    xSemaphoreGive(s_lock);
-    return ESP_OK;
+    return gw_live_view_submit(jpeg, len, release, arg);
 }

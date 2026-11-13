@@ -5,6 +5,7 @@ export { identityModule } from "./identity.module";
 export { createDashboardAuthRouter, createMobileAuthRouter, createPortalAuthRouter } from "./identity.module";
 export {
   authenticateAccessToken,
+  authenticatePortalCookie,
   findActiveCustomerById,
   findAuthUserById,
   findCustomerByTag,

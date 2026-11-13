@@ -71,3 +71,16 @@ export interface PublishOtaCommandInput {
   targetType: "gateway" | "node";
   checksumSha256: string;
 }
+
+/** Lệnh phiên fire-and-forget tới thiết bị qua gateway (camera live_start / live_stop — không ghi device_commands, không chờ ack). */
+export interface PublishSessionCommandInput {
+  homeId: number;
+  /** devices.id của gateway (để lấy bộ ký). */
+  gatewayDbId: number;
+  gatewayUid: string;
+  /** UID thiết bị đích (vd camera) — đi vào topic và chuỗi ký. */
+  deviceUid: string;
+  /** Mã phiên (UUID) — đóng vai command_id; gateway dùng để bỏ lệnh trùng. */
+  commandId: string;
+  action: "live_start" | "live_stop";
+}

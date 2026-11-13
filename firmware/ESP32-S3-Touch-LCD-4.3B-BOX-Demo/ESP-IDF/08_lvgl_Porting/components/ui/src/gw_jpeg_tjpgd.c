@@ -1,11 +1,47 @@
-#include "gw_jpeg.h"
+/*
+ * [Dự phòng] Bản cài đặt gw_jpeg bằng TJpgDec R0.01 trong ROM ESP32-S3 (CONFIG_GW_UI_JPEG_TJPGD) — chậm hơn nhiều so với
+ * esp_new_jpeg (VGA ≈ 3,3 khung/s). Giữ lại để có đường lui nếu bộ giải nén mới có vấn đề trên phần cứng.
+ *
+ * Hai vai, cùng mã nguồn:
+ *   CONFIG_GW_UI_JPEG_TJPGD bật  → cài thẳng API gw_jpeg_* (gw_jpeg.h), không dùng esp_new_jpeg.
+ *   CONFIG_GW_UI_JPEG_TJPGD tắt  → đổi tên thành gw_jpeg_tjpgd_* (gw_jpeg_tjpgd.h): đường lui lúc chạy của gw_jpeg_esp.c.
+ */
+#include "sdkconfig.h"
 
+#ifdef CONFIG_GW_UI_JPEG_TJPGD
+#include "gw_jpeg.h"
+#else
+#include "gw_jpeg_tjpgd.h"
+#define gw_jpeg_decoder gw_jpeg_tjpgd
+#define gw_jpeg_decoder_t gw_jpeg_tjpgd_t
+#define gw_jpeg_create gw_jpeg_tjpgd_create
+#define gw_jpeg_destroy gw_jpeg_tjpgd_destroy
+#define gw_jpeg_decode_fit gw_jpeg_tjpgd_decode_fit
+#endif
+
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"
 #include "rom/tjpgd.h"   /* esp_rom: TJpgDec R0.01 trong ROM, xuất RGB888 (JD_FORMAT 0), có thu nhỏ */
 
 static const char *TAG = "gw_jpeg";
+
+#define GW_JPEG_WORK_SIZE 3100   /* vùng làm việc TJpgDec R0.01 (bảng Huffman, IDCT) — như esp32-camera */
+
+struct gw_jpeg_decoder {
+    uint8_t work[GW_JPEG_WORK_SIZE] __attribute__((aligned(4)));
+};
+
+gw_jpeg_decoder_t *gw_jpeg_create(void)
+{
+    return calloc(1, sizeof(gw_jpeg_decoder_t));
+}
+
+void gw_jpeg_destroy(gw_jpeg_decoder_t *dec)
+{
+    free(dec);
+}
 
 typedef struct {
     const uint8_t *src;

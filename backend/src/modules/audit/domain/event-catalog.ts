@@ -98,6 +98,8 @@ export const EVENT_CATALOG_ENTRIES: ReadonlyArray<readonly [string, LogCategory,
   ["STAFF_UPDATED", "activity", "info"],
   ["STAFF_DELETED", "activity", "info"],
   ["LOGS_DELETED", "activity", "warning"],
+  ["CAMERA_LIVE_VIEW_START", "activity", "info"], // thêm: khách bắt đầu xem trực tiếp camera (FR-5.8)
+  ["CAMERA_LIVE_VIEW_END", "activity", "info"], // thêm: kết thúc xem trực tiếp; details { duration_s, reason }
   ["AI_PRICE_UPDATED", "activity", "info"], // thêm: Admin thêm/sửa/xoá giá model LLM (tab AI Usage)
   ["AI_PRICES_SYNCED", "activity", "info"], // thêm: đồng bộ giá LLM từ nguồn công khai
   ["AI_SETTINGS_UPDATED", "activity", "info"], // thêm: ngân sách AI/ngày, tỷ giá USD→VNĐ

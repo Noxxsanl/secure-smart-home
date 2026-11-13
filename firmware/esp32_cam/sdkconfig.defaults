@@ -8,7 +8,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 # Tối ưu kích thước (-Os). sdkconfig cũ còn -Og thì firmware/cmake/fw_build.cmake vẫn ép -Os
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 
-# PSRAM 4 MB chứa khung hình JPEG (fb_count = 2) và bộ đệm ảnh gửi Gateway
+# PSRAM 4 MB chứa khung hình JPEG (fb_count = 3) và bộ đệm ảnh gửi Gateway
 CONFIG_SPIRAM=y
 
 # Bảng phân vùng riêng: 2 slot OTA + log (ESP_IDF_BUILD §4)
@@ -23,3 +23,11 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 
 # Header yêu cầu /stream có X-Device-Id, X-Timestamp, X-Signature (64 hex) + header của HTTP client Gateway
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# Luồng MJPEG /stream: bộ đệm gửi TCP mặc định 5760 byte (4 MSS) chỉ cho phép ~4 gói chưa ACK, thông lượng ≈ cửa sổ/RTT
+# (~0,5 MB/s ở RTT 10 ms) — gần bằng mức cần của VGA 15-20 fps (khung ~30 KB). 16 KB (~11 MSS) gấp ~3 lần, vẫn chỉ
+# tốn tối đa 16 KB RAM nội bộ cho 1 socket đang phát (httpd tối đa 3 socket). Không nâng cao hơn: ESP32 + WiFi còn ít DRAM.
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
+# Camera chủ yếu gửi, chỉ nhận request nhỏ nên giữ cửa sổ nhận mặc định (CONFIG_LWIP_TCP_WND_DEFAULT), các tham số
+# WiFi (DYNAMIC_TX_BUFFER_NUM 32, AMPDU, IRAM_OPT) đã ở mức khuyến nghị; TX_BA_WIN chỉ có tác dụng khi Gateway nâng
+# RX_BA_WIN, nên không đổi ở phía camera. WiFi power save đã tắt trong cam_wifi.c (WIFI_PS_NONE).

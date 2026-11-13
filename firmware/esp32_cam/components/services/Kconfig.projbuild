@@ -9,7 +9,7 @@ menu "ESP32-CAM: services"
     config CAM_STREAM_MAX_FPS
         int "Giới hạn số khung/giây của luồng MJPEG"
         range 1 30
-        default 15
+        default 20
 
     config CAM_GATEWAY_HTTP_PORT
         int "Cổng HTTP của Gateway trên Local AP"

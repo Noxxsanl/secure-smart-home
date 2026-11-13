@@ -5,7 +5,8 @@
 #   gw_wifi         AP+STA: router của nhà + Local AP cho camera
 #   gw_espnow       ESP-NOW với node/camera: lọc MAC, chống trùng seq, kiểm HMAC lớp 1, TIME_SYNC, CMD
 #   gw_local_http   POST /local/camera/snapshot trên Local AP, kiểm HMAC camera
-#   gw_camera_live  kéo luồng MJPEG GET /stream của camera (ký HMAC camera), tách từng khung JPEG
+#   gw_camera_live  kéo luồng MJPEG GET /stream của camera (ký HMAC camera), tách từng khung JPEG vào bộ đệm PSRAM dùng chung
+#   gw_camera_relay chuyển tiếp khung JPEG lên Server (WebSocket TLS /api/device/camera/live, tcp_transport của ESP-IDF)
 #   gw_tls          CA nhúng; chặn kết nối không TLS trừ khi bật [DEV]
 #   gw_envelope     payload Gateway → Server có HMAC gateway (telemetry, ack, heartbeat, camera event)
 #   gw_mqtt         Broker MQTT TLS: publish telemetry/ack/…, nhận + kiểm lệnh từ Server
@@ -37,6 +38,7 @@ idf_component_register(SRCS "src/gw_config.c"
                             "src/gw_espnow.c"
                             "src/gw_local_http.c"
                             "src/gw_camera_live.c"
+                            "src/gw_camera_relay.c"
                             "src/gw_tls.c"
                             "src/gw_envelope.c"
                             "src/gw_mqtt.c"
@@ -45,4 +47,5 @@ idf_component_register(SRCS "src/gw_config.c"
                        REQUIRES esp_common esp_netif security_manager
                        PRIV_REQUIRES espnow_proto json mbedtls nvs_flash bootloader_support esp_wifi esp_event
                                      esp_timer esp_http_server esp_http_client mqtt esp_app_format lwip
+                                     tcp_transport
                        EMBED_TXTFILES "${gw_ca_file}")

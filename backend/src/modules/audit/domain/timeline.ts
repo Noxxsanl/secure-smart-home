@@ -28,6 +28,8 @@ export const TIMELINE_LABELS: Readonly<Record<string, string>> = {
   OPERATOR_ACCESS_GRANTED: "Cấp quyền truy cập cho Operator",
   OPERATOR_ACCESS_REVOKED: "Thu hồi quyền truy cập Operator",
   OPERATOR_HOME_VIEWED: "Operator xem dữ liệu nhà",
+  CAMERA_LIVE_VIEW_START: "Bắt đầu xem trực tiếp camera",
+  CAMERA_LIVE_VIEW_END: "Kết thúc xem trực tiếp camera",
   // gateway
   GATEWAY_ONLINE: "Gateway trực tuyến",
   GATEWAY_OFFLINE: "Gateway mất kết nối",

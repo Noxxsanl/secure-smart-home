@@ -28,6 +28,9 @@ extern "C" {
 /** Lưu base URL (VD "https://192.168.1.100"). ESP_ERR_INVALID_ARG nếu scheme không được phép. */
 esp_err_t gw_api_init(const char *base_url);
 
+/** Base URL đã được gw_api_init chấp nhận (không có '/' cuối), NULL nếu chưa cấu hình. Dùng cho gw_camera_relay (wss). */
+const char *gw_api_base_url(void);
+
 esp_err_t gw_api_post_telemetry(const char *json);
 
 /** snapshot_id nhận về (có thể rỗng nếu backend không trả). */

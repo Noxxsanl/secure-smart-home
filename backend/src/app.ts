@@ -23,16 +23,12 @@ app.set("trust proxy", env.trustProxy);
 // HTTP security headers (XSS, clickjacking, MIME sniffing, etc.)
 app.use(helmet());
 
-// CORS – chỉ các origin liệt kê trong FRONTEND_URL (phân tách bằng dấu phẩy). Web Next.js gọi qua rewrites/nginx
+// CORS – chỉ các origin liệt kê trong FRONTEND_URL (phân tách bằng dấu phẩy; đọc ở config/env.ts, dùng chung với kiểm Origin của WebSocket camera live). Web Next.js gọi qua rewrites/nginx
 // (cùng origin) nên chỉ cần thêm khi trình duyệt gọi thẳng backend, VD app mobile chạy bằng Flutter web lúc dev:
 // FRONTEND_URL=http://localhost,http://localhost:8080 (+ flutter run -d chrome --web-port 8080). Không dùng "*".
-const corsOrigins = (process.env.FRONTEND_URL || "http://localhost:3000")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter((origin) => origin.length > 0 && origin !== "*");
 app.use(
   cors({
-    origin: corsOrigins,
+    origin: [...env.frontendOrigins],
     credentials: true,
   })
 );

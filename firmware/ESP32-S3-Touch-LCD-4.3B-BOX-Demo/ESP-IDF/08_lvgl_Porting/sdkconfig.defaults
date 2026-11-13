@@ -70,8 +70,13 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 # HTTP server Local AP: header của Camera có X-Device-Id, X-Timestamp, X-Signature (64 hex), X-Trigger, X-Command-Id
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 
-# Socket: HTTP server (4) + MQTT + HTTPS + SNTP + DNS
+# Socket: HTTP server (4) + MQTT + HTTPS + SNTP + DNS + luồng camera + relay WebSocket
 CONFIG_LWIP_MAX_SOCKETS=16
+
+# Cửa sổ TCP lớn hơn mặc định (5760): luồng MJPEG từ camera (nhận) và relay khung JPEG lên Server (gửi) ~0,3-0,6 MB/s,
+# cửa sổ 5760 byte/RTT dễ thành nút cổ chai trên WiFi (docs/guides/MAN_HINH_GATEWAY.md, mục Xem từ xa).
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
+CONFIG_LWIP_TCP_WND_DEFAULT=11520
 
 # Bảo mật nhẹ, không đốt eFuse (README, mục Bảo mật): phát hiện tràn stack bằng canary
 CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y

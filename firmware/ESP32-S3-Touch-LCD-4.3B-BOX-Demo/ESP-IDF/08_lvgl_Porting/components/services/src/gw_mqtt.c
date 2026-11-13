@@ -106,12 +106,14 @@ static bool parse_signed_cmd(const cJSON *body, const char *subject, const char 
     }
     char msg[COMMAND_ID_MAX + GW_ID_MAX + ACTION_MAX + 32];
     snprintf(msg, sizeof(msg), "%s:%s:%s:%" PRId64, id->valuestring, subject, act->valuestring, *ts);
+    /* live_*: command_id chính là session_id của phiên xem từ xa → không log id, chỉ action. */
+    const bool live = strncmp(act->valuestring, "live_", 5) == 0;
     if (!gw_config_verify(msg, hmac->valuestring)) {
-        ESP_LOGW(TAG, "drop command %s: HMAC mismatch", id->valuestring);
+        ESP_LOGW(TAG, "drop command %s: HMAC mismatch", live ? act->valuestring : id->valuestring);
         return false;
     }
     if (seen_before(id->valuestring)) {
-        ESP_LOGW(TAG, "drop command %s: replayed", id->valuestring);
+        ESP_LOGW(TAG, "drop command %s: replayed", live ? act->valuestring : id->valuestring);
         return false;
     }
     remember(id->valuestring);
@@ -228,14 +230,19 @@ static void handle_message(const esp_mqtt_event_t *e)
     if (n == 7 && strcmp(p[4], "device") == 0 && strcmp(p[6], "command") == 0) {
         const char *dev = p[5];
         if (gw_valid_id(dev, 64) && parse_signed_cmd(body, dev, &cmd_id, &action, &ts)) {
-            ESP_LOGI(TAG, "device command %s → %s: %s", cmd_id, dev, action);
+            if (strncmp(action, "live_", 5) == 0) {
+                /* command_id của live_* là session_id của phiên xem từ xa: không log (chỉ action). */
+                ESP_LOGI(TAG, "device command → %s: %s", dev, action);
+            } else {
+                ESP_LOGI(TAG, "device command %s → %s: %s", cmd_id, dev, action);
+            }
             if (s_cbs.on_device_cmd) {
                 s_cbs.on_device_cmd(home, dev, cmd_id, action, ts, s_cbs.ctx);
             }
         }
     } else if (n == 5 && strcmp(p[4], "command") == 0) {
         if (parse_signed_cmd(body, gw, &cmd_id, &action, &ts)) {
-            ESP_LOGI(TAG, "gateway command %s: %s", cmd_id, action);
+            ESP_LOGI(TAG, "gateway command %s: %s", strncmp(action, "live_", 5) == 0 ? "-" : cmd_id, action);
             if (s_cbs.on_gateway_cmd) {
                 s_cbs.on_gateway_cmd(home, cmd_id, action, s_cbs.ctx);
             }

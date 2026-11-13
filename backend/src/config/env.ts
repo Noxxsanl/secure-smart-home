@@ -101,6 +101,17 @@ function readPricingSource(): string {
   return value;
 }
 
+/**
+ * FRONTEND_URL = danh sách origin (phân tách dấu phẩy) của web được gọi thẳng backend: dùng cho CORS (app.ts) và kiểm
+ * Origin của WebSocket dùng cookie (camera live — chống CSWSH). Mặc định http://localhost:3000; bỏ "*" và mục rỗng.
+ */
+function readFrontendOrigins(): readonly string[] {
+  return (process.env.FRONTEND_URL || "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0 && origin !== "*");
+}
+
 function readTrustProxy(): boolean | number | string {
   const raw = process.env.TRUST_PROXY?.trim();
   if (!raw || raw.toLowerCase() === "false" || raw === "0") return false;
@@ -123,6 +134,8 @@ function readTrustProxy(): boolean | number | string {
 }
 
 export interface AppEnv {
+  /** Origin web hợp lệ (FRONTEND_URL, tách dấu phẩy) — CORS và kiểm Origin của WebSocket cookie. */
+  frontendOrigins: readonly string[];
   /** Giá trị `trust proxy` của Express (false | số hop | danh sách subnet). */
   trustProxy: boolean | number | string;
   nodeEnv: string;
@@ -156,6 +169,7 @@ export interface AppEnv {
 }
 
 export const env: Readonly<AppEnv> = Object.freeze({
+  frontendOrigins: readFrontendOrigins(),
   trustProxy: readTrustProxy(),
   nodeEnv,
   isProduction,

@@ -10,6 +10,8 @@
 //   /dashboard/**               – sau requireDashboard("admin", "operator") (cookie sh_admin | sh_operator + X-Portal)
 //   /portal/auth/**, /portal/** – khách hàng web (cookie sh_user + X-Portal: user), cùng handler với /mobile
 //   /mobile/auth/**, /mobile/** – app khách hàng (Bearer + refresh token); /mobile/ws là WebSocket (module realtime)
+//   WebSocket (không qua router Express — đăng ký vào core/ws/upgrade-router.ts ở main.ts): /mobile/ws (realtime),
+//   /device/camera/live (uplink gateway, HMAC) và /portal/cameras/:deviceId/live (viewer web, cookie sh_user) (camera)
 //   /service/**                 – dịch vụ nội bộ (AI Agent): Bearer SERVICE_API_TOKEN; nginx chặn từ bên ngoài
 // Router /auth LUÔN mount trước guard của cùng kênh, nếu không login sẽ bị chặn 401.
 import { Router } from "express";

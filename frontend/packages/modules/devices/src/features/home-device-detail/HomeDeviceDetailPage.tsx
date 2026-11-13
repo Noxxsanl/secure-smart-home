@@ -32,7 +32,7 @@ const BackLink = () => (
 type HomeDeviceDetailPageProps = {
   /** Biểu đồ của cảm biến nhiệt/ẩm — app ghép từ @shh/telemetry (`HomeDeviceTelemetry`). */
   renderTelemetry?: (props: { deviceId: number; deviceName: string }) => React.ReactNode;
-  /** Ảnh chụp của camera — app ghép `HomeCameraSnapshots` (cùng module, feature khác nên đi qua slot). */
+  /** Camera — app ghép `HomeCameraLive` (xem trực tiếp) + `HomeCameraSnapshots` (ảnh chụp); cùng module, feature khác nên đi qua slot. */
   renderCamera?: (props: { deviceId: number; deviceName: string }) => React.ReactNode;
 };
 
@@ -190,7 +190,7 @@ export default function DeviceDetailPage({ renderTelemetry, renderCamera }: Home
             <DeviceReading device={device} size="lg" />
             {device.category === "camera" ? (
               <p className="mt-1 text-xs text-gray-400 dark:text-slate-500">
-                Hình trực tiếp hiện xem trên màn hình Gateway trong nhà; trên web bạn xem được các ảnh camera đã chụp bên dưới.
+                Bấm “Xem trực tiếp” bên dưới để xem hình camera ngay trên web; các ảnh đã chụp nằm ở khối “Ảnh camera”.
               </p>
             ) : (
               device.latest?.received_at && (

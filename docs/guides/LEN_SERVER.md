@@ -153,6 +153,45 @@ idf.py -p COM3 monitor
 mỗi camera (`CAMERA_SNAPSHOT_RETENTION_DAYS`). Đường dẫn file không bao giờ lộ ra client; ảnh chỉ tải được qua API có kiểm
 quyền theo nhà (bất biến 6).
 
+### Xem trực tiếp camera trên web
+
+Hiện trạng (2026-11-13): backend + web user + firmware đã viết, **chưa thử đầu-cuối** với phần cứng. Luồng và hợp đồng: [API](../API_DESIGN.md) §5.1, §8, §9.1; thiết kế: [IoT Node Network](../firmware/IOT_NODE_NETWORK.md) §5.5.
+
+**Điều kiện:**
+- Gateway nối Server qua **HTTPS cổng 443** (nginx, cùng cert với ảnh camera — mục 3, 5): Gateway mở WebSocket `wss://<IP>/api/device/camera/live` qua đó. Chỉ có đường `http://…:5000` thì Gateway dùng `ws://` (chỉ để dev).
+- Camera đã **gán vào nhà** (`hw:register`, mục 4) và không phải camera mô phỏng; tài khoản là OWNER/CONTROLLER/VIEWER của nhà (GUEST và Admin/Operator không xem được).
+- Mở web khách → nhà → phòng **Camera** → **Camera** → khối xem trực tiếp (bấm nút bắt đầu xem). Backend gửi lệnh MQTT `live_start`, Gateway kéo luồng từ camera rồi đẩy khung lên; trên LCD Gateway hiện nhãn **"Đang được xem từ xa"**.
+
+**Dev (web chạy `npm run dev` ở :3003):** Next rewrites có thể không chuyển tiếp WebSocket, nên cho web nối thẳng backend:
+- Đặt `NEXT_PUBLIC_LIVE_WS_ORIGIN=ws://localhost:5000` cho app user rồi khởi động lại dev server (biến `NEXT_PUBLIC_*` nạp lúc khởi động).
+- `compose.yaml` (dev) đã cho sẵn `FRONTEND_URL=http://localhost,http://localhost:3001,http://localhost:3002,http://localhost:3003` — Next dev ở :3003 tự chuyển tiếp WebSocket `/api/*` sang backend (đổi Host thành `backend:5000`), nên không cần `NEXT_PUBLIC_LIVE_WS_ORIGIN` khi chạy bằng Docker. Chạy backend ngoài Docker thì thêm origin của web vào `FRONTEND_URL` của backend (danh sách phân tách dấu phẩy), VD `FRONTEND_URL=http://localhost,http://localhost:3003`, rồi khởi động lại backend — backend kiểm `Origin` chống CSWSH và từ chối origin không có trong danh sách (403 trước upgrade, trình duyệt chỉ thấy lỗi kết nối chung). Qua nginx (cùng origin) thì không cần cả hai.
+
+**Sự cố theo thông báo / mã đóng** (web hiện câu tiếng Việt tương ứng):
+
+| Mã đóng | Thông báo trên web | Nguyên nhân + cách xử lý |
+|---|---|---|
+| `4401` | Phiên đăng nhập đã hết hạn | Đăng nhập lại |
+| `4403` | Không có quyền xem trực tiếp | Role trong nhà là GUEST — đổi role hoặc dùng tài khoản OWNER/CONTROLLER/VIEWER |
+| `4404` | Không tìm thấy camera | Camera không thuộc nhà của tài khoản, hoặc không phải camera |
+| `4408` | Camera không phản hồi | Sau 20 s không có luồng từ Gateway: kiểm Gateway online (heartbeat), Gateway nối được HTTPS 443, camera còn nguồn và trong Local AP; xem log Gateway (`gw_camera_relay`, `gw_camera_live`) |
+| `4409` | Quá nhiều người xem | Camera đã đủ 4 người xem — đóng bớt |
+| `4429` | Mở quá nhiều luồng | Tối đa 2 luồng/user và 10 lần mở/phút — đóng tab khác, chờ 1 phút |
+| `4501` | Camera mô phỏng không hỗ trợ | Chỉ camera thật xem được |
+| 1006 (không có mã) | "Không kết nối được máy chủ…" | Lỗi trước upgrade (Origin không nằm trong `FRONTEND_URL`, cookie hết hạn, quá 60 upgrade/phút/IP) hoặc proxy không chuyển WebSocket; kiểm `FRONTEND_URL`, đăng nhập lại, nginx có `Upgrade` cho `/api/` |
+| Gateway log `409` / `429` khi mở uplink | Uplink cũ của phiên chưa im đủ 3 s / quá 30 upgrade/phút/IP | Gateway tự thử lại 1, 2, 4 s; không cần xử lý |
+
+**Dòng log để đo fps** (mỗi ~5 giây; chỉ ghi số đo thật vào tài liệu sau khi đo trên board):
+
+| Nơi | Dòng log | Ý nghĩa |
+|---|---|---|
+| Camera | `cam_stream: sent X.Y fps, avg frame N B` | Khung/giây camera gửi cho Gateway, cỡ khung trung bình |
+| Gateway | `gw_camera_live: rx X.Y fps, N KB/s (… frames in … ms)` | Khung/giây nhận từ camera |
+| Gateway | `gw_live_view: shown X.Y fps, decode avg N ms (max …), submitted …, dropped … (replaced), failed …` | fps hiển thị trên LCD, thời gian giải nén trung bình, khung bị ghi đè |
+| Gateway | `gw_camera_relay: relay sent X.Y fps, N KB/s, offered …, dropped …` | fps gửi lên Server khi có người xem từ xa (trần `CONFIG_GW_CAMERA_RELAY_MAX_FPS`, mặc định 15) |
+| Web | fps hiện trên player | fps khung nhận ở trình duyệt |
+
+**Sau khi cập nhật code firmware, xoá `sdkconfig` của camera và của gateway** rồi `idf.py set-target …` lại để nhận giá trị mới từ `sdkconfig.defaults` (VD chất lượng JPEG, độ phân giải luồng, trần fps relay) — `sdkconfig` cũ giữ giá trị cũ. Chi tiết lệnh: [Nạp camera + gateway](NAP_CAMERA_GATEWAY.md).
+
 ## 7. Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân thường gặp | Cách xử lý |

@@ -47,7 +47,8 @@ function SnapshotGallery({ deviceName, items, selectedId, onSelect }: CameraSnap
   const current = items.find((s) => s.id === selectedId) ?? items[0];
 
   return (
-    <div className="space-y-3 p-4">
+    // Cùng khổ với khối "Xem trực tiếp" (≤ 640 px, căn giữa) — ảnh SVGA 800x600 thu nhẹ, không chiếm hết bề ngang
+    <div className="mx-auto w-full max-w-2xl space-y-3 p-4">
       <div className="aspect-[4/3] w-full overflow-hidden rounded bg-gray-100 dark:bg-slate-900">
         {failed.has(current.id) ? (
           <div className="flex h-full flex-col items-center justify-center px-4 text-center">

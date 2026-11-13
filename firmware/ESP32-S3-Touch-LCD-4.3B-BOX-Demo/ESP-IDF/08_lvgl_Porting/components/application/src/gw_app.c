@@ -24,6 +24,7 @@
 
 #include "gw_api.h"
 #include "gw_camera_live.h"
+#include "gw_camera_relay.h"
 #include "gw_config.h"
 #include "gw_envelope.h"
 #include "gw_espnow.h"
@@ -80,6 +81,7 @@ typedef enum {
     EV_GATEWAY_CMD,
     EV_PAGE,         /* người dùng chạm 1 mục trên nav */
     EV_LIVE_STATE,   /* gw_camera_live đổi trạng thái */
+    EV_RELAY_ENDED,  /* phiên xem từ xa tự kết thúc (Server đóng, bị từ chối, hết số lần nối lại) */
 } ev_type_t;
 
 typedef struct {
@@ -168,12 +170,21 @@ static char s_home_id[GW_HOME_ID_MAX + 1];
 static pending_t s_pending[PENDING_MAX];
 static motion_t s_motion[GW_REGISTRY_MAX];
 
-/* Màn hình + xem trực tiếp (chỉ task gw_app). Luồng camera chạy khi và chỉ khi đang ở trang Camera. */
+/*
+ * Màn hình + xem trực tiếp (chỉ task gw_app, trừ 2 biến atomic). MỘT luồng camera duy nhất (gw_camera_live) cho 2 nơi:
+ *   LCD    khi đang ở trang Camera — khung được giải nén và hiện (gw_ui_live_submit)
+ *   relay  khi có phiên xem từ xa (lệnh live_start của Server) — khung JPEG nguyên vẹn gửi lên Server (gw_camera_relay)
+ * Luồng chạy khi MỘT TRONG HAI cần; chỉ giải nén khi LCD đang xem.
+ */
 static gw_ui_page_t s_page = START_PAGE;     /* trang đang hiện */
 static gw_ui_page_t s_page_before_motion;    /* trang trước khi tự chuyển sang Camera vì chuyển động */
 static int64_t s_page_return_at_us;          /* 0 = không tự quay lại trang cũ */
 static int s_live_idx = -1;                  /* camera đang kéo luồng, -1 = không */
-static gw_ui_live_state_t s_live_ui = GW_UI_LIVE_OFF;
+static atomic_int s_lcd_cam = -1;            /* camera mà LCD đang xem (trang Camera), -1 = LCD không xem — task gw_live đọc */
+static atomic_int s_relay_cam = -1;          /* camera của phiên xem từ xa, -1 = không có phiên — task gw_live đọc */
+static bool s_remote_ui;                     /* nhãn "Đang được xem từ xa" đang bật */
+static gw_ui_live_state_t s_stream_ui = GW_UI_LIVE_WAITING;   /* trạng thái thật của luồng, để LCD hiện khi vào trang Camera */
+static gw_ui_live_state_t s_live_ui = GW_UI_LIVE_OFF;         /* trạng thái đã báo cho ui */
 static int64_t s_live_reopen_at_us;          /* luồng hỏng hẳn: chưa mở lại trước thời điểm này */
 static int s_live_failures;                  /* số lần hỏng hẳn liên tiếp */
 static char s_ready_status[STATUS_MAX];   /* dòng trạng thái lúc khởi động xong — khôi phục khi luồng chạy lại */
@@ -251,10 +262,33 @@ static void on_mqtt_connection(bool connected, void *ctx)
     ESP_LOGI(TAG, "server %s", connected ? "online" : "offline");
 }
 
-/* Task gw_live: giải nén ngay tại đây (không qua hàng đợi) — camera tự bỏ khung cũ khi Gateway đọc chậm. */
-static void on_live_frame(size_t idx, const uint8_t *jpeg, size_t len, void *ctx)
+static void frame_release(void *arg)
 {
-    gw_ui_live_frame(jpeg, len);
+    gw_live_frame_release((gw_live_frame_t *)arg);
+}
+
+/*
+ * Task gw_live, mỗi khung JPEG: chỉ chia con trỏ cho nơi cần, không giải nén/không gửi mạng ở đây (đọc luồng không
+ * được chờ ai). Mỗi nơi giữ khung bằng tham chiếu và chỉ giữ khung mới nhất (ui: gw_ui_live_submit, relay: offer).
+ */
+static void on_live_frame(size_t idx, gw_live_frame_t *frame, void *ctx)
+{
+    if ((int)idx == atomic_load(&s_relay_cam)) {
+        gw_camera_relay_offer(frame);
+    }
+    if ((int)idx == atomic_load(&s_lcd_cam)) {
+        gw_live_frame_ref(frame);
+        if (gw_ui_live_submit(frame->data, frame->len, frame_release, frame) != ESP_OK) {
+            gw_live_frame_release(frame);   /* ui không nhận (luồng LCD vừa tắt) */
+        }
+    }
+}
+
+/* Task gw_relay — chỉ đẩy vào hàng đợi. */
+static void on_relay_ended(void *ctx)
+{
+    app_event_t ev = {.type = EV_RELAY_ENDED};
+    post(&ev, "relay ended");
 }
 
 static void on_live_state(size_t idx, gw_live_state_t state, gw_live_err_t err, int http_status, void *ctx)
@@ -330,6 +364,20 @@ static void live_ui(gw_ui_live_state_t state)
     }
 }
 
+/* Trạng thái THẬT của luồng; LCD chỉ hiện khi đang ở trang Camera, ngoài ra OFF (ui bỏ khung, không giải nén). */
+static void stream_ui(gw_ui_live_state_t state)
+{
+    s_stream_ui = state;
+    live_ui(s_page == GW_UI_PAGE_CAMERA ? state : GW_UI_LIVE_OFF);
+}
+
+static void relay_source(gw_relay_source_t src)
+{
+    if (gw_camera_relay_active()) {
+        gw_camera_relay_set_source(src);
+    }
+}
+
 static void live_open(int idx, const char *why)
 {
     if (s_live_idx == idx) {
@@ -342,7 +390,8 @@ static void live_open(int idx, const char *why)
     }
     s_live_idx = idx;
     ESP_LOGI(TAG, "live view %s (%s)", dev->device_id, why);
-    live_ui(GW_UI_LIVE_CONNECTING);
+    stream_ui(GW_UI_LIVE_CONNECTING);
+    relay_source(GW_RELAY_SRC_CONNECTING);
 }
 
 static void live_close(const char *why)
@@ -353,6 +402,7 @@ static void live_close(const char *why)
     ESP_LOGI(TAG, "live view closed (%s)", why);
     gw_camera_live_stop();
     s_live_idx = -1;
+    s_stream_ui = GW_UI_LIVE_WAITING;
 }
 
 /* Hướng dẫn trên dòng trạng thái khi không mở được luồng (bất biến 10: không hiện mã thô). */
@@ -394,18 +444,21 @@ static void handle_live_state(const app_event_t *ev)
     }
     switch (ev->lst.state) {
     case GW_LIVE_CONNECTING:
-        live_ui(GW_UI_LIVE_CONNECTING);
+        stream_ui(GW_UI_LIVE_CONNECTING);
+        relay_source(GW_RELAY_SRC_CONNECTING);
         break;
     case GW_LIVE_STREAMING:
         s_live_failures = 0;
-        live_ui(GW_UI_LIVE_PLAYING);
+        stream_ui(GW_UI_LIVE_PLAYING);
+        relay_source(GW_RELAY_SRC_STREAMING);
         if (s_status_by_live) {
             gw_ui_set_status(s_ready_status, s_ready_status_error);
             s_status_by_live = false;
         }
         break;
     case GW_LIVE_RETRYING:
-        live_ui(GW_UI_LIVE_RETRY);
+        stream_ui(GW_UI_LIVE_RETRY);
+        relay_source(GW_RELAY_SRC_UNAVAILABLE);
         break;
     case GW_LIVE_FAILED: {
         live_show_failure(ev->lst.err, ev->lst.http_status);
@@ -417,45 +470,64 @@ static void handle_live_state(const app_event_t *ev)
         }
         s_live_failures++;
         s_live_reopen_at_us = esp_timer_get_time() + wait_us;
-        live_ui(GW_UI_LIVE_WAITING);
+        stream_ui(GW_UI_LIVE_WAITING);
+        relay_source(GW_RELAY_SRC_UNAVAILABLE);
         break;
     }
     case GW_LIVE_STOPPED:
-        break;   /* do chính gw_app dừng (rời trang Camera) */
+        break;   /* do chính gw_app dừng (hết người xem) */
     }
 }
 
-/* Camera đã vào Local AP và Gateway ký được yêu cầu (có giờ) → mở luồng mới có nghĩa. */
-static int camera_reachable(void)
+/* Camera `cam` đã vào Local AP và Gateway ký được yêu cầu (có giờ) → mở luồng mới có nghĩa. */
+static bool camera_reachable(int cam)
 {
-    int cam = first_camera();
     esp_ip4_addr_t ip;
-    if (cam < 0 || !gw_time_is_synced() || !gw_wifi_ap_client_ip(gw_registry_get((size_t)cam)->mac, &ip)) {
-        return -1;
+    return cam >= 0 && gw_time_is_synced() && gw_wifi_ap_client_ip(gw_registry_get((size_t)cam)->mac, &ip);
+}
+
+static void set_remote_ui(bool on)
+{
+    if (on != s_remote_ui) {
+        s_remote_ui = on;
+        gw_ui_set_remote_view(on);
     }
-    return cam;
 }
 
 /*
- * Luồng chạy khi và chỉ khi đang ở trang Camera (IOT_NODE_NETWORK §5.4: chỉ kéo luồng khi có người xem).
- * Gọi khi đổi trang và mỗi giây (camera vừa vào Local AP / tới lượt thử lại).
+ * Một luồng camera duy nhất, chạy khi LCD đang ở trang Camera HOẶC có phiên xem từ xa (relay); chỉ giải nén khi LCD xem
+ * (on_live_frame đọc s_lcd_cam). Gọi khi đổi trang, khi phiên xem từ xa đổi, và mỗi giây (camera vừa vào Local AP / tới
+ * lượt thử lại).
  */
 static void live_sync(void)
 {
-    if (s_page != GW_UI_PAGE_CAMERA) {
-        live_close("left camera page");
-        live_ui(GW_UI_LIVE_OFF);
-        return;
+    const bool lcd = s_page == GW_UI_PAGE_CAMERA;
+    if (atomic_load(&s_relay_cam) >= 0 && !gw_camera_relay_active()) {
+        atomic_store(&s_relay_cam, -1);   /* phiên đã kết thúc (Server đóng / hết số lần nối lại) */
+    }
+    const int relay = atomic_load(&s_relay_cam);
+    set_remote_ui(relay >= 0);
+    const int lcd_cam = lcd ? first_camera() : -1;
+    atomic_store(&s_lcd_cam, lcd_cam);
+    live_ui(lcd ? s_stream_ui : GW_UI_LIVE_OFF);
+
+    const int want = relay >= 0 ? relay : lcd_cam;
+    if (want < 0) {
+        live_close(lcd ? "no camera paired" : "no viewer");
+        return;   /* trang Camera mà chưa ghép camera: ui tự hiện "Chưa ghép camera" */
+    }
+    if (s_live_idx >= 0 && s_live_idx != want) {
+        live_close("camera changed");
     }
     if (s_live_idx >= 0) {
         return;
     }
-    int cam = esp_timer_get_time() >= s_live_reopen_at_us ? camera_reachable() : -1;
-    if (cam < 0) {
-        live_ui(GW_UI_LIVE_WAITING);
+    if (esp_timer_get_time() < s_live_reopen_at_us || !camera_reachable(want)) {
+        stream_ui(GW_UI_LIVE_WAITING);
+        relay_source(GW_RELAY_SRC_UNAVAILABLE);
         return;
     }
-    live_open(cam, "camera page");
+    live_open(want, relay >= 0 ? "remote view" : "camera page");
 }
 
 /* gw_app tự đổi trang (chuyển động, hết giờ quay lại). */
@@ -603,6 +675,25 @@ static int find_cmd_target(const char *device_id, const char **target)
     return -1;
 }
 
+/* live_start: mở (hoặc thay) phiên relay lên Server cho camera idx; live_stop: đóng nếu đúng phiên. Không log session_id. */
+static void handle_live_command(int idx, const char *session_id, bool start)
+{
+    if (start) {
+        const gw_device_info_t *dev = gw_registry_get((size_t)idx);
+        if (!s_api_ok || gw_camera_relay_start(dev->device_id, session_id) != ESP_OK) {
+            ESP_LOGW(TAG, "remote view of %s cannot start (server URL / relay not ready)", dev->device_id);
+            return;
+        }
+        ESP_LOGI(TAG, "remote view requested for %s", dev->device_id);
+        atomic_store(&s_relay_cam, idx);
+    } else if (gw_camera_relay_stop(session_id)) {
+        ESP_LOGI(TAG, "remote view stopped by server");
+    } else {
+        return;   /* không phải phiên đang chạy (lệnh muộn / cũ) */
+    }
+    live_sync();
+}
+
 static void handle_device_cmd(const app_event_t *ev)
 {
     const char *home = ev->dcmd.home;
@@ -610,20 +701,28 @@ static void handle_device_cmd(const app_event_t *ev)
     const char *cmd = ev->dcmd.command_id;
     const char *action = ev->dcmd.action;
     learn_home(home);
+    /* live_*: command_id = session_id của phiên xem từ xa → log chỉ action, không log id. */
+    const char *lid = strncmp(action, "live_", 5) == 0 ? action : cmd;
 
     const char *target = NULL;
     int idx = find_cmd_target(dev_id, &target);
     if (idx < 0) {
-        ESP_LOGW(TAG, "command %s: device %s is not paired with this gateway", cmd, dev_id);
+        ESP_LOGW(TAG, "command %s: device %s is not paired with this gateway", lid, dev_id);
         publish_ack(home, dev_id, cmd, false, -1);
         return;
     }
-    if (gw_registry_get((size_t)idx)->kind == GW_DEV_CAMERA && strcmp(action, "snapshot") != 0) {
-        /* live_start / live_stop từ Server = xem từ xa trên Mobile (IOT_NODE_NETWORK §5.5): cần chuyển tiếp khung
-         * lên Backend — chưa làm. Xem trên màn hình Gateway thì gw_camera_live đã kéo GET /stream (§5.4). */
-        ESP_LOGW(TAG, "command %s: camera action %s not supported yet", cmd, action);
-        publish_ack(home, dev_id, cmd, false, -1);
-        return;
+    if (gw_registry_get((size_t)idx)->kind == GW_DEV_CAMERA) {
+        if (strcmp(action, "live_start") == 0 || strcmp(action, "live_stop") == 0) {
+            /* Điều khiển PHIÊN XEM TỪ XA (IOT_NODE_NETWORK §5.5), không phải lệnh người dùng: command_id chính là
+             * session_id, KHÔNG ack (Server không chờ). HMAC + ts + chống phát lại đã kiểm ở gw_mqtt. */
+            handle_live_command(idx, cmd, strcmp(action, "live_start") == 0);
+            return;
+        }
+        if (strcmp(action, "snapshot") != 0) {
+            ESP_LOGW(TAG, "command %s: camera action %s not supported", lid, action);
+            publish_ack(home, dev_id, cmd, false, -1);
+            return;
+        }
     }
     pending_t *slot = NULL;
     for (size_t i = 0; i < PENDING_MAX && slot == NULL; i++) {
@@ -633,12 +732,12 @@ static void handle_device_cmd(const app_event_t *ev)
     }
     int64_t now;
     if (slot == NULL || !gw_time_now(&now)) {
-        ESP_LOGW(TAG, "command %s: gateway busy", cmd);
+        ESP_LOGW(TAG, "command %s: gateway busy", lid);
         publish_ack(home, dev_id, cmd, false, -1);
         return;
     }
     if (gw_espnow_send_cmd((size_t)idx, cmd, action, target, now) != ESP_OK) {
-        ESP_LOGW(TAG, "command %s: %s unreachable over ESP-NOW", cmd, dev_id);
+        ESP_LOGW(TAG, "command %s: %s unreachable over ESP-NOW", lid, dev_id);
         publish_ack(home, dev_id, cmd, false, -1);
         return;
     }
@@ -647,7 +746,7 @@ static void handle_device_cmd(const app_event_t *ev)
     strlcpy(slot->command_id, cmd, sizeof(slot->command_id));
     strlcpy(slot->home, home, sizeof(slot->home));
     strlcpy(slot->device_id, dev_id, sizeof(slot->device_id));   /* ack về đúng UID Server đã gửi (kể cả "-ac") */
-    ESP_LOGI(TAG, "command %s → %s (%s), waiting CMD_ACK", cmd, dev_id, action);
+    ESP_LOGI(TAG, "command %s → %s (%s), waiting CMD_ACK", lid, dev_id, action);
 }
 
 static void handle_gateway_cmd(const app_event_t *ev)
@@ -829,6 +928,9 @@ static void app_task(void *arg)
             case EV_LIVE_STATE:
                 handle_live_state(&ev);
                 break;
+            case EV_RELAY_ENDED:
+                live_sync();   /* phiên xem từ xa đã hết: ngừng kéo luồng nếu LCD cũng không xem */
+                break;
             }
         }
         tick();
@@ -934,6 +1036,9 @@ esp_err_t gw_app_start(void)
     const gw_camera_live_callbacks_t lcb = {.on_frame = on_live_frame, .on_state = on_live_state};
     if (gw_camera_live_init(&lcb) != ESP_OK) {
         gw_ui_set_status("Thiếu bộ nhớ cho luồng camera - kiểm tra log", true);
+    }
+    if (gw_camera_relay_init(on_relay_ended, NULL) != ESP_OK) {
+        ESP_LOGW(TAG, "remote camera view disabled: relay not started (low PSRAM?)");   /* LCD vẫn xem được */
     }
     gw_ui_set_page_handler(on_ui_page, NULL);
     gw_ui_show_page(s_page);   /* trang khởi động (menuconfig); luồng camera bật ở live_sync trong tick() */

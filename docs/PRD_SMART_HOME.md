@@ -307,7 +307,7 @@ Quy ước: **FR-x.y**, ưu tiên **M**/**S**/**C** (Must/Should/Could). Tiêu c
 | FR-5.5 | Thiết bị offline hiển thị rõ trạng thái và thời điểm online cuối. Nút điều khiển bị vô hiệu | M |
 | FR-5.6 | Mobile nhận cập nhật realtime qua WebSocket của backend. **Mobile không kết nối MQTT trực tiếp** | M |
 | FR-5.7 | Owner/Controller đổi tên nhà, phòng, thiết bị | S |
-| FR-5.8 | Xem snapshot camera cửa. Live view là tuỳ chọn | C |
+| FR-5.8 | Xem snapshot camera cửa. Live view là tuỳ chọn. *Trạng thái (2026-11-13): live view trên **web user** đã hiện thực (backend `modules/camera/features/live-relay/` + `@shh/devices`, chưa thử đầu-cuối với phần cứng); trên Mobile vẫn chưa làm — [API](API_DESIGN.md) §5.1, §8* | C |
 | FR-5.9 | Chỉ thành viên có quyền điều khiển (Owner/Controller/Guest trong phạm vi) mới gửi được lệnh. Mọi lệnh ghi Device Command Log | M |
 
 **Nghiệm thu FR-5.3:** *Cho trước* relay đèn phòng khách đang online, *khi* Controller bấm bật, *thì* relay đổi trạng thái vật lý và UI hiển thị trạng thái đã xác nhận trong mục tiêu NFR-P1. *Khi* thiết bị không phản hồi, *thì* UI quay về trạng thái cũ và báo lỗi.
@@ -550,7 +550,7 @@ Demo liền mạch trên phần cứng thật, không cắt cảnh:
 | Q1 | Hội đồng có chấp nhận gợi ý thống kê là "AI học thói quen" không, hay cần một model ML (VD: decision tree dự đoán hành động theo giờ)? | E7 | Hỏi giảng viên hướng dẫn sớm. Nếu cần model, thêm một classifier nhẹ chạy offline trên cùng dữ liệu |
 | Q2 | Đăng ký bằng email hay số điện thoại? Có cần OTP thật không? | E1 | Email + mật khẩu, không OTP ở V2 |
 | Q3 | Ngưỡng gợi ý (±15 phút, 5/7 ngày) có hợp lý không? | FR-7.4 | Giữ làm mặc định, cấu hình được |
-| Q4 | Camera: bỏ hẳn hay demo snapshot? | FR-5.8, FR-4.6 | Có ESP32-CAM trong bộ demo → demo snapshot + xem trực tiếp trên màn hình Gateway; xem trực tiếp từ xa trên Mobile làm nếu còn thời gian ([IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.4–5.5) |
+| Q4 | Camera: bỏ hẳn hay demo snapshot? | FR-5.8, FR-4.6 | Có ESP32-CAM trong bộ demo → demo snapshot + xem trực tiếp trên màn hình Gateway; xem trực tiếp từ xa trên Mobile làm nếu còn thời gian ([IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.4–5.5). *Cập nhật 2026-11-13: xem trực tiếp từ xa đã làm trên web user; Mobile vẫn chưa* |
 | Q5 | Push qua FCM có khả thi (tài khoản Firebase, thiết bị thật)? | E8 | Có. Dự phòng bằng in-app notification qua WebSocket |
 | Q6 | Dashboard giữ mock auth hay chuyển sang auth thật ngay? | FR-1.3, FR-11.6 | Chuyển sang auth thật ở mốc M2 |
 

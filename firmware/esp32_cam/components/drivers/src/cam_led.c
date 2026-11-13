@@ -1,5 +1,7 @@
 #include "cam_led.h"
 
+#include <stdatomic.h>
+
 #include "driver/ledc.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -22,6 +24,8 @@ static const char *TAG = "cam_led";
 static uint32_t s_period_ms;
 static uint32_t s_on_ms;
 static uint32_t s_duty;
+static atomic_bool s_started = false;
+static atomic_bool s_paused = false;
 
 static void set_duty(uint32_t duty)
 {
@@ -33,7 +37,9 @@ static void blink_task(void *arg)
 {
     TickType_t last = xTaskGetTickCount();
     for (;;) {
-        set_duty(s_duty);
+        if (!atomic_load(&s_paused)) {
+            set_duty(s_duty);
+        }
         vTaskDelay(pdMS_TO_TICKS(s_on_ms));
         set_duty(0);
         xTaskDelayUntil(&last, pdMS_TO_TICKS(s_period_ms));   /* giữ đúng chu kỳ, không cộng dồn trễ */
@@ -71,7 +77,21 @@ esp_err_t cam_led_blink_start(uint32_t period_ms, uint32_t on_ms, uint8_t bright
     if (xTaskCreate(blink_task, "led", LED_TASK_STACK, NULL, LED_TASK_PRIO, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
+    atomic_store(&s_started, true);
     ESP_LOGI(TAG, "flash LED GPIO%d: on %u ms every %u ms, brightness %u%%", LED_GPIO, (unsigned)on_ms,
              (unsigned)period_ms, (unsigned)brightness_pct);
     return ESP_OK;
+}
+
+void cam_led_pause(bool pause)
+{
+    if (!atomic_load(&s_started)) {
+        return;   /* nháy chưa chạy (tắt trong menuconfig hoặc init lỗi): không có gì để tạm dừng */
+    }
+    atomic_store(&s_paused, pause);
+    if (pause) {
+        /* Tắt ngay nếu đang trong 100 ms sáng. Nếu blink_task vừa kiểm cờ trước lúc này thì đèn sáng nốt
+         * nhịp hiện tại rồi tắt (task luôn tắt ở cuối nhịp) — chấp nhận được. */
+        set_duty(0);
+    }
 }

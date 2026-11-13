@@ -8,7 +8,7 @@ import CameraSnapshotViewer from "../../ui/CameraSnapshotViewer";
 export type HomeCameraSnapshotsProps = { deviceId: number; deviceName: string };
 
 // Khối "Ảnh camera" trên trang chi tiết thiết bị của khách (category = camera).
-// GET /devices/:id/snapshots, làm mới mỗi 15 s; không có xem trực tiếp trong đợt này.
+// GET /devices/:id/snapshots, làm mới mỗi 15 s; xem trực tiếp là khối `HomeCameraLive` (feature camera-live) đặt phía trên.
 export default function HomeCameraSnapshots({ deviceId, deviceName }: HomeCameraSnapshotsProps) {
   const { data, error, mutate } = useDeviceSnapshots(deviceId);
   const [selectedId, setSelectedId] = useState<number | null>(null);

@@ -41,6 +41,11 @@ esp_err_t gw_api_init(const char *base_url)
     return ESP_OK;
 }
 
+const char *gw_api_base_url(void)
+{
+    return s_ready ? s_base : NULL;
+}
+
 static esp_http_client_handle_t open_client(const char *path, int timeout_ms)
 {
     char url[URL_MAX];

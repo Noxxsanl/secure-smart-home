@@ -2,7 +2,9 @@ import "./config/env"; // loads .env and validates required vars – must be fir
 import type { Server } from "http";
 import app from "./app";
 import { listWorkers } from "./app.module";
+import { createUpgradeRouter } from "./core/ws/upgrade-router";
 import { runMigrations } from "./infrastructure/database/migrate";
+import { attachCameraLive } from "./modules/camera";
 import { attachWsHub } from "./modules/realtime";
 import { runDemoSeed } from "./seed/demo-seed";
 
@@ -37,7 +39,10 @@ async function main(): Promise<void> {
   // (AppModule.workers, thứ tự theo APP_MODULES trong app.module.ts).
   const server: Server = app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
-    safeStart("wsHub", () => attachWsHub(server, app)); // WebSocket cho Mobile, dùng chung HTTP server
+    // MỘT listener `upgrade` cho mọi WebSocket (core/ws/upgrade-router.ts); mỗi module đăng ký route của mình
+    const upgrades = createUpgradeRouter(server);
+    safeStart("wsHub", () => attachWsHub(server, app, upgrades)); // WebSocket cho Mobile: /api/mobile/ws
+    safeStart("cameraLive", () => attachCameraLive(server, app, upgrades)); // Camera live: uplink gateway + viewer web
     for (const worker of listWorkers()) safeStart(worker.name, worker.start);
   });
 }

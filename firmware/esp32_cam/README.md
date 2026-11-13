@@ -10,14 +10,14 @@ Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.2,
 
 | Chức năng | Trạng thái | File |
 |---|---|---|
-| Khởi tạo OV2640, SVGA, JPEG q=12, 2 bộ đệm PSRAM, `GRAB_LATEST` | Có | `drivers/src/cam_camera.c` |
+| Khởi tạo OV2640, SVGA, JPEG q=12, 3 bộ đệm PSRAM (~300 KB: mỗi bộ rộng×cao/5 = 96 000 byte), `GRAB_LATEST` | Có | `drivers/src/cam_camera.c` |
 | PIR GPIO13: bỏ qua 30 s đầu, nghỉ 10 s giữa 2 sự kiện | Có | `drivers/src/cam_pir.c` |
-| Đèn flash GPIO4 nháy báo board đang chạy: sáng 100 ms mỗi 1 s, độ sáng 20 % (PWM LEDC timer 1/kênh 1) | Có — chỉnh/tắt ở menu *ESP32-CAM: drivers* | `drivers/src/cam_led.c` |
+| Đèn flash GPIO4 nháy báo board đang chạy: sáng 100 ms mỗi 1 s, độ sáng 20 % (PWM LEDC timer 1/kênh 1) | Có — chỉnh/tắt ở menu *ESP32-CAM: drivers*; tự tạm dừng trong lúc phát `/stream` (`cam_led_pause`) và nháy lại khi luồng kết thúc | `drivers/src/cam_led.c` |
 | Đọc identity, Local AP, MAC Gateway, LMK từ NVS | Có | `services/src/cam_config.c` |
 | WiFi STA vào Local AP, WPA2 trở lên, tự nối lại (1 → 30 s) | Có | `services/src/cam_wifi.c` |
 | ESP-NOW: PING, HEARTBEAT 30 s, EVENT motion, CMD `snapshot`, CMD_ACK, TIME_SYNC | Có, mã `type` là **đề xuất** | `services/src/cam_espnow.c`, `../common/espnow_proto` |
 | Gửi ảnh `POST /local/camera/snapshot` có HMAC, ≤ 200 KB | Có | `services/src/cam_snapshot.c` |
-| `GET /stream` MJPEG, kiểm HMAC ±300 s, 1 luồng (409), VGA/QVGA | Có | `services/src/cam_stream.c` |
+| `GET /stream` MJPEG, kiểm HMAC ±300 s, 1 luồng (409), VGA/QVGA. Mỗi khung gửi 2 chunk (boundary + part header gộp, rồi JPEG); trần `CAM_STREAM_MAX_FPS` mặc định 20; log mỗi 5 s `sent X.Y fps, avg frame N B` | Có | `services/src/cam_stream.c` |
 | Nối sự kiện: chuyển động → EVENT + chụp; lệnh → chụp → CMD_ACK | Có | `application/src/cam_app.c` |
 | HMAC dùng chung `HMAC-SHA256(secret, "<device_id>:<unix_ts>")` | Có | `../common/security_manager` |
 | Ghép nối ECDH (`PAIR_*`), nhận LMK + Local AP qua ESP-NOW | **Chưa**: đang nạp tay qua NVS | — |
@@ -150,6 +150,12 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "X-Device-Id: $ID" -H "X-Timestamp: 
 
 Mở 2 luồng cùng lúc thì luồng thứ hai nhận `409`.
 
+## Thông lượng luồng MJPEG
+
+- Nhận `fps` thật qua log `cam_stream: sent 18.4 fps, avg frame 31000 B` (mỗi 5 s trong lúc có người xem). Fps thấp hơn trần `CAM_STREAM_MAX_FPS` (20) nghĩa là mạng hoặc Gateway (giải nén JPEG) chậm hơn camera, vì `httpd_resp_send_chunk` chặn khi TCP đầy.
+- `sdkconfig.defaults` có `CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384` (mặc định 5760 là nút thắt). **Sau khi pull bản này phải xoá `sdkconfig` (`Remove-Item sdkconfig`) hoặc chạy `idf.py reconfigure` rồi build lại**, nếu không giá trị mới không có hiệu lực (sdkconfig cũ đè defaults). Trần fps mặc định mới 20 cũng nằm ở sdkconfig (`CONFIG_CAM_STREAM_MAX_FPS`).
+- Đèn flash tạm tắt khi đang phát luồng, tự nháy lại khi Gateway đóng kết nối.
+
 ## Xử lý sự cố
 
 | Hiện tượng | Nguyên nhân thường gặp |
@@ -158,6 +164,7 @@ Mở 2 luồng cùng lúc thì luồng thứ hai nhận `409`.
 | Reset liên tục, `Brownout detector was triggered` | Nguồn 5 V yếu. Dùng adapter ≥ 2 A, tụ lọc. **Không** tắt brownout. Nếu chỉ reset đúng lúc đèn flash nháy: giảm `Độ sáng đèn khi nháy` hoặc tắt `Nháy đèn flash theo chu kỳ` (menu *ESP32-CAM: drivers*) |
 | Khung hình/ảnh chụp lúc sáng lúc tối theo nhịp 1 s | Đèn flash nằm cạnh ống kính nên chiếu sáng cảnh mỗi lần nháy. Giảm độ sáng hoặc tắt nháy |
 | `not provisioned` | Chưa nạp `nvs_dev.bin`, hoặc sai tên namespace/key |
+| `/stream` mượt hơn nhưng Gateway vẫn hiện ~3 fps | Gateway chậm (giải nén), không phải camera: xem log `sent ... fps` ở camera. Nếu camera báo ≥ 15 fps mà Gateway nhận ít hơn thì sửa ở Gateway |
 | `/stream` trả 503 | Camera chưa có giờ: chưa nhận `TIME_SYNC` từ Gateway, hoặc chưa bật SNTP dev |
 | Gateway trả 401 cho ảnh | Sai `device_secret`, hoặc giờ camera lệch > 300 s |
 | `refusing unencrypted ESP-NOW` | Thiếu `pairing/session_key`. Khi dev có thể bật `[DEV] Cho ESP-NOW không mã hoá` (menu *ESP32-CAM: services*) |

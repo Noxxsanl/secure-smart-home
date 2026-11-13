@@ -10,9 +10,10 @@
 // dashboard) · 403 USE_DASHBOARD (nhân viên trên portal/mobile) · 403 FORBIDDEN (sai role) ·
 // 403 CSRF_CHECK_FAILED (thiếu/sai X-Portal trên POST/PUT/PATCH/DELETE của kênh cookie).
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import type { IncomingMessage } from "http";
 import { HttpError, forbidden } from "../../../shared/errors/http-error";
 import { STAFF_ROLES, type StaffRole } from "../../../shared/types/domain";
-import type { PortalName } from "../../../core/auth/auth-context";
+import type { AuthContext, PortalName } from "../../../core/auth/auth-context";
 import { SESSION_COOKIE, isPortalName, readCookie } from "./session-cookies";
 import { authenticateAccessToken, loadSessionUser } from "../domain/session.service";
 import { verifySessionToken } from "../domain/session-tokens";
@@ -94,6 +95,23 @@ export const requirePortalUser: RequestHandler = async (req: Request, _res: Resp
   req.auth = toAuthContext(user, "portal");
   next();
 };
+
+/**
+ * Xác thực cookie `sh_user` của một request KHÔNG đi qua Express (nâng cấp WebSocket của portal, vd camera live).
+ * Cùng quy tắc với requirePortalUser: token thiếu → 401 NO_TOKEN, sai/hết hạn → 401, tài khoản khoá → 403 ACCOUNT_LOCKED,
+ * nhân viên → 403 USE_DASHBOARD. Không kiểm X-Portal (WebSocket của trình duyệt không gửi được header tuỳ biến) —
+ * người gọi phải tự chống CSWSH bằng kiểm Origin. Trả thêm tokenVersion/expiresAt để kiểm lại định kỳ.
+ */
+export async function authenticatePortalCookie(
+  req: Pick<IncomingMessage, "headers">
+): Promise<{ auth: AuthContext; tokenVersion: number; expiresAt: Date }> {
+  const token = readCookie(req, SESSION_COOKIE.user);
+  if (!token) throw new HttpError(401, "NO_TOKEN");
+  const verified = verifySessionToken(token, "portal");
+  const user = await loadSessionUser(verified.userId, verified.role, verified.tokenVersion);
+  if (user.role !== "user") throw new HttpError(403, "USE_DASHBOARD", "Staff accounts must use the dashboard", { role: user.role });
+  return { auth: toAuthContext(user, "portal"), tokenVersion: verified.tokenVersion, expiresAt: verified.expiresAt };
+}
 
 /** Kênh Mobile: `Authorization: Bearer <access JWT>`, chỉ USER. Client refresh 1 lần khi gặp 401 (trừ /auth/*). */
 export const requireMobileUser: RequestHandler = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
