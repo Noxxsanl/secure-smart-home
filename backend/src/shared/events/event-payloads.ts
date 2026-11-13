@@ -22,6 +22,8 @@ export interface DeviceStateSnapshot {
   ac_setpoint: number | null;
   /** Bitmask mã IR điều hoà đã học (bit 0 = TẮT, bit t−15 = BẬT ở t°C); null khi chưa học hoặc không phải điều hoà. */
   ac_codes: number | null;
+  /** Rèm: % mở (0 = đóng, 100 = mở hết); null khi chưa biết hoặc không phải rèm. */
+  curtain_pos: number | null;
 }
 
 export interface CustomerNotification {

@@ -1,6 +1,7 @@
 /*
  * Node phòng khách ESP32-S3 — điểm vào. Toàn bộ luồng ở components/application (node_app), như Gateway:
- * màn hình + SHT31 + ESP-NOW tới Gateway. Chân chỉnh trong menuconfig → "Node S3: màn hình" / "Node S3: cảm biến I2C".
+ * màn hình + SHT31 + ESP-NOW tới Gateway + điều hòa IR + đèn/quạt (relay) + rèm (động cơ bước) + LED trạng thái
+ * (+ mic/loa, mặc định tắt). Chân chỉnh trong menuconfig → các menu "Node S3: ...".
  */
 #include "esp_log.h"
 #include "node_app.h"

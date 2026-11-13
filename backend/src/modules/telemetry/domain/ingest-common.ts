@@ -1,28 +1,49 @@
 // Bước dùng chung của HAI đường ingest (HTTP fallback và MQTT) — invariant 4: cả hai gọi đúng hàm này (và cùng
 // verifyGatewayHMAC / verifyDeviceHMAC / registerAuthFailure / listGatewayAndSensorTypeStatus của module devices)
 // nên không thể lệch nhau về cách cập nhật trạng thái thiết bị.
-import { isValidAcCodes, isValidAcSetpoint, markDeviceSeen, syncNodeAppliances } from "../../devices";
+import { isValidAcCodes, isValidAcSetpoint, markDeviceSeen, parseReportedCurtainPos, syncNodeAppliances } from "../../devices";
 import type { NodeApplianceReport } from "../../devices";
 
+/** Bật/tắt trong số đo: 0/1 hoặc boolean; khác → null (bỏ qua). */
+function parseOnOff(value: unknown): boolean | null {
+  return value === true || value === 1 ? true : value === false || value === 0 ? false : null;
+}
+
+/** Rèm: số 0..100 (0 = đóng hẳn, > 0 = mở — Node gửi 2..100 = % mở, 1 = mở chưa rõ %) hoặc boolean; khác → null. */
+function parseCurtainOpen(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100) return value > 0;
+  return null;
+}
+
 /**
- * Node phòng khách báo trạng thái điều hoà IR trong số đo: `ac` (0/1 hoặc boolean) và `ac_temp` (số nguyên 16..30).
- * Kèm `ac_codes` (bitmask mã IR đã học, số nguyên 0..65535). Mỗi khoá chỉ có khi Node đã biết trạng thái; thiếu hoặc sai kiểu/miền → null (bỏ qua, KHÔNG từ chối gói số đo).
+ * Node phòng khách báo trạng thái các thiết bị nó điều khiển trong số đo: `lamp`, `fan`, `ac` (0/1 hoặc boolean),
+ * `curtain` (0 = đóng, 2..100 = % mở, 1 = mở chưa rõ % → chỉ power_state, giữ curtain_pos), `ac_temp` (số nguyên 16..30) và `ac_codes` (bitmask mã IR đã học, số nguyên
+ * 0..65535). Mỗi khoá chỉ có khi Node đã biết trạng thái (gói có thể chỉ mang một phần); thiếu hoặc sai kiểu/miền → null
+ * (bỏ qua, giữ giá trị trong DB, KHÔNG từ chối gói số đo).
  */
 export function parseApplianceReport(data: unknown): NodeApplianceReport {
   const raw = typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
-  const ac = raw.ac;
-  const acPower = ac === true || ac === 1 ? true : ac === false || ac === 0 ? false : null;
-  const acSetpoint = isValidAcSetpoint(raw.ac_temp) ? raw.ac_temp : null;
-  const acCodes = isValidAcCodes(raw.ac_codes) ? raw.ac_codes : null;
-  return { acPower, acSetpoint, acCodes };
+  return {
+    power: {
+      lamp: parseOnOff(raw.lamp),
+      fan: parseOnOff(raw.fan),
+      curtain: parseCurtainOpen(raw.curtain),
+      ac: parseOnOff(raw.ac),
+    },
+    acSetpoint: isValidAcSetpoint(raw.ac_temp) ? raw.ac_temp : null,
+    acCodes: isValidAcCodes(raw.ac_codes) ? raw.ac_codes : null,
+    curtainPos: parseReportedCurtainPos(raw.curtain),
+  };
 }
 
 /**
  * Sau khi INSERT sensor_data và chạy onTelemetryIngested: last_seen = NOW(), fail_count = 0 cho gateway rồi sensor
  * (đúng thứ tự này). IP khác null (kể cả chuỗi rỗng) → ghi thêm last_ip; null → giữ IP cũ.
  *
- * Rồi đồng bộ các relay THẬT của sensor này (điều hoà `<uid>-ac`): last_seen theo Node cha + power_state/ac_setpoint
- * từ `data.ac` / `data.ac_temp` / `data.ac_codes`. Lỗi ở bước này không được làm hỏng ingest (số đo đã lưu).
+ * Rồi đồng bộ các thiết bị THẬT của sensor này (`<uid>-lamp|fan|curtain|ac`): last_seen theo Node cha + power_state từ
+ * `data.lamp` / `data.fan` / `data.curtain` / `data.ac`, ac_setpoint / ac_codes từ `data.ac_temp` / `data.ac_codes`. Lỗi
+ * ở bước này không được làm hỏng ingest (số đo đã lưu).
  */
 export async function markGatewayAndSensorSeen(
   gatewayDbId: number,

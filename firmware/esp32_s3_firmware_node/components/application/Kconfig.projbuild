@@ -2,12 +2,32 @@
 menu "Node S3: ứng dụng"
 
     config NODE_APP_TELEMETRY_INTERVAL_S
-        int "Chu kỳ gửi nhiệt độ, độ ẩm về Gateway (giây)"
+        int "Chu kỳ gửi số đo + trạng thái tải về Gateway (giây)"
         range 5 3600
         default 10
         help
             Màn hình Node vẫn cập nhật 2 giây/lần; đây chỉ là chu kỳ gửi ESP-NOW TELEMETRY (Gateway chuyển tiếp lên
-            Server, mỗi gói là 1 dòng sensor_data). 10 giây cho demo; chạy lâu dài nên 30–60 giây. Gói đầu tiên gửi
-            ngay khi đã nối Gateway và có giờ.
+            Server, mỗi gói là 1 dòng sensor_data): nhiệt độ, độ ẩm và trạng thái đèn, quạt, rèm, điều hòa. Tải đổi
+            trạng thái thì gửi ngay, không chờ chu kỳ. Server tính đèn/quạt/rèm/điều hòa online theo gói này, nên đừng
+            đặt quá 60 giây. Gói đầu tiên gửi ngay khi đã nối Gateway và có giờ.
+
+    config NODE_APP_RESTORE_SWITCHES
+        bool "Khôi phục trạng thái đèn, quạt khi có điện lại"
+        default y
+        help
+            Bật: mỗi lần đèn/quạt đổi trạng thái thì lưu NVS, khởi động lại thì đóng relay theo trạng thái đã lưu (như
+            công tắc thông minh). Tắt: luôn TẮT khi khởi động. Rèm luôn nhớ vị trí và không tự chạy khi có điện lại.
+
+    config NODE_AUDIO_BEEP_ON_ACTION
+        bool "Bíp khi bật/tắt đèn, quạt, rèm"
+        depends on NODE_AUDIO_ENABLE
+        default y
+
+    config NODE_AUDIO_MIC_SELFTEST
+        bool "[Thử mic] In mức âm (dBFS) ra log mỗi 5 giây"
+        depends on NODE_AUDIO_ENABLE
+        default n
+        help
+            Chỉ để kiểm mic sau khi lắp: task âm thanh đọc mic liên tục. Tắt khi một tính năng khác cần đọc mic.
 
 endmenu

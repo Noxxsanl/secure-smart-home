@@ -11,6 +11,10 @@ export type DevicePowerControl = {
   toggle: (device: CustomerDevice) => Promise<void>;
   /** Đặt hẳn bật/tắt (nút Mở/Đóng của rèm); trùng trạng thái hiện tại thì không gửi lệnh. */
   setPower: (device: CustomerDevice, on: boolean) => Promise<void>;
+  /** Rèm: vị trí hiển thị 0..100 (giá trị tạm khi đang chờ xác nhận, không thì của server); null = chưa biết. */
+  curtainPosOf: (device: CustomerDevice) => number | null;
+  /** Rèm: đặt vị trí 0..100 (set_pos), optimistic + hoàn tác khi lỗi / quá thời gian chờ. */
+  setCurtainPosition: (device: CustomerDevice, position: number) => Promise<void>;
   /** Điều hòa: nhiệt độ đặt hiển thị (giá trị tạm khi đang chỉnh, không thì của server); null = chưa biết. */
   setpointOf: (device: CustomerDevice) => number | null;
   /** Điều hòa: có thể bấm −/+ (đúng quyền, online, không có lệnh nhiệt độ đang gửi). */

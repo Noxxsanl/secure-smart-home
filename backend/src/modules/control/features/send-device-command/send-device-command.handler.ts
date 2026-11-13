@@ -21,11 +21,15 @@ import {
   getDeviceRow,
   getGatewaySigner,
   learnSlotMask,
+  CURTAIN_POS_MAX,
+  CURTAIN_POS_MIN,
   parseLearnAction,
+  parseSetPosAction,
   parseSetTempAction,
   requireDeviceAccess,
   setDeviceAcCodesBit,
   setDeviceAcSetpoint,
+  setDeviceCurtainPos,
   setDevicePowerState,
   toCustomerDeviceOne,
   toDeviceStateEvent,
@@ -96,11 +100,13 @@ async function runMqttDeviceCommand(device: DeviceRow, action: DeviceCommandActi
  * Gửi lệnh bật/tắt tới một relay và chờ ack (≤ 5 s; lệnh học mã learn_* ≤ 15 s vì Node chờ người dùng bấm remote tối đa 10 s).
  *
  * Kiểm tra theo thứ tự: không tồn tại/chưa gán nhà → 404 · không phải relay → 400 NOT_CONTROLLABLE ·
- * set_temp_<NN> / learn_off / learn_t<NN> mà không phải điều hoà (appliance <> 'ac') → 400 NOT_CONTROLLABLE · bị chặn → 409 DEVICE_BLOCKED · nhà tạm ngưng → 409 HOME_SUSPENDED · không active hoặc offline
+ * set_temp_<NN> / learn_off / learn_t<NN> mà không phải điều hoà (appliance <> 'ac') → 400 NOT_CONTROLLABLE · set_pos_<N> mà không phải rèm
+ * (appliance <> 'curtain') → 400 NOT_CONTROLLABLE · bị chặn → 409 DEVICE_BLOCKED · nhà tạm ngưng → 409 HOME_SUSPENDED · không active hoặc offline
  * (last_seen > 90 s) → 409 DEVICE_OFFLINE. Quyền của người dùng với thiết bị KHÔNG kiểm ở đây —
  * người gọi phải gọi requireDeviceAccess(auth, id, "control_device") trước.
  *
- * Thành công: cập nhật power_state (set_temp: ack.power ?? true, kèm ac_setpoint), device_commands → acked, phát bus
+ * Thành công: cập nhật power_state (set_temp: ack.power ?? true, kèm ac_setpoint; set_pos_<N>: ack.power ?? N > 0; với rèm,
+ * curtain_pos = N / 100 (turn_on) / 0 (turn_off) cùng transaction), device_commands → acked, phát bus
  * `device_state`, ghi user_behavior_logs và audit DEVICE_COMMAND. Riêng learn_*: KHÔNG đổi power_state/ac_setpoint
  * (chỉ bật bit mã tương ứng trong ac_codes) và KHÔNG ghi user_behavior_logs. Thất bại: device_commands → timeout/failed, audit
  * DEVICE_COMMAND_FAILED rồi ném 504 TIMEOUT (không ack trong 5 s, learn_*: 15 s / broker không sẵn sàng) hoặc 502
@@ -110,14 +116,18 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
   const device = await getDeviceRow(input.deviceId);
   if (!device || device.device_type === "gateway") throw notFound("Device not found");
   if (device.category !== "relay") throw new HttpError(400, "NOT_CONTROLLABLE", "Device is not a relay");
-  // set_temp_<NN> / learn_off / learn_t<NN>: chỉ điều hoà IR; chuỗi lạ (không thuộc các dạng trên) là lỗi gọi hàm
+  // set_temp_<NN> / learn_off / learn_t<NN>: chỉ điều hoà IR; set_pos_<N>: chỉ rèm; chuỗi lạ (không thuộc các dạng trên) là lỗi gọi hàm
   const setpoint = parseSetTempAction(input.action);
   const learnSlot = parseLearnAction(input.action);
-  if (learnSlot === null && setpoint === null && input.action !== "turn_on" && input.action !== "turn_off") {
+  const curtainTarget = parseSetPosAction(input.action);
+  if (learnSlot === null && setpoint === null && curtainTarget === null && input.action !== "turn_on" && input.action !== "turn_off") {
     throw new HttpError(400, "INVALID_INPUT", "Unsupported command action");
   }
   if ((setpoint !== null || learnSlot !== null) && device.appliance !== "ac") {
     throw new HttpError(400, "NOT_CONTROLLABLE", "set_temp and learn_code are only supported by air conditioners");
+  }
+  if (curtainTarget !== null && device.appliance !== "curtain") {
+    throw new HttpError(400, "NOT_CONTROLLABLE", "set_pos is only supported by curtains");
   }
   if (device.home_id === null) throw notFound("Device is not assigned to a home");
   if (device.status === "blocked") throw new HttpError(409, "DEVICE_BLOCKED", "Device is blocked");
@@ -135,12 +145,25 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
       : await runMqttDeviceCommand(device, input.action, commandUuid, rowId);
 
   // Tên hành động trong thông báo lỗi (chữ thường) và trong audit khi thành công
-  const failVerb = learnSlot !== null ? "học mã remote" : setpoint !== null ? "đặt nhiệt độ" : input.action === "turn_on" ? "bật" : "tắt";
+  const failVerb =
+    learnSlot !== null
+      ? "học mã remote"
+      : setpoint !== null
+      ? "đặt nhiệt độ"
+      : curtainTarget !== null
+      ? "mở rèm"
+      : input.action === "turn_on"
+      ? "bật"
+      : "tắt";
   const successMessage =
     learnSlot !== null
       ? `Học mã remote "${device.device_name}" ${learnSlot === "off" ? "mã TẮT" : `${learnSlot}°C`}`
       : setpoint !== null
       ? `Đặt điều hòa "${device.device_name}" ${setpoint}°C`
+      : curtainTarget !== null
+      ? curtainTarget === 0
+        ? `Đóng rèm "${device.device_name}"`
+        : `Mở rèm "${device.device_name}" ${curtainTarget}%`
       : `${input.action === "turn_on" ? "Bật" : "Tắt"} "${device.device_name}"`;
   const failureBase = {
     homeId: device.home_id,
@@ -174,8 +197,12 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
   // Ack ok: ghi trạng thái mới
   const ackedAt = new Date();
   // set_temp: điều hoà nhận lệnh đặt độ nghĩa là đang chạy → mặc định bật; turn_on/turn_off không đụng ac_setpoint
-  const newPower = outcome.power ?? (setpoint !== null ? true : input.action === "turn_on");
-  // power_state + ac_setpoint (bảng devices, qua facade) + device_commands → acked: cùng thành công hoặc cùng huỷ (invariant 9)
+  // set_pos_<N>: mở tới N % nghĩa là rèm đang mở khi N > 0
+  const newPower = outcome.power ?? (setpoint !== null ? true : curtainTarget !== null ? curtainTarget > 0 : input.action === "turn_on");
+  // % mở rèm sau lệnh: set_pos_<N> → N; turn_on = mở hết (100), turn_off = đóng (0). Chỉ dòng rèm (appliance = 'curtain').
+  const newCurtainPos =
+    device.appliance !== "curtain" ? null : curtainTarget ?? (input.action === "turn_on" ? CURTAIN_POS_MAX : input.action === "turn_off" ? CURTAIN_POS_MIN : null);
+  // power_state + ac_setpoint/curtain_pos (bảng devices, qua facade) + device_commands → acked: cùng thành công hoặc cùng huỷ (invariant 9)
   // learn_*: ack ok = Node đã học + lưu mã xong → chỉ bật bit của ô đó trong ac_codes; KHÔNG đụng power_state/ac_setpoint
   // (học mã không bật/tắt điều hoà thật, nên bỏ qua `power` trong ack)
   await withTransaction(async (conn) => {
@@ -184,11 +211,16 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
     } else {
       await setDevicePowerState(device.id, newPower, conn);
       if (setpoint !== null) await setDeviceAcSetpoint(device.id, setpoint, conn);
+      if (newCurtainPos !== null) await setDeviceCurtainPos(device.id, newCurtainPos, conn);
     }
     await markCommandAcked(rowId, ackedAt, conn);
   });
 
-  const updated = (await getDeviceRow(device.id)) ?? { ...device, power_state: newPower };
+  const updated = (await getDeviceRow(device.id)) ?? {
+    ...device,
+    power_state: newPower,
+    curtain_pos: newCurtainPos ?? device.curtain_pos,
+  };
   const stateEvent = toDeviceStateEvent(updated);
   if (stateEvent) eventBus.emit("device_state", stateEvent);
 
@@ -201,7 +233,17 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
       roomId: device.room_id,
       deviceId: device.id,
       deviceCategory: device.category,
-      action: setpoint !== null ? "SET_TEMP" : input.action === "turn_on" ? "TURN_ON" : "TURN_OFF",
+      // set_pos không có action riêng trong nhật ký hành vi (gợi ý thói quen chỉ hiểu bật/tắt): N > 0 → TURN_ON, N = 0 → TURN_OFF
+      action:
+        setpoint !== null
+          ? "SET_TEMP"
+          : curtainTarget !== null
+          ? curtainTarget > 0
+            ? "TURN_ON"
+            : "TURN_OFF"
+          : input.action === "turn_on"
+          ? "TURN_ON"
+          : "TURN_OFF",
       previousState:
         setpoint !== null ? tempLabel(device.ac_setpoint) : powerLabel(device.power_state === null ? null : toBool(device.power_state)),
       newState: setpoint !== null ? tempLabel(setpoint) : powerLabel(newPower),

@@ -16,26 +16,30 @@
 Màn hình 800×480, chữ tiếng Việt có dấu:
 
 ```
-┌ GATEWAY NHÀ THÔNG MINH   WiFi 192.168.x.x   Máy chủ --          12:34:56 ┐  header
+┌ Gateway Smart Home                              Th 7 14/11/2026  21:05:33 ┐  header
 │ ┌───────────┐ ┌──────────────────────────────────────────────────────────┐ │
 │ │ CAMERA    │ │  nội dung của mục đang chọn                              │ │
 │ │ Trực tiếp │ │                                                          │ │
 │ ├───────────┤ │                                                          │ │
-│ │PHÒNG KHÁCH│ │                                                          │ │
+│ │LIVING ROOM│ │                                                          │ │
 │ │28.4°C 61% │ │                                                          │ │
 │ ├───────────┤ │                                                          │ │
 │ │ THIẾT BỊ  │ │                                                          │ │
 │ │1/1 đã k.n.│ └──────────────────────────────────────────────────────────┘ │
-└ dòng trạng thái (hướng dẫn khi lỗi) ───────────────────────────────────────┘  footer
+└ dòng trạng thái (hướng dẫn / kết quả lệnh)   WiFi 192.168.x.x  Máy chủ OK ┘  footer
 ```
+
+**Header** (y 0–44): bên trái "Gateway Smart Home"; bên phải **ngày + giờ** dạng `Th 7 14/11/2026  21:05:33` (thứ: `CN`, `Th 2` … `Th 7`; giờ Việt Nam, UTC+7), căn phải nên không tràn khỏi 800 px. Gateway chưa có giờ (chưa NTP, RTC trống) thì hiện `--/--/----  --:--:--`. Mô hình được vẽ lại mỗi 200 ms (khi có thay đổi).
+
+**Footer** (y ≈ 452): dòng trạng thái ở bên trái (rộng 430 px, chữ dài bị cắt bằng `...`); bên phải, căn phải, **WiFi** (`LV_SYMBOL_WIFI <IP>` xanh, hoặc `Mất kết nối` đỏ) và **Máy chủ** (`Máy chủ OK` xanh / `Máy chủ --` đỏ). Hai nhãn này trước đây nằm ở header.
 
 | Trang | Nội dung |
 |---|---|
 | **Camera** | Hình trực tiếp 448×336 từ ESP32-CAM; góc phải hàng tiêu đề: chấm + chữ kết nối Camera ↔ Gateway (kèm số khung/giây khi có hình). Luồng chạy khi đang ở trang này hoặc khi có người xem từ xa; góc trên trái khung hình có nhãn **"Đang được xem từ xa"** khi có phiên xem từ xa (mục 3.2) |
-| **Phòng khách** | Nhiệt độ, độ ẩm; trạng thái quạt, điều hoà, đèn, rèm cửa (chờ node gửi); kết nối node ↔ Gateway |
+| **LIVING ROOM** | Nhiệt độ, độ ẩm; 4 ô Quạt, Điều hòa, Đèn, Rèm cửa, mỗi ô có **công tắc** điều khiển Node; ô Rèm có thêm 2 nút mức **50% / 100%** — mục 3.3. Kết nối node ↔ Gateway ở góc phải hàng tiêu đề |
 | **Thiết bị** | Bảng các thiết bị đã ghép với Gateway — mục 2 |
 
-Ba nơi dùng **cùng một quy tắc** 3 trạng thái kết nối (mục 2.2): chấm trong bảng Thiết bị, dòng phụ dưới mục nav, chấm ở góc phải trang Camera / Phòng khách.
+Ba nơi dùng **cùng một quy tắc** 3 trạng thái kết nối (mục 2.2): chấm trong bảng Thiết bị, dòng phụ dưới mục nav, chấm ở góc phải trang Camera / LIVING ROOM.
 
 ---
 
@@ -46,7 +50,7 @@ Ba nơi dùng **cùng một quy tắc** 3 trạng thái kết nối (mục 2.2):
 ┌──────────────────┬──────────┬──────────┬─────────┬─────────────┐
 │ Thiết bị         │ Loại     │ Trạng thái│ Tín hiệu│ Lần cuối    │
 ├──────────────────┼──────────┼──────────┼─────────┼─────────────┤
-│ cam-door-01      │ Camera   │ ●        │ -58 dBm │ 14:02:31    │
+│ camera-01        │ Camera   │ ●        │ -58 dBm │ 14:02:31    │
 │ livingroom-01    │ Node     │ ●        │ --      │ 08/11 21:47 │
 └──────────────────┴──────────┴──────────┴─────────┴─────────────┘
 ```
@@ -129,7 +133,7 @@ Cách sửa (không đụng thư viện LVGL): sự kiện `LV_EVENT_DRAW_PART_B
 
 ---
 
-## 3. Trang Camera và Phòng khách
+## 3. Trang Camera và LIVING ROOM
 
 - Chấm kết nối ở góc phải dùng quy tắc mục 2.2. Riêng trang Camera khi đang có hình: xanh "Đã kết nối  3.3 khung/s"; đang mở luồng: vàng; luồng đứt đang thử lại: đỏ.
 ### 3.1. Đường ống hình camera (2026-11-13)
@@ -158,7 +162,41 @@ gw_camera_relay: relay sent <F> fps, <G> KB/s, offered <N>, dropped <M>  # chỉ
 
 Server gửi lệnh MQTT `live_start` (command_id = session_id) tới camera → Gateway mở WebSocket TLS `/api/device/camera/live` và đẩy khung JPEG lên Server (≤ `CONFIG_GW_CAMERA_RELAY_MAX_FPS`, mặc định 15). Trong lúc phiên còn hiệu lực, trang Camera hiện nhãn "Đang được xem từ xa" (chấm đỏ trên nền đen mờ, góc trên trái khung hình, kể cả khi chưa có hình). Nhãn tắt khi `live_stop`, khi Server đóng, hoặc khi rớt mạng quá 3 lần nối lại (1, 2, 4 s). Rời trang Camera thì LCD không giải nén nữa nhưng luồng camera vẫn được kéo cho phiên xem từ xa. Chi tiết giao thức: README của Gateway, mục *Xem từ xa*.
 
-- Trạng thái quạt / điều hoà / đèn / rèm đọc từ trường `fan`, `ac`, `ac_temp`, `lamp`, `curtain` trong telemetry của node — **đề xuất**, node chưa gửi (README Gateway, mục *Giao diện và xem trực tiếp*).
+- Trạng thái quạt / điều hoà / đèn / rèm đọc từ trường `fan`, `ac`, `ac_temp`, `lamp`, `curtain` trong telemetry của node (`curtain`: 0 = đóng, 2..100 = % mở; khi rèm đang chạy Node báo mức MỤC TIÊU).
+
+### 3.3. Điều khiển cục bộ ở trang LIVING ROOM (2026-11-14)
+
+```
+ Quạt        ◯──     Điều hòa    ──●     Đèn        ──●     Rèm cửa              ──●
+                         Đặt 24°C
+                                                             [  50%  ] [ 100% ]
+```
+
+| Thành phần | Hành vi |
+|---|---|
+| Công tắc (góc trên phải mỗi ô) | Xám = tắt, xanh = bật (ô cũng chuyển nền xanh sẫm). Gạt → lệnh `turn_on` / `turn_off` tới Node (rèm: mở 100% / đóng hẳn). Vùng chạm rộng hơn hình công tắc 16 px |
+| 2 nút mức rèm | `set_pos_50`, `set_pos_100` (không còn 75%). Nút to (cao 56 px, chữ cỡ 20), vùng chạm nới 3 px, 2 nút cách nhau 8 px nên không chồng vùng chạm. Nút khớp mức hiện tại (±1%) tô xanh dương (màu nhấn); công tắc rèm tự bật |
+| Chữ trong ô | Không còn chữ "Đang chạy/bật/sáng/tắt/Đóng/Mở N%": công tắc + nền xanh đã cho biết. Chỉ giữ: Điều hòa "Đặt NN°C" khi bật; "Node chưa báo" khi chưa biết trạng thái. Rèm không có chữ (nút mức nói lên) |
+| Chưa biết trạng thái | Node chưa báo trạng thái thiết bị đó → công tắc (và nút mức rèm) bị khoá mờ, chữ "Node chưa báo" |
+
+Luồng lệnh (không đi qua Server):
+
+```
+chạm công tắc ─► gw_ui (task LVGL) ─► EV_LOCAL_CMD ─► gw_app: command_id "gw-<8 hex>", ESP-NOW CMD {action, params.target}
+                                                                       │
+Node: node_cmd log, đổi tải, CMD_ACK trong vài ms ◄───────────────────┘
+        └─► gw_app: log "local command <id> → <target> <action>", hiện kết quả ở dòng trạng thái
+        └─► ack ok: gw_ui_set_actuator(target, state) ─► công tắc + nền ô đổi ở lần vẽ lại kế (<= 200 ms)
+Node gửi telemetry với trạng thái mới ─► công tắc/ô cập nhật theo Node (nguồn sự thật)
+```
+
+- **Node nhận lệnh**: Node phòng khách = Node đã ghép gửi telemetry gần nhất, chưa có thì Node đầu tiên trong NVS `nodes`.
+- **Cập nhật ngay khi có ack**: khi Node ack `ok` cho một lệnh, Gateway ghi trạng thái mới vào mô hình màn hình ngay (không chờ telemetry kế tiếp) rồi màn hình vẽ lại (chu kỳ 200 ms). Áp cho CẢ lệnh cục bộ lẫn lệnh Server (MQTT) tới Node phòng khách (lệnh Server chỉ áp khi nhắm thiết bị con `<node>-lamp|fan|curtain|ac`). Quạt/đèn/điều hòa: theo `power` của ack, không có thì theo `turn_on`/`turn_off`. Rèm: theo action (`set_pos_N` → N, `turn_on` → 100, `turn_off` → 0). Action khác (VD đặt nhiệt độ, học mã IR) không đổi trạng thái. Ack lỗi hoặc hết giờ: không đổi mô hình.
+- **Công tắc luôn theo trạng thái Node**: sau khi gạt, công tắc giữ vị trí mới tối đa 3 s chờ ack/telemetry (rèm cũng 3 s: Node báo mức MỤC TIÊU ngay khi rèm bắt đầu chạy). Ack hoặc telemetry tới thì lấy theo đó; lệnh lỗi thì công tắc quay về trạng thái Node đã báo lần cuối.
+- **Kết quả** (dòng trạng thái ở footer): thành công `Đã gửi lệnh: bật quạt` (xám); lỗi (màu đỏ): `Chưa có giờ, chưa điều khiển được` (Gateway chưa có NTP/RTC — cần giờ để ký lệnh), `Đang chờ Node phản hồi` (lệnh trước cho cùng thiết bị chưa có ack), `Không gửi được tới Node`, `Node báo lỗi khi ...`, `Node không phản hồi` (không có ack trong `CONFIG_GW_NODE_ACK_TIMEOUT_MS`, mặc định 3 s).
+- Rèm ack lúc **bắt đầu chạy**; màn hình hiện luôn mức đích từ action, telemetry sau đó báo mức mục tiêu (rồi mức thật).
+- **Server không biết về lệnh cục bộ**: không có dòng nào trong lịch sử lệnh của Server và không có ack MQTT; Server chỉ thấy **trạng thái kết quả** khi Gateway chuyển tiếp telemetry của Node như bình thường (web/Mobile thấy công tắc đổi theo). Lệnh từ web/Mobile vẫn đi đường cũ (MQTT → Gateway → ESP-NOW → ack MQTT).
+- Log để lần theo (cổng Serial của Gateway cạnh log `node_cmd` của Node): `gw_app: local command gw-1a2b3c4d → fan turn_on, waiting CMD_ACK` rồi `local command gw-1a2b3c4d → fan turn_on: Node acked ok`.
 
 ## 4. Chữ tiếng Việt
 
@@ -183,6 +221,13 @@ LVGL hiển thị được tiếng Việt nếu font có glyph; font Montserrat 
 | `components/ui/idf_component.yml`, `Kconfig.projbuild`, `CMakeLists.txt` | Khai báo `espressif/esp_new_jpeg ^1.0.2`; chọn bộ giải nén |
 | `components/application/src/gw_app.c`, `include/gw_app.h` | Lệnh camera `live_start`/`live_stop` (không ack); một luồng cho LCD + relay; `live_sync` theo (trang Camera) HOẶC (phiên relay) |
 | `sdkconfig.defaults` | `CONFIG_LWIP_TCP_SND_BUF_DEFAULT` / `WND_DEFAULT` = 11520 (mặc định 5760 dễ nghẽn ở 0,3–0,6 MB/s) — chỉ áp dụng khi sinh lại `sdkconfig` |
+
+### 5.1b. Header/footer mới + điều khiển cục bộ (2026-11-14)
+
+| File | Thay đổi |
+|---|---|
+| `components/ui/src/gw_ui.c`, `include/gw_ui.h` | Header: ngày + giờ căn phải (`fmt_datetime`); WiFi / Máy chủ chuyển xuống footer; trang và nav đổi tên **LIVING ROOM**; 4 ô thiết bị dùng `lv_switch` + 2 nút mức rèm (50% / 100%); API mới `gw_ui_control_cb_t`, `gw_ui_set_control_handler`, `gw_ui_control_failed`, `gw_ui_set_actuator` (cập nhật ngay từ ack); bỏ chữ trạng thái trong ô; làm tươi 200 ms |
+| `components/application/src/gw_app.c` | Sự kiện `EV_LOCAL_CMD`; `handle_local_cmd` gửi ESP-NOW CMD tới Node; ô chờ ack đánh dấu `local` (ack/timeout báo lên màn hình, không publish MQTT); ô chờ ack lưu `target`/`action` cho cả lệnh Server; `apply_ack_to_ui` gọi `gw_ui_set_actuator` khi ack ok |
 
 ### 5.2. Bảng Thiết bị (2026-11-09)
 

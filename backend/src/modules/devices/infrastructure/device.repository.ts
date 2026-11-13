@@ -4,6 +4,7 @@
 // Mọi hàm ghi nhận `db` để chạy được trong transaction của người gọi.
 import pool from "../../../infrastructure/database/pool";
 import { placeholders, queryOne, queryRows, runSql, type Queryable } from "../../../infrastructure/database/db";
+import type { Appliance } from "../domain/device.types";
 
 export async function updateDeviceName(id: number, name: string, db: Queryable = pool): Promise<void> {
   await runSql("UPDATE devices SET device_name = ? WHERE id = ?", [name, id], db);
@@ -82,6 +83,11 @@ export async function updateAcSetpoint(deviceDbId: number, setpoint: number, db:
   await runSql("UPDATE devices SET ac_setpoint = ? WHERE id = ?", [setpoint, deviceDbId], db);
 }
 
+/** % mở của rèm sau khi Node ack lệnh set_pos/turn_on/turn_off (CHECK 0..100 ở DB). */
+export async function updateCurtainPos(deviceDbId: number, position: number, db: Queryable = pool): Promise<void> {
+  await runSql("UPDATE devices SET curtain_pos = ? WHERE id = ?", [position, deviceDbId], db);
+}
+
 /** Bật thêm bit mã IR đã học: ac_codes = COALESCE(ac_codes, 0) | mask (một câu nguyên tử, NULL coi như 0). */
 export async function orAcCodes(deviceDbId: number, mask: number, db: Queryable = pool): Promise<void> {
   await runSql("UPDATE devices SET ac_codes = COALESCE(ac_codes, 0) | ? WHERE id = ?", [mask, deviceDbId], db);
@@ -89,21 +95,23 @@ export async function orAcCodes(deviceDbId: number, mask: number, db: Queryable 
 
 export interface NodeApplianceRow {
   id: number;
-  appliance: string;
+  /** CHECK ck_devices_appliance bảo đảm miền; câu SELECT lọc NULL. */
+  appliance: Appliance;
   power_state: boolean | null;
   ac_setpoint: number | null;
   ac_codes: number | null;
+  curtain_pos: number | null;
   last_seen: Date | null;
 }
 
 /**
  * Các thiết bị THẬT (is_simulated = FALSE) gắn với một Node: cùng nhà và device_id = "<node_uid>-<appliance>"
- * (quy ước của scripts/register-hardware.ts). Node là chủ của chúng nên telemetry của Node cũng là bằng chứng
- * "còn sống" của các relay này (chúng không tự gửi gì lên backend).
+ * (quy ước của scripts/register-hardware.ts và trang Đăng ký Gateway) — đèn, quạt, rèm, điều hoà. Node là chủ của chúng
+ * nên telemetry của Node cũng là bằng chứng "còn sống" của các thiết bị này (chúng không tự gửi gì lên backend).
  */
 export async function listNodeAppliances(nodeDbId: number, db: Queryable = pool): Promise<NodeApplianceRow[]> {
   return queryRows<NodeApplianceRow>(
-    `SELECT a.id, a.appliance, a.power_state, a.ac_setpoint, a.ac_codes, a.last_seen
+    `SELECT a.id, a.appliance, a.power_state, a.ac_setpoint, a.ac_codes, a.curtain_pos, a.last_seen
        FROM devices n
        JOIN devices a ON a.home_id = n.home_id
                      AND a.is_simulated = FALSE
@@ -116,17 +124,18 @@ export async function listNodeAppliances(nodeDbId: number, db: Queryable = pool)
   );
 }
 
-/** last_seen = NOW() cho một relay của Node, ghi kèm power_state/ac_setpoint/ac_codes (giữ nguyên giá trị cũ nếu truyền lại). */
+/** last_seen = NOW() cho một relay của Node, ghi kèm power_state/ac_setpoint/ac_codes/curtain_pos (giữ nguyên giá trị cũ nếu truyền lại). */
 export async function touchAppliance(
   deviceDbId: number,
   power: boolean | null,
   setpoint: number | null,
   acCodes: number | null,
+  curtainPos: number | null,
   db: Queryable = pool
 ): Promise<void> {
   await runSql(
-    "UPDATE devices SET last_seen = NOW(), power_state = ?, ac_setpoint = ?, ac_codes = ? WHERE id = ?",
-    [power, setpoint, acCodes, deviceDbId],
+    "UPDATE devices SET last_seen = NOW(), power_state = ?, ac_setpoint = ?, ac_codes = ?, curtain_pos = ? WHERE id = ?",
+    [power, setpoint, acCodes, curtainPos, deviceDbId],
     db
   );
 }

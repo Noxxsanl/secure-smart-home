@@ -4,7 +4,7 @@
 // UPDATE devices mà gọi các hàm "ghi trạng thái" bên dưới, truyền `db` khi đang trong transaction của mình.
 import type { Queryable } from "../../infrastructure/database/db";
 import type { DeviceRow } from "./domain/device.types";
-import { markProvisioned, orAcCodes, updateAcSetpoint, updatePowerState } from "./infrastructure/device.repository";
+import { markProvisioned, orAcCodes, updateAcSetpoint, updateCurtainPos, updatePowerState } from "./infrastructure/device.repository";
 
 // ── Đọc thiết bị (read model) ───────────────────────────────────────────────
 export {
@@ -84,16 +84,27 @@ export async function setDeviceAcSetpoint(deviceDbId: number, setpoint: number, 
   await updateAcSetpoint(deviceDbId, setpoint, db);
 }
 
-// ── Điều hoà IR / relay thật của Node ───────────────────────────────────────
+/** % mở của rèm sau khi Node ack lệnh set_pos/turn_on/turn_off. */
+export async function setDeviceCurtainPos(deviceDbId: number, position: number, db?: Queryable): Promise<void> {
+  await updateCurtainPos(deviceDbId, position, db);
+}
+
+// ── Điều hoà IR / rèm / relay thật của Node ─────────────────────────────────
 export {
   AC_SETPOINT_MAX,
   AC_SETPOINT_MIN,
+  CURTAIN_POS_MAX,
+  CURTAIN_POS_MIN,
   isValidAcCodes,
   isValidAcSetpoint,
+  isValidCurtainPos,
   learnSlotMask,
   parseLearnAction,
+  parseReportedCurtainPos,
+  parseSetPosAction,
   parseSetTempAction,
   toLearnAction,
+  toSetPosAction,
   toSetTempAction,
 } from "./domain/appliance";
 export type { LearnSlot } from "./domain/appliance";

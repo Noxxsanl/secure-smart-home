@@ -1,11 +1,11 @@
 # LEN_SERVER.md — Đưa dữ liệu phần cứng thật lên Server và giao diện khách
 
 Hướng dẫn nối bộ demo thật (Gateway Waveshare ESP32-S3 `gw-s3-demo-01`, Node phòng khách `node-living-01`, ESP32-CAM
-`cam-door-01`) với backend, để **nhiệt độ/độ ẩm** và **ảnh camera khi có chuyển động** hiện trên cổng web khách
+`camera-01`) với backend, để **nhiệt độ/độ ẩm** và **ảnh camera khi có chuyển động** hiện trên cổng web khách
 (`apps/user`, http://localhost:3003) và app Mobile.
 
 Điều kiện trước: Node → Gateway và Camera → Gateway đã chạy (Gateway log `TELEMETRY node-living-01 verified`, nhận ảnh
-`snapshot from cam-door-01`) — xem [NAP_CAMERA_GATEWAY](NAP_CAMERA_GATEWAY.md). Không cần nạp lại Node hay Camera.
+`snapshot from camera-01`) — xem [NAP_CAMERA_GATEWAY](NAP_CAMERA_GATEWAY.md). Không cần nạp lại Node hay Camera.
 
 ## 1. Luồng dữ liệu
 
@@ -64,7 +64,7 @@ docker compose logs -f backend          # chờ "[migrate]" xong và "[mqttData]
 Backend tự tạo bảng mới `camera_snapshots` khi khởi động (migration append-only).
 
 Đăng ký thiết bị **với đúng device_id/secret đã nạp vào chip** (giá trị trong `nvs_dev.csv` của gateway — file gitignore).
-Có 2 cách, cùng kết quả (nhà + phòng Phòng khách/Camera + gateway, node, camera, đèn/quạt/rèm mô phỏng, điều hoà thật):
+Có 2 cách, cùng kết quả (nhà + phòng Phòng khách/Camera + gateway, node, camera, đèn/quạt/rèm/điều hoà — đều là thiết bị thật do node điều khiển):
 
 **Cách 1 — trên console (Admin hoặc Operator), gắn được cho bất kỳ tài khoản khách nào.** Đăng nhập http://localhost:3001
 (`admin`) hoặc http://localhost:3002 (`operator01`) → **Đăng ký Gateway** → chọn khách hàng (tài khoản khách tự tạo ở cổng
@@ -87,11 +87,11 @@ Kết quả mẫu:
 ```
 [hw:register] Đã tạo nhà "Nhà demo phần cứng" (home_id=5, chủ nhà user01@smarthome.local)
   - gw-s3-demo-01  id=31  gateway  phòng: (không)  "Gateway S3"
-  - cam-door-01  id=32  camera  phòng: Camera  "Camera"
+  - camera-01  id=32  camera  phòng: Camera  "Camera"
   - node-living-01  id=33  sensor  phòng: Phòng khách  "Cảm biến nhiệt/ẩm phòng khách"
-  - node-living-01-lamp  id=34  relay (mô phỏng)  phòng: Phòng khách  "Đèn phòng khách"
-  - node-living-01-fan  id=35  relay (mô phỏng)  phòng: Phòng khách  "Quạt phòng khách"
-  - node-living-01-curtain  id=36  relay (mô phỏng)  phòng: Phòng khách  "Rèm cửa phòng khách"
+  - node-living-01-lamp  id=34  relay (thật)  phòng: Phòng khách  "Đèn phòng khách"
+  - node-living-01-fan  id=35  relay (thật)  phòng: Phòng khách  "Quạt phòng khách"
+  - node-living-01-curtain  id=36  relay (thật)  phòng: Phòng khách  "Rèm cửa phòng khách"
   - node-living-01-ac  id=37  relay (thật)  phòng: Phòng khách  "Điều hòa phòng khách"
 [hw:register] Nhớ ghi cloud/home_id = 5 vào NVS gateway để gửi heartbeat/sự kiện camera.
 ```
@@ -102,10 +102,13 @@ Chạy lại bất cứ lúc nào (idempotent): nhà/phòng dùng lại, thiết
 Nhà đã đăng ký bằng bản cũ (phòng "Cửa chính" chứa "Camera cửa chính") được đổi thành phòng **Camera** / thiết bị **Camera**
 (tên khách đã tự đổi thì giữ nguyên).
 
-Đèn, quạt, rèm của phòng khách là **relay mô phỏng** (`is_simulated = TRUE`): bật/tắt trên web/mobile chạy thật
-qua simulator (ack sau ~0,5 s) nhưng **không** gửi gì xuống node, vì firmware node chưa nhận lệnh relay. Điều hoà là thiết bị
-**thật** (Node học và phát mã IR). Rèm dùng `turn_on` = mở, `turn_off` = đóng. Khi node hỗ trợ lệnh relay: đặt
-`is_simulated = FALSE` cho 3 dòng `<node>-lamp|fan|curtain` (chạy lại script không bật lại mô phỏng).
+Đèn, quạt (relay), rèm (động cơ bước) và điều hoà (IR) của phòng khách đều là thiết bị **thật** (`is_simulated = FALSE`,
+từ 2026-11-13): lệnh trên web/mobile đi MQTT → gateway → node (ESP-NOW), trạng thái và online lấy từ telemetry của node.
+Rèm dùng `turn_on` = mở hẳn, `turn_off` = đóng hẳn. Nhà đăng ký trước ngày đó (đèn/quạt/rèm còn mô phỏng) được backend tự
+chuyển sang thật khi khởi động (migration `set_node_appliances_real_2026_11`); chạy lại script cũng cho cùng kết quả.
+**Thứ tự triển khai:** nạp firmware Node mới (có relay/rèm, [README của Node](../../firmware/esp32_s3_firmware_node/README.md))
+**trước** khi khởi động backend bản này — Node cũ không nhận lệnh đèn/quạt/rèm nên web sẽ báo lỗi 502/504 thay vì bật được như
+lúc còn mô phỏng.
 Thiết bị đã có ở **nhà khác** thì script dừng (không ghi gì) trừ khi thêm `--force`. Script từ chối chạy khi `NODE_ENV=production`.
 
 ## 5. Cấu hình lại Gateway
@@ -137,6 +140,34 @@ idf.py -p COM3 monitor
 (Trong CMD dùng `%IDF_PATH%` thay `$env:IDF_PATH`, `del nvs_dev.bin` thay `Remove-Item`.) Build báo
 `certs/mqtt_ca.crt not found` nghĩa là chưa làm bước 3.
 
+## 5b. Đổi mã camera `cam-door-01` → `camera-01` (2026-11-14)
+
+Mã camera là `device_id` dùng để ký HMAC, nên phải khớp ở **cả 3 nơi**: NVS của Camera, NVS của Gateway (`nodes/0_id`) và
+bảng `devices` của backend. Hai file `nvs_dev.csv` trên máy dev đã được sửa sẵn (`identity/device_uuid` của Camera và
+`nodes/0_id` của Gateway; secret, LMK giữ nguyên). Làm đủ 3 bước, theo thứ tự — làm dở thì Camera bị từ chối (Gateway log
+`bad signature` / backend `sensor not found`):
+
+1. Đổi mã trong database (ảnh chụp cũ giữ nguyên vì gắn theo id nội bộ, không theo mã):
+
+   ```powershell
+   docker exec -it iot-postgres psql -U <POSTGRES_APP_USER> -d secure_smart_home_iot -c "UPDATE devices SET device_id = 'camera-01' WHERE device_id = 'cam-door-01';"
+   ```
+
+   `<POSTGRES_APP_USER>` lấy trong `.env` như [CHAY_LOCAL](CHAY_LOCAL.md). Kết quả phải là `UPDATE 1`.
+
+2. Nạp lại NVS cho **Camera** (COM6), trong thư mục `firmware\esp32_cam` — như [NAP_CAMERA_GATEWAY](NAP_CAMERA_GATEWAY.md) mục Camera:
+
+   ```powershell
+   python $env:IDF_PATH\components\nvs_flash\nvs_partition_generator\nvs_partition_gen.py generate nvs_dev.csv nvs_dev.bin 0x4000
+   python $env:IDF_PATH\components\partition_table\parttool.py -p COM6 write_partition --partition-name=nvs --input nvs_dev.bin
+   Remove-Item nvs_dev.bin      # file chứa secret
+   ```
+
+3. Nạp lại NVS cho **Gateway** (COM3) như mục 5 (`nvs_partition_gen` 0x6000 + `parttool write_partition`). Ghi đè cả phân
+   vùng nên mất "lần cuối kết nối" đã lưu của các thiết bị — không ảnh hưởng gì khác.
+
+Xong: tab **Thiết bị** trên màn hình Gateway hiện `node-living-01` và `camera-01`; Gateway log `snapshot from camera-01`.
+
 ## 6. Kiểm tra từng chặng
 
 | # | Kiểm | Dấu hiệu đạt |
@@ -144,7 +175,7 @@ idf.py -p COM3 monitor
 | 1 | Gateway nối Broker MQTT | Log gateway `gw_config: … mqtt=mqtts://<IP>:8883 … home_id=<h>` rồi `gw_mqtt: connected to broker`; header màn hình: Server xanh |
 | 2 | Nhiệt/ẩm lên Server | Mỗi 10 s backend log `[mqttData] saved id=… from node-living-01 via gw-s3-demo-01` |
 | 3 | Heartbeat | Sau ≤ 30 s, gateway/node/camera hiện **online** trên web (Thiết bị) |
-| 4 | Ảnh camera | Vẫy tay trước PIR: gateway log `snapshot uploaded (… bytes) id=…` + `snapshot from cam-door-01 uploaded to server` |
+| 4 | Ảnh camera | Vẫy tay trước PIR: gateway log `snapshot uploaded (… bytes) id=…` + `snapshot from camera-01 uploaded to server` |
 | 5 | Thông báo chuyển động | Chuông thông báo của user01: "Phát hiện chuyển động" (chống lặp 60 s / camera) |
 | 6 | Web khách | http://localhost:3003, đăng nhập `user01@smarthome.local` / `user123`, nhà **Nhà demo phần cứng** → Tổng quan/Phòng khách: nhiệt độ, độ ẩm, công tắc Đèn/Quạt/Điều hòa và nút Mở/Đóng rèm; phòng **Camera** → **Camera** → khối "Ảnh camera" (tự làm mới 15 s) |
 | 7 | Mobile | Chạy app với `--dart-define=API_BASE_URL=http://<IP>` (qua nginx :80) hoặc `http://<IP>:5000`; đăng nhập user01, chọn nhà, Phòng khách: điều khiển đèn/quạt/rèm/điều hòa; mở **Camera**: khung "Xem trực tiếp" (hiện báo chưa hỗ trợ trên ứng dụng — cắm nguồn luồng ở `cameraLiveSourceProvider` khi backend chuyển tiếp MJPEG) + ảnh mới tự hiện khi có tin WebSocket `camera_snapshot` |

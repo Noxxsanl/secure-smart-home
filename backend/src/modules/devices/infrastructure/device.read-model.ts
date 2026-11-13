@@ -42,7 +42,7 @@ export const DEVICE_SELECT_SQL = `
          d.fail_count, d.last_seen, d.last_ip, d.created_at,
          d.home_id, d.room_id, d.gateway_device_id, d.node_uid, d.power_state,
          d.firmware_version, d.rssi, d.wifi_ssid, d.provision_status, d.is_simulated, d.sim_online,
-         d.appliance, d.ac_setpoint, d.ac_codes,
+         d.appliance, d.ac_setpoint, d.ac_codes, d.curtain_pos,
          h.name AS home_name, h.status AS home_status, h.timezone AS home_timezone,
          r.name AS room_name, gw.device_id AS gateway_uid
     FROM devices d
@@ -217,6 +217,7 @@ export function toCustomerDevice(row: DeviceRow, opts: { canControl: boolean; la
     appliance: row.appliance,
     ac_setpoint: row.ac_setpoint,
     ac_codes: row.ac_codes,
+    curtain_pos: row.curtain_pos,
   };
 }
 
@@ -284,6 +285,7 @@ export function toDeviceStateSnapshot(row: DeviceRow): DeviceStateSnapshot {
     status: row.status,
     ac_setpoint: row.ac_setpoint,
     ac_codes: row.ac_codes,
+    curtain_pos: row.curtain_pos,
   };
 }
 

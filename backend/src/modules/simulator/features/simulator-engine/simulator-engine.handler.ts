@@ -10,7 +10,7 @@
 // (heartbeat 20 s nằm ở domain/simulated-heartbeat.ts vì route power cũng dùng.)
 import type { SimulatedAck, SimulatedCommand } from "../../../control";
 import { logEvent } from "../../../audit";
-import { parseLearnAction, parseSetTempAction } from "../../../devices";
+import { parseLearnAction, parseSetPosAction, parseSetTempAction } from "../../../devices";
 import { notifyStaff } from "../../../notifications";
 import { isRestarting, simulateGatewayRestart } from "../../domain/gateway-restart";
 import { randomInt, sleep } from "../../domain/random";
@@ -59,6 +59,9 @@ export async function handleSimulatedCommand(command: SimulatedCommand): Promise
   if (parseLearnAction(command.action) !== null) return { status: "ok" };
   // set_temp_<NN> (điều hoà mô phỏng): đặt độ nghĩa là đang chạy → bật; turn_on/turn_off như cũ
   if (parseSetTempAction(command.action) !== null) return { status: "ok", power: true };
+  // set_pos_<N> (rèm mô phỏng): mở tới N % → đang mở khi N > 0 (như Node thật ack power = target > 0)
+  const curtainPos = parseSetPosAction(command.action);
+  if (curtainPos !== null) return { status: "ok", power: curtainPos > 0 };
   return { status: "ok", power: command.action === "turn_on" };
 }
 

@@ -48,12 +48,12 @@ Mẹo: LED IR không nhìn thấy bằng mắt thường. Muốn biết LED có 
 ## 3. Học mã trên màn Node
 
 1. Nạp firmware Node (`idf.py build flash monitor` trong `firmware/esp32_s3_firmware_node`).
-2. Chạm ô **Điều hòa** để mở bảng Điều hòa, rồi bấm **HỌC MÃ**.
-3. Chạm một ô, ví dụ **26°C**. Dòng chữ dưới cùng chuyển màu vàng: "chĩa remote vào mắt thu, bấm nút trong 10 giây".
+2. Chạm ô **Điều hòa** (ngoài công tắc) để mở bảng Điều hòa, rồi bấm **Học mã**.
+3. Chạm một ô, ví dụ **26°C**. Ô nháy viền vàng, dòng chữ hướng dẫn chuyển vàng và thanh đếm ngược 10 giây chạy ở đáy màn hình.
 4. Cầm remote cách mắt thu VS1838B khoảng 5–20 cm. Chỉnh remote về Lạnh, 26°C, rồi bấm **một lần, nhả ra** (giữ nút lâu thì mã có thể dài quá bộ nhớ thu).
-5. Học được thì ô chuyển xanh và dòng chữ báo "Đã học mã 26°C: N khung, M xung". **Giữ lâu** ô xanh để phát thử. Điều hòa phải kêu "bíp" và chuyển đúng trạng thái.
+5. Học được thì ô chuyển xanh kèm dấu ✓ và dòng chữ báo "Đã học mã 26°C: N khung, M xung". **Giữ lâu** ô có dấu ✓ để phát thử. Điều hòa phải kêu "bíp" và chuyển đúng trạng thái.
 6. Lặp lại cho ô **TẮT** và các mức nhiệt bạn hay dùng. Học lại một ô thì mã mới ghi đè mã cũ.
-7. Bấm **Quay lại** để về bảng điều khiển. Ở đó có **BẬT** (phát mã của nhiệt độ đang đặt), **TẮT**, và `-` / `+`. Bấm `-` / `+` liên tục thì Node chờ 600 ms sau lần bấm cuối mới phát một lần.
+7. Bấm **Quay lại** để về bảng điều khiển. Ở đó có công tắc **Nguồn** (bật = phát mã của nhiệt độ đang đặt, tắt = mã TẮT), nút `-` / `+` và thanh kéo 16–30°C. Chỉnh liên tục thì Node chờ 600 ms sau lần chỉnh cuối mới phát một lần. Mức chưa học mã hiện số màu vàng và không phát gì. Công tắc trên ô Điều hòa ở màn hình chính làm cùng việc với công tắc Nguồn.
 
 Trong lúc đang học (tối đa 10 giây), lệnh từ web bị từ chối để mắt thu không bị LED của chính Node làm nhiễu.
 
@@ -101,9 +101,9 @@ Web user (thẻ Điều hòa: Bật/Tắt, − 26°C +)
   → Gateway: ack về topic .../device/<node_id>-ac/command/ack → Backend lưu power_state + ac_setpoint → web cập nhật
 ```
 
-- Chuẩn bị Backend: khởi động backend để tự áp migration (`devices.appliance`, `devices.ac_setpoint`), rồi chạy lại `npm run hw:register` ([LEN_SERVER](LEN_SERVER.md)). Lệnh này chuyển dòng `<node_id>-ac` từ **mô phỏng** sang **thiết bị thật**. Đèn, quạt, rèm vẫn mô phỏng vì chưa có relay.
+- Chuẩn bị Backend: khởi động backend để tự áp migration (`devices.appliance`, `devices.ac_setpoint`), rồi chạy lại `npm run hw:register` ([LEN_SERVER](LEN_SERVER.md)). Lệnh này chuyển dòng `<node_id>-ac` từ **mô phỏng** sang **thiết bị thật**. Đèn, quạt, rèm cũng là thiết bị thật từ 2026-11-13 (relay + động cơ bước, [README của Node](../../firmware/esp32_s3_firmware_node/README.md)).
 - Điều hòa được tính **online theo Node**: mỗi gói TELEMETRY của Node (10 giây/lần) cập nhật `last_seen` của dòng `-ac`. Node chưa gửi được gói nào (chưa ghép nối Gateway, hoặc SHT31 lỗi) thì web báo điều hòa offline.
-- Khi bấm trên màn Node, Node gửi telemetry ngay với `ac` (0/1) và `ac_temp`. Backend đồng bộ vào dòng `-ac`, nên web và trang Phòng khách của Gateway cùng cập nhật.
+- Khi bấm trên màn Node, Node gửi telemetry ngay với `ac` (0/1) và `ac_temp`. Backend đồng bộ vào dòng `-ac`, nên web và trang Living Room của Gateway cùng cập nhật.
 - Lỗi "Điều hòa chưa nhận lệnh" trên web thường nghĩa là Node chưa học mã cho mức nhiệt đó.
 
 ## 5. Giới hạn

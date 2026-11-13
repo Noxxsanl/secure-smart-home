@@ -11,6 +11,7 @@ import OpenCloseButtons from "./OpenCloseButtons";
 import type { DevicePowerControl } from "../model/power";
 import AcSetpointControl from "./AcSetpointControl";
 import { APPLIANCE_TEXT, applianceKind, isAirConditioner } from "../model/appliance";
+import { curtainStatusText } from "../model/curtain";
 
 type DeviceCardProps = {
   device: CustomerDevice;
@@ -77,7 +78,11 @@ export default function DeviceCard({ device, power, showRoom = true }: DeviceCar
         )}
         {isRelay && (
           <span className={`shrink-0 font-semibold ${on ? "text-brand" : "text-gray-400 dark:text-slate-500"}`}>
-            {pending ? "Đang gửi lệnh…" : on ? words.on : words.off}
+            {pending
+              ? "Đang gửi lệnh…"
+              : kind === "curtain"
+                ? curtainStatusText(power.curtainPosOf(device), value)
+                : on ? words.on : words.off}
           </span>
         )}
       </div>

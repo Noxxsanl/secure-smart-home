@@ -73,6 +73,8 @@ export type CustomerDevice = {
   ac_setpoint?: number | null;
   // Bitmask mã IR điều hòa đã học: bit 0 = mã TẮT, bit (t − 15) = mã t°C (t = 16..30). null / thiếu = Node chưa báo.
   ac_codes?: number | null;
+  // Vị trí rèm 0..100 % (0 = đóng hẳn); null / thiếu = chưa biết. Chỉ có ý nghĩa khi appliance === "curtain".
+  curtain_pos?: number | null;
 };
 
 export type DeviceAppliance = "lamp" | "fan" | "curtain" | "ac";
@@ -121,17 +123,19 @@ export type DeviceDetail = {
 
 export type DeviceAction = "turn_on" | "turn_off";
 
-/** Thân POST /devices/:id/commands. `set_temp` chỉ dành cho điều hòa (appliance === "ac"). */
+/** Thân POST /devices/:id/commands. `set_temp` chỉ dành cho điều hòa (appliance === "ac"), `set_pos` chỉ cho rèm. */
 export type DeviceCommandBody =
   | { action: DeviceAction }
   | { action: "set_temp"; temperature: number }
+  // Rèm: vị trí nguyên 0..100 (0 = đóng hẳn).
+  | { action: "set_pos"; position: number }
   // Học mã IR: Node chờ người dùng bấm remote tối đa 10 s (server chờ ≤ 15 s) — dùng timeout riêng ≥ 20 s.
   | { action: "learn_code"; slot: "off" | number };
 
 export type DeviceCommandResult = {
   command: {
     id: number;
-    action: DeviceAction | "set_temp" | "learn_code";
+    action: DeviceAction | "set_temp" | "set_pos" | "learn_code";
     status: "acked";
     issued_at: string;
     acked_at: string | null;

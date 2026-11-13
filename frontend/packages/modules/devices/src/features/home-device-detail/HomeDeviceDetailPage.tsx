@@ -16,6 +16,7 @@ import { useDevicePower } from "../../api/useDevicePower";
 import AcControlPanel from "../../ui/AcControlPanel";
 import { useAcLearn } from "../../api/useAcLearn";
 import { APPLIANCE_TEXT, applianceKind, isAirConditioner } from "../../model/appliance";
+import { curtainStatusText } from "../../model/curtain";
 
 // Đường dẫn /devices/abc không phải số → coi như không tìm thấy, không gọi API.
 const NOT_FOUND = new FetchError(404, { error: "NOT_FOUND" });
@@ -141,11 +142,13 @@ export default function DeviceDetailPage({ renderTelemetry, renderCamera }: Home
         {isRelay && !acPanel && (
           <div className="mt-5 flex items-center justify-between gap-4 rounded border border-gray-100 dark:border-slate-700 px-4 py-3">
             <div>
-              <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">{on ? words.on : words.off}</p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-slate-100">
+                {kind === "curtain" ? curtainStatusText(power.curtainPosOf(device), power.powerOf(device)) : on ? words.on : words.off}
+              </p>
               <p className="text-xs text-gray-400 dark:text-slate-500">
                 {power.isPending(device)
                   ? "Đang chờ thiết bị xác nhận…"
-                  : (blockedReason ?? (kind === "curtain" ? "Bấm Mở hoặc Đóng để điều khiển rèm" : "Bấm công tắc để bật/tắt"))}
+                  : (blockedReason ?? (kind === "curtain" ? "Chọn Đóng, 50% hoặc 100% để điều khiển rèm" : "Bấm công tắc để bật/tắt"))}
               </p>
             </div>
             {kind === "curtain" ? (

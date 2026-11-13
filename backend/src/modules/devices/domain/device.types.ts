@@ -14,8 +14,10 @@ export type DeviceAction = "turn_on" | "turn_off";
 export type SetTempAction = `set_temp_${number}`;
 /** Học mã IR remote điều hoà: `learn_off` (mã TẮT) hoặc `learn_t<NN>` (mã BẬT ở NN°C, VD `learn_t24`). */
 export type LearnAction = "learn_off" | `learn_t${number}`;
-/** Mọi lệnh gửi tới một relay (bật/tắt + đặt nhiệt độ + học mã IR của điều hoà). */
-export type DeviceCommandAction = DeviceAction | SetTempAction | LearnAction;
+/** Mở rèm tới N % (0 = đóng): chuỗi lưu ở device_commands.command và gửi xuống gateway/Node, VD `set_pos_50`. */
+export type SetPosAction = `set_pos_${number}`;
+/** Mọi lệnh gửi tới một relay (bật/tắt + đặt nhiệt độ + học mã IR của điều hoà + mở rèm tới N %). */
+export type DeviceCommandAction = DeviceAction | SetTempAction | LearnAction | SetPosAction;
 /** devices.appliance — loại đồ gia dụng mà một relay của Node phòng khách đại diện (NULL = relay thường). */
 export type Appliance = "lamp" | "fan" | "curtain" | "ac";
 /** Lệnh quản trị gateway (CONTRACT §5 Gateways). */
@@ -55,6 +57,8 @@ export interface DeviceRow {
   ac_setpoint: number | null;
   /** Bitmask mã IR điều hoà đã học (bit 0 = TẮT, bit t−15 = BẬT ở t°C); NULL = chưa học/chưa biết. */
   ac_codes: number | null;
+  /** Rèm: % mở (0 = đóng, 100 = mở hết); NULL khi chưa biết hoặc không phải rèm. */
+  curtain_pos: number | null;
   // ── cột join ──
   home_name: string | null;
   home_status: HomeStatus | null;
@@ -87,6 +91,8 @@ export interface CustomerDevice {
   ac_setpoint: number | null;
   /** Bitmask mã IR điều hoà đã học (bit 0 = TẮT, bit t−15 = BẬT ở t°C); null khi chưa học hoặc không phải điều hoà. */
   ac_codes: number | null;
+  /** Rèm: % mở (0 = đóng, 100 = mở hết); null khi chưa biết hoặc không phải rèm. */
+  curtain_pos: number | null;
 }
 
 /** Thiết bị theo góc nhìn console (ADMIN/OPERATOR). */

@@ -24,6 +24,8 @@
 #include "sdkconfig.h"
 
 static const char *TAG = "node_link";
+/* Vết của 1 lệnh từ Server (README, mục Theo dõi lệnh): cùng tag với node_app / node_switches / node_curtain / node_ac. */
+static const char *CMD_TAG = "node_cmd";
 
 #define RX_QUEUE_LEN 8
 #define SEND_ACK_TIMEOUT_MS 100
@@ -54,6 +56,7 @@ typedef struct {
     bool done;
     bool ok;
     node_power_t power;
+    int64_t rx_us;   /* lúc nhận CMD (esp_timer) — để log thời gian xử lý khi ack; 0 = không rõ */
 } cmd_entry_t;
 
 static uint8_t s_gw_mac[6];
@@ -228,13 +231,21 @@ esp_err_t node_link_send_cmd_ack(const char *command_id, bool ok, node_power_t p
     e->done = true;
     e->ok = ok;
     e->power = power;
+    int64_t rx_us = e->rx_us;
     xSemaphoreGive(s_cmd_lock);
 
-    ESP_LOGI(TAG, "CMD_ACK %s %s", command_id, ok ? "ok" : "error");
-    if (!atomic_load(&s_online)) {
-        return ESP_ERR_INVALID_STATE;
+    esp_err_t err = atomic_load(&s_online) ? send_ack_body(command_id, ok, power) : ESP_ERR_INVALID_STATE;
+    const char *state = power == NODE_POWER_ON ? " power=ON" : power == NODE_POWER_OFF ? " power=OFF" : "";
+    int ms = rx_us > 0 ? (int)((esp_timer_get_time() - rx_us) / 1000) : -1;
+    if (err == ESP_OK) {
+        ESP_LOGI(CMD_TAG, "[3] ack %s%s -> gateway, %d ms after receive   (cmd %s)", ok ? "OK" : "ERROR", state, ms,
+                 command_id);
+    } else {
+        /* Gateway không nhận được ack: Server sẽ báo hết giờ dù Node đã làm xong. */
+        ESP_LOGW(CMD_TAG, "[3] ack %s%s NOT delivered to gateway (%s), %d ms after receive   (cmd %s)",
+                 ok ? "OK" : "ERROR", state, esp_err_to_name(err), ms, command_id);
     }
-    return send_ack_body(command_id, ok, power);
+    return err;
 }
 
 /* ---- nhận --------------------------------------------------------------------------------------------- */
@@ -345,6 +356,7 @@ static void handle_cmd(const cJSON *body)
         s_cmd_next = (s_cmd_next + 1) % CMD_CACHE_LEN;
         memset(e, 0, sizeof(*e));
         strlcpy(e->id, cid, sizeof(e->id));
+        e->rx_us = esp_timer_get_time();
     }
     xSemaphoreGive(s_cmd_lock);
     if (seen) {

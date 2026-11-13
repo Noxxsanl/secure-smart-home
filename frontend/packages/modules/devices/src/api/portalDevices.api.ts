@@ -38,6 +38,14 @@ export function sendSetTemperature(deviceId: number, temperature: number, signal
 }
 
 /**
+ * POST /devices/:id/commands `{ action: "set_pos", position }` — chỉ rèm, vị trí nguyên 0..100 (0 = đóng hẳn).
+ * Trả về khi thiết bị đã xác nhận, kèm thiết bị với `curtain_pos` mới.
+ */
+export function sendSetPosition(deviceId: number, position: number, signal?: AbortSignal) {
+  return postCommand(deviceId, { action: "set_pos", position }, signal);
+}
+
+/**
  * POST /devices/:id/commands `{ action: "learn_code", slot }` — Node học 1 mã IR từ remote (slot "off" hoặc 16..30).
  * Trả về sau ~10–15 s (khi người dùng bấm remote hoặc hết giờ); huỷ bằng `signal` khi quá LEARN_TIMEOUT_MS.
  */

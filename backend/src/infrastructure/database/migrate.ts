@@ -4,8 +4,8 @@ import pool from "./pool";
 // Hệ thống migration tuần tự đơn giản cho PostgreSQL.
 // BASELINE = infra/postgres/migrations/001_schema.sql (schema V2 đầy đủ, nạp lúc khởi tạo volume Docker hoặc
 // chạy tay theo docs/guides/CHAY_LOCAL.md). Mảng `migrations` chỉ chứa thay đổi SAU baseline (30 entry MySQL cũ
-// đã được gộp vào 001_schema.sql); hiện có bảng camera_snapshots (module camera), cột devices.appliance/ac_setpoint/ac_codes (điều hoà IR) và
-// 3 bảng ai_* cùng giá LLM mặc định (module ai-usage).
+// đã được gộp vào 001_schema.sql); hiện có bảng camera_snapshots (module camera), cột devices.appliance/ac_setpoint/ac_codes (điều hoà IR)/curtain_pos (% mở rèm),
+// 3 bảng ai_* cùng giá LLM mặc định (module ai-usage) và bước dữ liệu chuyển đèn/quạt/rèm của Node từ mô phỏng sang thật.
 //
 // Mỗi entry chỉ được áp dụng đúng một lần, theo dõi qua bảng _migrations.
 // QUY TẮC: chỉ THÊM vào cuối mảng, mỗi entry đúng 1 câu SQL, không sửa/xoá/đổi tên entry cũ.
@@ -196,6 +196,20 @@ const migrations: { name: string; sql: string }[] = [
       ('anthropic', 'claude-opus-5-5', 4.0, 0.2, 5.0, 20.0, NULL, 'official', 'https://platform.claude.com/docs/en/about-claude/pricing', '2026-11-13T00:00:00Z'),
       ('anthropic', 'claude-fable-5-2', 8.0, 0.2, 10.0, 40.0, NULL, 'official', 'https://platform.claude.com/docs/en/about-claude/pricing', '2026-11-13T00:00:00Z')
     ON CONFLICT (provider, model) DO NOTHING`,
+  },
+  // Đèn/quạt/rèm của Node phòng khách có phần cứng thật từ 2026-11-13 (relay HF46F + động cơ bước): các dòng đã đăng ký
+  // bằng hw:register / trang Đăng ký Gateway khi còn là relay MÔ PHỎNG chuyển sang thật — lệnh đi MQTT tới Node, trạng thái
+  // đồng bộ từ telemetry của Node. Cột appliance chỉ được gán cho thiết bị con của Node thật (đăng ký phần cứng) nên câu
+  // này không chạm nhà mô phỏng nào. Chỉ đổi một chiều mô phỏng → thật, như upsertNodeAppliance. Dữ liệu, không đổi schema.
+  {
+    name: "set_node_appliances_real_2026_11",
+    sql: "UPDATE devices SET is_simulated = FALSE WHERE appliance IN ('lamp','fan','curtain') AND is_simulated = TRUE",
+  },
+  // Rèm mở theo mức (giao diện dùng 50 / 100 %, lệnh set_pos_<N> nhận 0..100): % mở hiện tại của rèm (0 = đóng, 100 = mở hết). NULL = chưa biết/không phải
+  // rèm. Giữ đúng tên/cột với 001_schema.sql.
+  {
+    name: "add_curtain_pos_to_devices",
+    sql: "ALTER TABLE devices ADD COLUMN IF NOT EXISTS curtain_pos SMALLINT NULL CONSTRAINT ck_devices_curtain_pos CHECK (curtain_pos BETWEEN 0 AND 100)",
   },
 ];
 

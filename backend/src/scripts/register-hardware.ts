@@ -1,6 +1,7 @@
 // Đăng ký PHẦN CỨNG THẬT vào DB dev: đọc file NVS CSV của gateway (định dạng nvs_partition_gen: key,type,encoding,value)
 // và tạo/cập nhật nhà + phòng (Phòng khách, Camera) + thiết bị (gateway, node nhiệt/ẩm, camera) khớp đúng device_id/secret
-// đã nạp vào chip, kèm 4 relay của phòng khách (đèn, quạt, rèm: MÔ PHỎNG; điều hoà: THẬT qua IR — xem LIVING_ROOM_APPLIANCES).
+// đã nạp vào chip, kèm 4 thiết bị THẬT của phòng khách do Node điều khiển (đèn, quạt: relay; rèm: động cơ bước; điều hoà:
+// IR — xem LIVING_ROOM_APPLIANCES).
 //   npm run hw:register -- [--nvs <đường dẫn csv>] [--owner <email>] [--home-name <tên nhà>] [--force]
 // Mặc định: --nvs ../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/nvs_dev.csv (tính từ thư mục
 // backend), --owner user01@smarthome.local, --home-name "Nhà demo phần cứng".
@@ -131,16 +132,16 @@ const CAMERA_NAME = "Camera";
 const LEGACY_CAMERA_NAME = "Camera cửa chính";
 
 // Thiết bị điều khiển của phòng khách (màn hình Gateway trang Phòng khách đọc cùng 4 trường lamp/fan/curtain/ac).
-// Điều hoà là thiết bị THẬT (is_simulated = FALSE): Node phòng khách học mã IR remote rồi phát lại; lệnh bật/tắt/đặt nhiệt
-// độ đi MQTT xuống gateway → Node, còn trạng thái online/bật/nhiệt độ đồng bộ từ telemetry của Node (telemetry/ingest-common).
-// Đèn/quạt/rèm CHƯA có phần cứng nhận lệnh nên vẫn là relay MÔ PHỎNG (is_simulated) — bật/tắt chạy qua simulator, không gửi
-// gì xuống phần cứng; khi firmware hỗ trợ thì đặt `simulated: false` cho dòng tương ứng.
-// device_id = "<id node phòng khách>-<suffix>" và cột devices.appliance = suffix (ingest dựa vào cặp này để tìm điều hoà
+// Cả 4 là thiết bị THẬT (is_simulated = FALSE) do Node phòng khách điều khiển: đèn/quạt qua relay HF46F, rèm qua động cơ
+// bước, điều hoà qua IR (Node học mã remote rồi phát lại). Lệnh đi MQTT xuống gateway → Node (ESP-NOW, params.target = hậu
+// tố), còn trạng thái online/bật-tắt (rèm: mở/đóng)/nhiệt độ đặt đồng bộ từ telemetry của Node (telemetry/ingest-common).
+// Chạy lại script trên dữ liệu cũ (đèn/quạt/rèm còn mô phỏng) sẽ chuyển chúng sang thật (upsertAppliance chỉ đổi một chiều).
+// device_id = "<id node phòng khách>-<suffix>" và cột devices.appliance = suffix (ingest dựa vào cặp này để tìm thiết bị
 // của Node); tên chứa từ khoá ("Đèn", "Quạt", "Rèm", "Điều hòa") để web/mobile chọn đúng kiểu điều khiển.
 const LIVING_ROOM_APPLIANCES = [
-  { suffix: "lamp", name: "Đèn phòng khách", simulated: true },
-  { suffix: "fan", name: "Quạt phòng khách", simulated: true },
-  { suffix: "curtain", name: "Rèm cửa phòng khách", simulated: true },
+  { suffix: "lamp", name: "Đèn phòng khách", simulated: false },
+  { suffix: "fan", name: "Quạt phòng khách", simulated: false },
+  { suffix: "curtain", name: "Rèm cửa phòng khách", simulated: false },
   { suffix: "ac", name: "Điều hòa phòng khách", simulated: false },
 ] as const;
 
@@ -326,7 +327,7 @@ interface ApplianceSpec {
   uid: string;
   /** Hậu tố của uid, đồng thời là giá trị devices.appliance. */
   appliance: (typeof LIVING_ROOM_APPLIANCES)[number]["suffix"];
-  /** true = relay mô phỏng (simulator ack); false = thiết bị thật (lệnh đi MQTT). */
+  /** true = relay mô phỏng (simulator ack); false = thiết bị thật (lệnh đi MQTT). Hiện cả 4 thiết bị đều thật. */
   simulated: boolean;
   name: string;
   roomId: number;

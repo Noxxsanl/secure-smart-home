@@ -224,29 +224,29 @@ Gửi cùng yêu cầu từ mạng router (IP STA của Gateway) phải nhận `
 **Giao diện và xem trực tiếp** — màn hình 800×480:
 
 ```
-┌ GATEWAY NHÀ THÔNG MINH  WiFi 192.168.x.x    Máy chủ --      12:34:56 ┐
+┌ Gateway Smart Home                        Th 7 14/11/2026  12:34:56 ┐
 │ ┌───────────┐ ┌────────────────────────────────────────────────────┐ │
 │ │ CAMERA    │ │ CAMERA CỬA              ● Đã kết nối  3.3 khung/s  │ │
 │ │ Trực tiếp │ │ ┌────────────────────────────────────────────────┐ │ │
 │ └───────────┘ │ │                                                │ │ │
 │ ┌───────────┐ │ │            hình trực tiếp 448×336              │ │ │
-│ │PHÒNG KHÁCH│ │ │                                                │ │ │
+│ │LIVING ROOM│ │ │                                                │ │ │
 │ │28.4°C 61% │ │ │                                                │ │ │
 │ └───────────┘ │ │                                                │ │ │
 │ ┌───────────┐ │ │                                                │ │ │
 │ │ THIẾT BỊ  │ │ └────────────────────────────────────────────────┘ │ │
 │ │2/2 trực...│ └────────────────────────────────────────────────────┘ │
-└ dòng trạng thái ──────────────────────────────────────────────────────┘
+└ dòng trạng thái                     WiFi 192.168.x.x   Máy chủ OK ─┘
 
-Trang Phòng khách:
-  PHÒNG KHÁCH                                         ● Đã kết nối
+Trang Living Room (công tắc và nút mức điều khiển thẳng Node qua ESP-NOW — docs/guides/MAN_HINH_GATEWAY.md):
+  LIVING ROOM                                         ● Đã kết nối
   ┌ NHIỆT ĐỘ ───────────────┐ ┌ ĐỘ ẨM ──────────────────┐
   │ 28.4  °C                │ │ 61  %                   │
   └─────────────────────────┘ └─────────────────────────┘
-  ┌ QUẠT ──┐ ┌ ĐIỀU HÒA ┐ ┌ ĐÈN ───┐ ┌ RÈM CỬA ┐      (ô xanh = đang bật/mở)
-  │ BẬT    │ │ TẮT      │ │ BẬT    │ │ MỞ      │
-  │Đang chạy│ │Đang tắt  │ │Đang sáng│ │Mở 60%   │
-  └────────┘ └──────────┘ └────────┘ └─────────┘
+  ┌ Quạt  [●═]┐ ┌ Điều hòa[═●]┐ ┌ Đèn   [═●]┐ ┌ Rèm cửa   [═●]┐   (ô xanh = đang bật/mở; không chữ trạng thái)
+  │           │ │ Đặt 26°C    │ │           │ │               │
+  │           │ │             │ │           │ │ [50%] [100%]  │
+  └───────────┘ └─────────────┘ └───────────┘ └───────────────┘
   Node <id>  |  Ánh sáng 350 lux  |  Cập nhật 12:30:05  |  -58 dBm
 ```
 

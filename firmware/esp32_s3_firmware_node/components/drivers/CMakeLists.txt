@@ -4,6 +4,8 @@
 #   audio/    mic INMP441 (I2S RX), loa qua ampli I2S (I2S TX)
 #   ir/       LED phát 940 nm (RMT TX + sóng mang 38 kHz), mắt thu VS1838B (RMT RX), mã NEC
 #   relay/    relay HF46F qua transistor/opto
+#   stepper/  động cơ bước 4 pha 28BYJ-48 qua ULN2003 (nửa bước, đếm bước bằng esp_timer)
+#   led/      LED địa chỉ hoá WS2812B/SK6812 (RMT TX, copy encoder)
 #   lcd/      TFT 3.5" ILI9488 SPI (esp_lcd panel, RGB565 → RGB666) + drv_display: LVGL 8.4 trên panel đó
 #             (tick, task lv_timer_handler, khoá, thiết bị trỏ). LVGL 8.4 ở components/lvgl__lvgl như Gateway.
 #   touch/    cảm ứng điện trở XPT2046 của module 3.5" (SPI chung bus LCD, lọc trung vị, hiệu chuẩn 4 mép)
@@ -21,6 +23,8 @@ idf_component_register(SRCS "src/bus/drv_bus.c"
                             "src/ir/drv_ir_tx.c"
                             "src/ir/drv_ir_rx.c"
                             "src/relay/drv_relay.c"
+                            "src/stepper/drv_stepper.c"
+                            "src/led/drv_ws2812.c"
                             "src/lcd/drv_ili9488.c"
                             "src/lcd/drv_display.c"
                             "src/touch/drv_xpt2046.c"

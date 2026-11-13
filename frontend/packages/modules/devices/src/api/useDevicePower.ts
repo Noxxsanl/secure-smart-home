@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "@shh/ui";
 import { useRevalidate, deviceKey, homesKey, overviewKey, roomsPrefix } from "@shh/api-client/portal";
-import { COMMAND_TIMEOUT_MS, sendDeviceCommand, sendSetTemperature } from "./portalDevices.api";
+import { COMMAND_TIMEOUT_MS, sendDeviceCommand, sendSetPosition, sendSetTemperature } from "./portalDevices.api";
 import type { CustomerDevice } from "@shh/api-client/portal";
 import { commandErrorMessage } from "../model/errors";
 import { AC_SETPOINT_START, clampSetpoint, isAirConditioner } from "../model/appliance";
@@ -31,6 +31,8 @@ export function useDevicePower({ homeSuspended = false }: Options = {}): DeviceP
   const [setpointDraft, setSetpointDraft] = useState<Record<number, number>>({});
   /** Thiết bị đang chờ ack lệnh nhiệt độ (đã gửi, khác với đang debounce). */
   const [sendingTemp, setSendingTemp] = useState<Record<number, true>>({});
+  /** Rèm đang chờ ack lệnh set_pos → vị trí tạm (%). */
+  const [curtainDraft, setCurtainDraft] = useState<Record<number, number>>({});
   const timers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
   useEffect(() => {
@@ -80,6 +82,30 @@ export function useDevicePower({ homeSuspended = false }: Options = {}): DeviceP
       // Lấy trạng thái đã xác nhận từ server rồi mới bỏ giá trị tạm, để công
       // tắc không nháy về trạng thái cũ khi lệnh thành công.
       await revalidateDevice(device);
+      setOptimistic((prev) => withoutKey(prev, device.id));
+    }
+  }
+
+  const curtainPosOf = (device: CustomerDevice): number | null =>
+    device.id in curtainDraft ? curtainDraft[device.id] : (device.curtain_pos ?? null);
+
+  // Rèm: set_pos 0..100 — optimistic cả vị trí lẫn bật/tắt (0 = đóng), lỗi / quá thời gian chờ → hoàn tác + toast.
+  async function setCurtainPosition(device: CustomerDevice, position: number) {
+    if (!canToggle(device)) return;
+    const next = Math.min(100, Math.max(0, Math.round(position)));
+    setOptimistic((prev) => ({ ...prev, [device.id]: next > 0 }));
+    setCurtainDraft((prev) => ({ ...prev, [device.id]: next }));
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), COMMAND_TIMEOUT_MS);
+    try {
+      await sendSetPosition(device.id, next, controller.signal);
+    } catch (err) {
+      showToast(commandErrorMessage(err), false);
+    } finally {
+      clearTimeout(timer);
+      await revalidateDevice(device);
+      setCurtainDraft((prev) => withoutKey(prev, device.id));
       setOptimistic((prev) => withoutKey(prev, device.id));
     }
   }
@@ -142,7 +168,7 @@ export function useDevicePower({ homeSuspended = false }: Options = {}): DeviceP
   }
 
   return {
-    powerOf, isPending, canToggle, blockReason, toggle, setPower,
+    powerOf, isPending, canToggle, blockReason, toggle, setPower, curtainPosOf, setCurtainPosition,
     setpointOf, canAdjustSetpoint, isSetpointPending, adjustSetpoint, setSetpoint,
   };
 }

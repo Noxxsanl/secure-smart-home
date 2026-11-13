@@ -18,6 +18,7 @@
 #include "node_ui.h"
 
 static const char *TAG = "node_ac";
+static const char *CMD_TAG = "node_cmd";   /* vết lệnh: [2] thực thi (node_app.c giải thích các bước) */
 
 #define AC_QUEUE_LEN 6
 #define AC_TASK_STACK 6144         /* learn(): msg + dòng log + nvs_set_blob */
@@ -122,7 +123,10 @@ static esp_err_t apply_slot(int slot)
     }
     if (err != ESP_OK) {
         if (err == ESP_ERR_NOT_FOUND) {
-            snprintf(msg, sizeof(msg), "Chưa học mã %s. Bấm HỌC MÃ, chạm ô %s rồi bấm remote điều hòa.", label, label);
+            snprintf(msg, sizeof(msg), "Chưa học mã %s. Bấm Học mã, chạm ô %s rồi bấm remote điều hòa.", label, label);
+            char notice[64];
+            snprintf(notice, sizeof(notice), "Điều hòa: chưa học mã %s", label);
+            node_ui_set_notice(NODE_UI_MSG_WARN, notice);
         } else {
             snprintf(msg, sizeof(msg), "Không phát được mã %s (%s). Kiểm dây LED phát hồng ngoại.", label,
                      esp_err_to_name(err));
@@ -174,14 +178,21 @@ static void handle_command(const ac_req_t *req)
 {
     if (esp_timer_get_time() - req->queued_us > CMD_MAX_AGE_US) {
         /* Xếp sau việc học mã (≤ 10 s): Gateway/Server đã báo hết giờ — phát lúc này sẽ đổi điều hòa ngoài ý muốn. */
-        ESP_LOGW(TAG, "CMD %s dropped: waited too long in queue", req->command_id);
+        ESP_LOGW(CMD_TAG, "[2] ac %s DROPPED: waited too long in queue   (cmd %s)", req->action, req->command_id);
         node_link_send_cmd_ack(req->command_id, false, NODE_POWER_UNKNOWN);
         return;
     }
     int learn_slot = parse_learn_slot(req->action);
     if (learn_slot >= 0) {
-        ESP_LOGI(TAG, "CMD %s: learn %s requested from the server", req->command_id, req->action);
-        node_link_send_cmd_ack(req->command_id, learn(learn_slot), NODE_POWER_UNKNOWN);
+        ESP_LOGI(CMD_TAG, "[2] ac %s: waiting up to 10 s for the remote   [remote]", req->action);
+        bool learned = learn(learn_slot);
+        if (learned) {
+            ESP_LOGI(CMD_TAG, "[2] ac %s: IR code captured and saved", req->action);
+        } else {
+            ESP_LOGW(CMD_TAG, "[2] ac %s FAILED: no usable IR signal (reason shown on the AC panel of the screen)",
+                     req->action);
+        }
+        node_link_send_cmd_ack(req->command_id, learned, NODE_POWER_UNKNOWN);
         return;
     }
     int slot = -1;
@@ -197,11 +208,17 @@ static void handle_command(const ac_req_t *req)
         }
     }
     if (slot < 0) {
-        ESP_LOGW(TAG, "CMD %s: unsupported action %s", req->command_id, req->action);
+        ESP_LOGW(CMD_TAG, "[2] ac: unsupported action %s   (cmd %s)", req->action, req->command_id);
         node_link_send_cmd_ack(req->command_id, false, NODE_POWER_UNKNOWN);
         return;
     }
     bool ok = apply_slot(slot) == ESP_OK;
+    if (ok) {
+        ESP_LOGI(CMD_TAG, "[2] ac %s: IR code sent, AC %s, setpoint %d C   [remote]", req->action,
+                 atomic_load(&s_power) == 1 ? "ON" : "OFF", atomic_load(&s_setpoint));
+    } else {
+        ESP_LOGW(CMD_TAG, "[2] ac %s FAILED: IR code not learned yet or IR send error", req->action);
+    }
     node_power_t power = !ok ? NODE_POWER_UNKNOWN : atomic_load(&s_power) == 1 ? NODE_POWER_ON : NODE_POWER_OFF;
     node_link_send_cmd_ack(req->command_id, ok, power);
 }
@@ -308,7 +325,9 @@ static bool learn(int slot)
 
     size_t count = 0;
     unsigned frames = 0;
+    node_ui_set_ac_learning(slot, LEARN_WAIT_MS);   /* ô nháy viền + thanh đếm ngược trong lúc chờ remote */
     esp_err_t err = capture(&count, &frames);
+    node_ui_set_ac_learning(slot, 0);
     if (err == ESP_ERR_INVALID_RESPONSE) {   /* toàn nhiễu → báo như tín hiệu quá ngắn */
         err = ESP_OK;
         count = 0;
@@ -445,7 +464,7 @@ bool node_ac_post_command(const char *command_id, const char *action)
         return false;
     }
     if (atomic_load(&s_learning)) {
-        ESP_LOGW(TAG, "CMD %s rejected: learning an IR code on the screen", command_id);
+        ESP_LOGW(CMD_TAG, "[2] ac %s REJECTED: learning an IR code on the screen   (cmd %s)", action, command_id);
         return false;
     }
     ac_req_t req = {.type = REQ_CMD, .queued_us = esp_timer_get_time()};

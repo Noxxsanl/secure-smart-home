@@ -267,7 +267,7 @@ Bật Gateway trước (để có giờ NTP), rồi bật camera.
 | 2 | Camera có giờ | Camera: `cam_time: time synced from gateway` |
 | 3 | Xem trực tiếp | Gateway khởi động ở trang **Camera** (thanh nav bên trái). Vài giây sau khi camera vào Local AP: log `gw_app: live view <ID_CAMERA> (camera page)` rồi `gw_camera_live: streaming from camera <ID_CAMERA>`; góc trên phải hiện "Trực tiếp" và số khung/giây (~3 khung/s ở VGA); camera log `stream started (vga, q=12)`. Chấm ở góc phải hàng tiêu đề: **xanh** "Đã kết nối" (kèm khung/s), **vàng** đang kết nối, **đỏ** mất kết nối. Tắt camera thì khung hình hiện "Chờ camera...", bật lại thì tự nối lại |
 | 4 | Ảnh chụp do chuyển động | Đợi 30 s sau khi camera bật nguồn (PIR khởi động), vẫy tay trước PIR. Không có PIR: nối tạm GPIO13 của camera lên chân 3V3 bằng dây rồi rút ra. Camera: `snapshot sent (… bytes, motion)`; Gateway: `snapshot from <ID_CAMERA>: … bytes (motion)` (ảnh chỉ đẩy lên Server, không hiện trên màn hình) |
-| 5 | Chạm nav | Chạm **PHÒNG KHÁCH** / **THIẾT BỊ**: đổi trang ngay, luồng camera dừng (camera log `stream ended: N frames in M s`); chạm **CAMERA**: luồng chạy lại. Đang ở trang khác mà có chuyển động: tự về trang Camera, 30 s sau quay lại trang cũ |
+| 5 | Chạm nav | Chạm **LIVING ROOM** / **THIẾT BỊ**: đổi trang ngay, luồng camera dừng (camera log `stream ended: N frames in M s`); chạm **CAMERA**: luồng chạy lại. Đang ở trang khác mà có chuyển động: tự về trang Camera, 30 s sau quay lại trang cũ |
 
 Ghi lại số khung/giây đo được (mục tiêu 10 khung/s, IOT_NODE_NETWORK §5.4). Giật quá thì menuconfig → *Gateway S3: services* → chọn **QVGA**, hoặc tăng `Chất lượng JPEG của luồng` (số lớn hơn = khung nhẹ hơn).
 

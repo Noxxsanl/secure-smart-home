@@ -149,6 +149,14 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
             default y
             help
                 In "raw X=.. Y=.. Z=.. -> (x, y)" tối đa 5 dòng/giây khi đang chạm. Tắt khi đã hiệu chuẩn xong.
+
+        config NODE_UI_TOUCH_TEST
+            bool "Hiện chấm theo ngón tay + toạ độ chạm trên màn hình (kiểm hiệu chuẩn)"
+            depends on NODE_TOUCH_ENABLE
+            default n
+            help
+                Bật khi hiệu chuẩn cảm ứng: chạm vào chỗ trống của màn hình thì chấm xanh nằm dưới ngón tay và dòng
+                thông báo dưới cùng hiện toạ độ. Dùng hằng ngày thì tắt.
     endmenu
 
 endmenu
@@ -202,4 +210,190 @@ menu "Node S3: hồng ngoại (điều hòa)"
         default n
         help
             Để tắt với LED nối thẳng GPIO hoặc qua NPN/MOSFET kéo xuống. Bật khi dùng PNP / module kích mức thấp.
+endmenu
+
+# Relay HF46F 12 V cho đèn và quạt, kích qua transistor (mức CAO = relay đóng). Mặc định = PCB Node phòng khách:
+# Relay_1 GPIO41 = Đèn, Relay_2 GPIO42 = Quạt. Trạng thái khi có điện lại: menu "Node S3: ứng dụng".
+menu "Node S3: relay (đèn, quạt)"
+    config NODE_RELAY_ENABLE
+        bool "Bật relay đèn, quạt"
+        default y
+
+    config NODE_RELAY_LAMP_GPIO
+        int "Chân relay ĐÈN (Relay_1)"
+        depends on NODE_RELAY_ENABLE
+        range 0 48
+        default 41
+
+    config NODE_RELAY_FAN_GPIO
+        int "Chân relay QUẠT (Relay_2)"
+        depends on NODE_RELAY_ENABLE
+        range 0 48
+        default 42
+
+    config NODE_RELAY_ACTIVE_HIGH
+        bool "Relay đóng khi chân ở mức CAO"
+        depends on NODE_RELAY_ENABLE
+        default y
+        help
+            Mạch kích qua transistor NPN / MOSFET kéo xuống (PCB Node): bật. Module relay kích mức thấp: tắt.
+
+    config NODE_RELAY_MIN_SWITCH_MS
+        int "Khoảng cách tối thiểu giữa 2 lần đóng/cắt cùng 1 relay (ms)"
+        depends on NODE_RELAY_ENABLE
+        range 100 5000
+        default 500
+        help
+            Bảo vệ tiếp điểm và tải (quạt) khỏi lệnh dồn dập. Lệnh tới sớm hơn bị từ chối: ack lỗi, màn hình báo.
+endmenu
+
+# Rèm cửa: động cơ bước 28BYJ-48 bản 5 V qua ULN2003, KHÔNG có công tắc hành trình — vị trí là số bước đếm được, lưu NVS,
+# hiệu chuẩn trên màn hình (bảng Rèm cửa → Hiệu chuẩn). Mặc định = PCB: IN1 GPIO8, IN2 GPIO18, IN3 GPIO17, IN4 GPIO16.
+menu "Node S3: rèm cửa (ULN2003 + động cơ bước)"
+    config NODE_CURTAIN_ENABLE
+        bool "Bật điều khiển rèm"
+        default y
+
+    config NODE_CURTAIN_IN1_GPIO
+        int "ULN2003 IN1"
+        depends on NODE_CURTAIN_ENABLE
+        range 0 48
+        default 8
+
+    config NODE_CURTAIN_IN2_GPIO
+        int "ULN2003 IN2"
+        depends on NODE_CURTAIN_ENABLE
+        range 0 48
+        default 18
+
+    config NODE_CURTAIN_IN3_GPIO
+        int "ULN2003 IN3"
+        depends on NODE_CURTAIN_ENABLE
+        range 0 48
+        default 17
+
+    config NODE_CURTAIN_IN4_GPIO
+        int "ULN2003 IN4"
+        depends on NODE_CURTAIN_ENABLE
+        range 0 48
+        default 16
+
+    config NODE_CURTAIN_STEP_US
+        int "Thời gian 1 nửa bước (µs): lớn hơn = chậm hơn nhưng khoẻ hơn"
+        depends on NODE_CURTAIN_ENABLE
+        range 800 20000
+        default 1000
+        help
+            28BYJ-48 bản 5 V: 4096 nửa bước ≈ 1 vòng trục ra, 1000 µs ≈ 4 giây/vòng (nhanh nhất mà bản 5 V còn đủ lực).
+            Động cơ kêu mà không quay hoặc rèm lệch dần sau vài lần chạy (trượt bước vì rèm nặng) thì tăng lên 1500–3000.
+
+    config NODE_CURTAIN_INVERT
+        bool "Đảo chiều quay (bấm MỞ mà rèm đóng lại thì bật)"
+        depends on NODE_CURTAIN_ENABLE
+        default n
+
+    config NODE_CURTAIN_TRAVEL_STEPS
+        int "Hành trình mặc định: số nửa bước từ ĐÓNG hẳn tới MỞ hẳn"
+        depends on NODE_CURTAIN_ENABLE
+        range 512 1000000
+        default 20480
+        help
+            Chỉ dùng khi chưa hiệu chuẩn trên màn hình. 20480 = 5 vòng trục ra. Hiệu chuẩn xong thì hành trình đo được
+            lưu NVS và thay giá trị này.
+endmenu
+
+# LED RGB WS2812 1 bóng báo trạng thái (debug). Mặc định = PCB: DIN GPIO40. Bảng màu: README, mục LED debug.
+menu "Node S3: LED debug (WS2812)"
+    config NODE_LED_ENABLE
+        bool "Bật LED trạng thái WS2812"
+        default y
+
+    config NODE_LED_GPIO
+        int "Chân DIN của LED"
+        depends on NODE_LED_ENABLE
+        range 0 48
+        default 40
+
+    config NODE_LED_BRIGHTNESS
+        int "Độ sáng (%)"
+        depends on NODE_LED_ENABLE
+        range 1 100
+        default 10
+        help
+            WS2812 sáng hết cỡ rất chói và ăn ~60 mA; 10 % đủ nhìn trong nhà.
+endmenu
+
+# Mic INMP441 (I2S1 RX) + loa qua ampli NS4168 (I2S0 TX). Code viết sẵn (board_audio, node_audio) nhưng MẶC ĐỊNH TẮT —
+# bật khi phát triển tính năng giọng nói. Mặc định = PCB: mic SCK 4, WS 5, SD 6 (L/R nối GND); loa BCLK 10, LRCLK 11,
+# DIN 9, chân CTRL của NS4168 không nối vào ESP32.
+menu "Node S3: âm thanh (mic INMP441 + loa NS4168)"
+    config NODE_AUDIO_ENABLE
+        bool "Bật mic + loa (I2S)"
+        default n
+        help
+            Tắt: không khởi tạo I2S, các chân âm thanh để trống, node_audio_* không làm gì (code vẫn được biên dịch).
+
+    config NODE_MIC_PIN_SCK
+        int "Mic INMP441 SCK"
+        depends on NODE_AUDIO_ENABLE
+        range 0 48
+        default 4
+
+    config NODE_MIC_PIN_WS
+        int "Mic INMP441 WS"
+        depends on NODE_AUDIO_ENABLE
+        range 0 48
+        default 5
+
+    config NODE_MIC_PIN_SD
+        int "Mic INMP441 SD"
+        depends on NODE_AUDIO_ENABLE
+        range 0 48
+        default 6
+
+    config NODE_MIC_RIGHT_CHANNEL
+        bool "Chân L/R của mic nối VDD (kênh phải)"
+        depends on NODE_AUDIO_ENABLE
+        default n
+        help
+            PCB Node nối L/R xuống GND (kênh trái): để tắt.
+
+    config NODE_SPK_PIN_BCLK
+        int "Loa NS4168 BCLK"
+        depends on NODE_AUDIO_ENABLE
+        range 0 48
+        default 10
+
+    config NODE_SPK_PIN_LRCLK
+        int "Loa NS4168 LRCLK"
+        depends on NODE_AUDIO_ENABLE
+        range 0 48
+        default 11
+
+    config NODE_SPK_PIN_DIN
+        int "Loa NS4168 SDATA (DIN)"
+        depends on NODE_AUDIO_ENABLE
+        range 0 48
+        default 9
+
+    config NODE_SPK_PIN_CTRL
+        int "Loa NS4168 CTRL (-1 = không nối vào ESP32)"
+        depends on NODE_AUDIO_ENABLE
+        range -1 48
+        default -1
+        help
+            Nối CTRL vào GPIO thì driver kéo thấp (tắt ampli, hết tiếng rè) khi không phát. Để -1 khi CTRL kéo lên cố
+            định trên mạch: ampli luôn bật, lúc im lặng driver gửi mẫu 0.
+
+    config NODE_AUDIO_SAMPLE_RATE
+        int "Tần số lấy mẫu (Hz)"
+        depends on NODE_AUDIO_ENABLE
+        range 8000 48000
+        default 16000
+
+    config NODE_SPK_VOLUME
+        int "Âm lượng loa (%)"
+        depends on NODE_AUDIO_ENABLE
+        range 0 100
+        default 60
 endmenu

@@ -16,9 +16,10 @@ import type { CameraSnapshotList } from "./types";
 
 export const PORTAL_API = "/api/portal";
 
-// Web không có WebSocket (CONTRACT §10): polling theo loại trang.
-export const POLL_OVERVIEW_MS = 5_000;
-export const POLL_DETAIL_MS = 5_000;
+// Web không có WebSocket (CONTRACT §10): polling theo loại trang. Tổng quan/chi tiết thiết bị 2 s để thay đổi
+// làm trên thiết bị / màn hình gateway hiện lên web trong ~2 s.
+export const POLL_OVERVIEW_MS = 2_000;
+export const POLL_DETAIL_MS = 2_000;
 export const POLL_NOTIFICATIONS_MS = 15_000;
 export const POLL_TELEMETRY_MS = 60_000;
 export const POLL_SNAPSHOTS_MS = 15_000;

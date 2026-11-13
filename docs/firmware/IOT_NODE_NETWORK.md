@@ -4,7 +4,7 @@
 > Đường đi: **Node (ESP32-CAM, Node phòng khách) → Gateway (Waveshare ESP32-S3-Touch-LCD-4.3B-BOX) → Server (Broker MQTT TLS + Backend) → Client (Web Dashboard, Mobile)**.
 > Tài liệu này mô tả **thiết kế đích cho bộ phần cứng demo**. Hiện trạng code (gateway ESP32 DOIT + `sensor-node` gửi qua Broker 1) nằm ở mục 9. Nguyên tắc chung (ESP-NOW cho node, Local AP cho camera, key hierarchy) đã chốt ở [WiFi Provisioning](SMART_HOME_WIFI_PROVISIONING.md); cấu trúc firmware ESP-IDF ở [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md); bảng tổng hợp mọi API (hiện có + dự kiến) ở [API Design](../API_DESIGN.md). Tài liệu này **không lặp lại** các phần đó mà áp chúng vào phần cứng cụ thể.
 >
-> **Trạng thái:** bản thiết kế, chưa có code. Phần cứng Node phòng khách **chờ bổ sung** (mục 4.3). Các hợp đồng đánh dấu **(đề xuất)** chưa có ở backend.
+> **Trạng thái:** bản thiết kế; code Gateway, Camera, Node phòng khách đã có (mục 8). Phần cứng Node phòng khách đã chốt (mục 4.3, 2026-11-13). Các hợp đồng đánh dấu **(đề xuất)** chưa có ở backend.
 
 ---
 
@@ -189,21 +189,21 @@ Hai kênh song song trên cùng radio:
 
 Camera **chỉ** kết nối Local AP của Gateway, không bao giờ biết WiFi thật. Luồng trực tiếp thiết kế ở mục 5.4 (xem trên Gateway) và 5.5 (xem từ xa — tuỳ chọn, [PRD](../PRD_SMART_HOME.md) FR-5.8 xếp live view là COULD).
 
-### 4.3. Node phòng khách — chờ chi tiết phần cứng
+### 4.3. Node phòng khách
 
-Phần cứng do nhóm tự thiết kế; mục này sẽ hoàn thiện khi có sơ đồ. Kỳ vọng theo Kit ở [Kiến trúc sản phẩm](../SMART_HOME_PRODUCT_ARCHITECTURE.md) §4.1: cảm biến nhiệt độ, độ ẩm, ánh sáng + relay đèn và quạt.
+PCB do nhóm tự thiết kế, module **ESP32-S3-WROOM-1 N16R8** (flash 16 MB, PSRAM Octal 8 MB), nạp và xem log qua USB native. Bảng chân đầy đủ + cách đấu, hiệu chuẩn, chạy thử: [README của Node](../../firmware/esp32_s3_firmware_node/README.md) (mục *Sơ đồ chân*).
 
-Thông tin cần bổ sung:
+| Nhóm | Thiết bị | Chân ESP32-S3 | Firmware |
+|---|---|---|---|
+| Cảm biến | SHT31 nhiệt độ, độ ẩm (I2C0) | SDA 15, SCL 7 | `board_sensors`, gửi `temperature`, `humidity` |
+| Màn hình | TFT 3.5" ILI9488 SPI + cảm ứng XPT2046, LVGL 8.4 | SCK 21, MOSI 13, MISO (T_DO) 12, LCD CS 38, RESET 39, DC 48, LED 47, T_CS 14 | `board_display` + `node_ui`: 4 ô Đèn / Quạt / Rèm / Điều hòa nhận chạm |
+| Điều hòa | LED IR 940 nm (RMT TX) + mắt thu VS1838B (RMT RX) | TX 2, RX 1 | `node_ac`: học mã remote, phát lại ([Học mã IR](../guides/HOC_MA_IR_DIEU_HOA.md)) |
+| Đèn, quạt | Relay HF46F 12 V, kích qua transistor (mức cao = đóng) | Đèn 41 (Relay_1), Quạt 42 (Relay_2) | `node_switches`: khôi phục trạng thái khi có điện lại |
+| Rèm cửa | Động cơ bước 28BYJ-48 5 V qua ULN2003, không công tắc hành trình | IN1 8, IN2 18, IN3 17, IN4 16 | `node_curtain`: vị trí đếm theo bước, hiệu chuẩn trên màn hình, lưu NVS |
+| LED trạng thái | WS2812 1 bóng (RMT TX) | 40 | `node_status_led` |
+| Âm thanh | Mic INMP441 (I2S1) + ampli NS4168 (I2S0) | Mic SCK 4, WS 5, SD 6; loa BCLK 10, LRCLK 11, DIN 9 | `node_audio` — viết sẵn, **mặc định tắt** |
 
-| # | Thông tin | Ảnh hưởng tới |
-|---|---|---|
-| 1 | Chip/module (ESP32, ESP32-C3, ESP32-S3, ESP32-C6…) | Target build, ESP-NOW, có Zigbee/Thread hay không |
-| 2 | Danh sách cảm biến, model, giao tiếp (I2C/1-Wire/ADC) | Driver, trường `data` trong telemetry |
-| 3 | Cơ cấu chấp hành: relay, triac/dimmer, IR, số kênh, tải tối đa | Lệnh `action` hỗ trợ, ack trạng thái |
-| 4 | Nguồn: điện lưới (AC-DC trên mạch) hay pin | Có deep-sleep hay không, chu kỳ gửi |
-| 5 | Sơ đồ nguyên lý, bảng chân GPIO | Kiểm tra chân strapping, xung đột |
-| 6 | Nút bấm, LED trạng thái, nút reset/ghép nối | Luồng ghép nối, khôi phục gốc |
-| 7 | Vỏ, vị trí lắp | Tầm phủ ESP-NOW tới Gateway |
+Nguồn: điện lưới (relay 12 V, động cơ 5 V riêng), không deep-sleep. Lệnh `action` và trường telemetry của từng thiết bị: [API Design](../API_DESIGN.md) §11.
 
 ---
 
@@ -233,7 +233,7 @@ Với `TELEMETRY`, `body` **chính là `sensor_payload` mà backend đang nhận
 {"sensor_id":"<device_id>","sn_timestamp":1761480000,"sn_hmac":"<64 hex>","data":{"temperature":28.4,"humidity":61}}
 ```
 
-Khoảng 200 byte với 2–3 trường đo. Nếu node phòng khách gửi nhiều trường hơn, tách thành nhiều gói hoặc rút gọn tên trường — quyết định khi có danh sách cảm biến (mục 4.3).
+Khoảng 200 byte với 2–3 trường đo. Node phòng khách gửi cả trạng thái tải trong cùng gói (`temperature`, `humidity`, `ac`, `ac_temp`, `lamp`, `fan`, `curtain` ≈ 230 byte với `device_id` 14 ký tự); `ac_codes` (ít đổi) đi gói riêng để không vượt 246 byte.
 
 ### 5.2. Camera → Gateway: HTTP trên Local AP (đề xuất)
 
@@ -430,7 +430,7 @@ Khi mất Internet:
 |---|---|---|---|
 | Gateway | `firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting` (dựng trên ví dụ LVGL của Waveshare; bản sơ bộ, xem README trong thư mục) | `esp32s3` | WiFi STA + SoftAP, ESP-NOW, esp-mqtt TLS, HTTP server cục bộ (nhận ảnh), HTTP client kéo luồng MJPEG, giải nén JPEG (TJpgDec trong ROM; `esp_new_jpeg` nếu cần nhanh hơn), HTTPS/WebSocket client, LVGL + driver LCD RGB/cảm ứng/CH422G/RTC/TF |
 | Camera | `firmware/esp32_cam` | `esp32` | `esp32-camera`, ESP-NOW, WiFi STA, HTTP client (gửi ảnh), HTTP server `/stream` (MJPEG, 1 kết nối), driver PIR |
-| Node phòng khách | `firmware/esp32_s3_firmware_node` | `esp32s3` | ESP-NOW, driver cảm biến/relay (chờ mục 4.3), TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 + LVGL 8.4 (cùng bản Gateway) |
+| Node phòng khách | `firmware/esp32_s3_firmware_node` | `esp32s3` | ESP-NOW, SHT31, TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 + LVGL 8.4 (cùng bản Gateway), IR (RMT), relay, động cơ bước (esp_timer), WS2812 (RMT), I2S mic/loa (tắt mặc định) — mục 4.3 |
 
 - **Framework:** ESP-IDF cho cả ba (đúng hướng [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md) §3). Có thể build qua PlatformIO với `framework = espidf` để CI hiện tại (`pio run`) vẫn chạy. Waveshare cung cấp ví dụ ESP-IDF và Arduino cho board Gateway.
 - **Mã dùng chung:** HMAC, khung tin ESP-NOW, định dạng `sensor_payload` đặt trong một thư mục chung (VD `firmware/common/`) để cả ba project cùng dùng. Đây là bài học từ 2 bản `hmac_util` khác nhau ở [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md) §1.2.
@@ -456,7 +456,7 @@ Khi mất Internet:
 | 5 | Camera: ESP-NOW + Local AP + HTTP gửi ảnh tới Gateway; backend thêm endpoint ảnh | FR-5.8 (snapshot), FR-4.6 (camera không giữ WiFi thật) |
 | 5b | Luồng MJPEG Camera → Gateway, hiển thị trên màn hình Gateway (mục 5.4) | Xem trực tiếp tại chỗ, đo fps thật |
 | 5c | *(Tuỳ chọn)* Chuyển tiếp luồng lên Backend và web/Mobile (mục 5.5) | FR-5.8 phần live view (COULD). **Web user: đã hiện thực (2026-11-13), chưa thử đầu-cuối**; Mobile: chưa làm |
-| 6 | Node phòng khách trên mạch thật (sau khi có mục 4.3) | Thay node thử ở bước 2 |
+| 6 | Node phòng khách trên mạch thật (mục 4.3) | Thay node thử ở bước 2. Màn hình, SHT31, ESP-NOW, điều hòa IR đã chạy trên PCB; relay, rèm, LED WS2812 đã có code (2026-11-13), **chưa nạp thử** |
 | 7 | Ghép nối ECDH, provisioning BLE/SoftAP, OTA | Theo [WiFi Provisioning](SMART_HOME_WIFI_PROVISIONING.md), [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md) §12–14 |
 
 Bước 1–3 không đổi hợp đồng backend. Bước 5 cần backend thêm endpoint; bước 7 đổi topic sang `home/{home_id}/...` theo [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §10.4.
@@ -467,7 +467,7 @@ Bước 1–3 không đổi hợp đồng backend. Bước 5 cần backend thêm
 
 | # | Câu hỏi | Đề xuất mặc định |
 |---|---|---|
-| Q1 | Chi tiết phần cứng Node phòng khách (mục 4.3) | Chờ sơ đồ từ nhóm |
+| Q1 | Chi tiết phần cứng Node phòng khách (mục 4.3) | **Đã chốt** (2026-11-13) |
 | Q2 | Module camera chính xác (AI-Thinker hay loại khác, có PIR không) | AI-Thinker + PIR HC-SR501 trên GPIO13 |
 | Q3 | Dữ liệu đệm khi mất Internet bị backend từ chối vì quá cửa sổ 300 giây | Thêm trường `buffered: true` và cho backend nhận với cửa sổ riêng, kèm chống trùng theo `seq` — cần thống nhất với [Bảo mật](../SECURITY_ARCHITECTURE.md) trước khi làm |
 | Q4 | Có dùng DI/DO của Gateway (còi, tiếp điểm cửa có dây) không | Chưa dùng ở V2 |

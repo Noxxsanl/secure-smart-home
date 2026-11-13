@@ -5,7 +5,7 @@ import { POLL_OVERVIEW_MS, useHomeOverview, isNotFound } from "@shh/api-client/p
 import { useCurrentHome } from "./CurrentHomeProvider";
 
 /**
- * GET /homes/:id/overview của nhà đang chọn, polling 5 s (mặc định).
+ * GET /homes/:id/overview của nhà đang chọn, polling 2 s (mặc định).
  * 404 nghĩa là tôi không còn là thành viên (bị xoá, GUEST hết hạn) → tải lại
  * danh sách nhà để chuyển sang nhà khác hoặc màn hình "chưa có nhà".
  */

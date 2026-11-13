@@ -43,7 +43,11 @@ export interface OtaTarget {
   is_simulated: boolean;
 }
 
-/** Gateway (type gateway) hoặc thiết bị không phải gateway (type node) đã gán nhà; homeId = giới hạn một nhà. */
+/**
+ * Gateway (type gateway) hoặc thiết bị không phải gateway (type node) đã gán nhà; homeId = giới hạn một nhà.
+ * Type node bỏ các thiết bị con của Node (`appliance` = đèn/quạt/rèm/điều hoà): chúng không có firmware riêng — OTA nạp
+ * cho chính Node — nên tính vào job thì job không bao giờ xong (đứng mãi ở downloading).
+ */
 export async function listTargets(type: "gateway" | "node", homeId: number | null): Promise<OtaTarget[]> {
   const params: SqlParam[] = [];
   let homeFilter = "";
@@ -51,7 +55,8 @@ export async function listTargets(type: "gateway" | "node", homeId: number | nul
     homeFilter = "AND d.home_id = ?";
     params.push(homeId);
   }
-  const typeFilter = type === "gateway" ? "d.device_type = 'gateway'" : "d.device_type <> 'gateway'";
+  const typeFilter =
+    type === "gateway" ? "d.device_type = 'gateway'" : "d.device_type <> 'gateway' AND d.appliance IS NULL";
   return queryRows<OtaTarget>(
     `SELECT d.id, d.gateway_device_id, d.is_simulated FROM devices d
       WHERE ${typeFilter} AND d.home_id IS NOT NULL ${homeFilter} ORDER BY d.id`,

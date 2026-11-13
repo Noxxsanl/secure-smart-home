@@ -1,17 +1,21 @@
 /*
  * gw_ui — giao diện màn hình Gateway 800x480 (IOT_NODE_NETWORK §3.3):
  *
- *   ┌ header: SMART HOME GATEWAY · WiFi · Server · giờ ──────────────────────────────┐
+ *   ┌ header: Gateway Smart Home ·························· Th 7 14/11/2026  21:05:33 ┐
  *   │ [CAMERA     ] │ nội dung của mục đang chọn (hàng tiêu đề: tên · trạng thái kết nối): │
- *   │ [PHONG KHACH] │   Camera      hình trực tiếp 448x336                                 │
- *   │ [THIET BI   ] │   Phòng khách nhiệt độ, độ ẩm + trạng thái quạt, điều hoà, đèn, rèm   │
+ *   │ [LIVING ROOM] │   Camera      hình trực tiếp 448x336                                 │
+ *   │ [THIET BI   ] │   Living room nhiệt độ, độ ẩm + công tắc quạt, điều hoà, đèn, rèm    │
  *   │   (nav)       │   Thiết bị    bảng thiết bị đã ghép (online, RSSI, lần cuối thấy)    │
- *   └ footer: dòng trạng thái ───────────────────────────────────────────────────────┘
+ *   └ footer: dòng trạng thái ················ WiFi <ip> · Máy chủ OK ┘
  *
  * Chạm mục trên nav (cần cảm ứng GT911) → đổi trang ngay và báo tầng trên qua gw_ui_page_cb_t (VD để bật/tắt luồng
  * camera). Tầng trên đổi trang bằng gw_ui_show_page (VD có chuyển động → trang Camera).
  *
- * Gọi được từ MỌI task: gw_ui_set_* chỉ ghi vào mô hình (có mutex); lv_timer trong task LVGL vẽ lại mỗi 500 ms.
+ * Trang Living room có công tắc cho quạt / điều hoà / đèn / rèm và 2 nút mức rèm (50 / 100 %). Chạm → gw_ui_control_cb_t
+ * (điều khiển cục bộ Gateway → Node, không qua Server); Node ack ok → tầng trên gọi gw_ui_set_actuator để màn hình đổi
+ * ngay; lệnh thất bại thì tầng trên gọi gw_ui_control_failed để công tắc trở về trạng thái thật của Node.
+ *
+ * Gọi được từ MỌI task: gw_ui_set_* chỉ ghi vào mô hình (có mutex); lv_timer trong task LVGL vẽ lại mỗi 200 ms.
  * Riêng khung hình (gw_ui_live_submit): chỉ trao con trỏ JPEG cho task giải nén riêng (nhân 1, ưu tiên dưới LVGL),
  * task đó luôn lấy khung MỚI NHẤT (khung cũ chưa kịp giải nén bị bỏ) rồi đổi ảnh dưới khoá LVGL (2 bộ đệm — LVGL
  * không bao giờ vẽ bộ đệm đang bị ghi). Gọi khi chưa gw_ui_start thì bỏ qua.
@@ -54,7 +58,7 @@ typedef struct {
 
 typedef enum {
     GW_UI_PAGE_CAMERA = 0,
-    GW_UI_PAGE_ROOM,      /* Phòng khách */
+    GW_UI_PAGE_ROOM,      /* LIVING ROOM (phòng khách) */
     GW_UI_PAGE_DEVICES,   /* Danh sách thiết bị */
 } gw_ui_page_t;
 
@@ -71,11 +75,21 @@ typedef enum {
 /** Người dùng vừa chạm 1 mục trên nav (màn hình đã đổi trang). Chạy trong task LVGL — chỉ đẩy việc đi. */
 typedef void (*gw_ui_page_cb_t)(gw_ui_page_t page, void *ctx);
 
+/**
+ * Người dùng vừa gạt công tắc / chạm nút mức rèm ở trang Living room. target: "fan" | "ac" | "lamp" | "curtain";
+ * action: "turn_on" | "turn_off" (cả 4 thiết bị) hoặc "set_pos_50" | "set_pos_100" (rèm).
+ * Chạy trong task LVGL (đang giữ khoá LVGL) — chỉ đẩy việc đi, không chặn.
+ */
+typedef void (*gw_ui_control_cb_t)(const char *target, const char *action, void *ctx);
+
 /** Cần gw_display_init trước. Tạo màn hình (trang Camera), timer vẽ lại và bộ đệm ảnh (PSRAM). */
 esp_err_t gw_ui_start(void);
 
 /** Đăng ký hàm nhận thao tác trên nav. Gọi 1 lần khi khởi động. */
 void gw_ui_set_page_handler(gw_ui_page_cb_t cb, void *ctx);
+
+/** Đăng ký hàm nhận thao tác điều khiển ở trang Living room. Gọi 1 lần khi khởi động. */
+void gw_ui_set_control_handler(gw_ui_control_cb_t cb, void *ctx);
 
 /** Đổi trang từ task khác (không gọi lại gw_ui_page_cb_t). */
 void gw_ui_show_page(gw_ui_page_t page);
@@ -83,7 +97,13 @@ void gw_ui_show_page(gw_ui_page_t page);
 /** Dòng trạng thái cuối màn hình (VD hướng dẫn khi thiếu cấu hình). */
 void gw_ui_set_status(const char *text, bool is_error);
 
-/** time_synced = false → đồng hồ hiện "--:--:--". */
+/**
+ * Lệnh điều khiển cục bộ thất bại: hiện text (màu lỗi) ở dòng trạng thái và vẽ lại ngay để các công tắc trở về trạng
+ * thái Node đã báo lần cuối.
+ */
+void gw_ui_control_failed(const char *text);
+
+/** time_synced = false → đồng hồ ở header hiện "--/--/----  --:--:--"; có giờ: "Th 7 14/11/2026  21:05:33". */
 void gw_ui_set_network(bool wifi, const char *ip, bool server, bool time_synced);
 
 /**
@@ -96,6 +116,13 @@ void gw_ui_set_network(bool wifi, const char *ip, bool server, bool time_synced)
  * Tên trường trạng thái là ĐỀ XUẤT — chốt cùng firmware node (esp32_s3_firmware_node/README.md).
  */
 void gw_ui_set_telemetry(const char *device_id, const char *payload, size_t len);
+
+/**
+ * Cập nhật NGAY trạng thái 1 thiết bị của node phòng khách từ CMD_ACK (không chờ telemetry kế tiếp), cùng cách mã hoá
+ * với telemetry. target: "fan" | "ac" | "lamp" (state 0/1) | "curtain" (0 = đóng, 1..100 = mở theo %). Target lạ → bỏ
+ * qua. Xoá mốc giữ công tắc của thiết bị đó nên công tắc và nền ô đổi ở lần vẽ lại kế tiếp (<= 200 ms).
+ */
+void gw_ui_set_actuator(const char *target, int state);
 
 void gw_ui_set_devices(const gw_ui_device_t *list, size_t n);
 

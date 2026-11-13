@@ -206,7 +206,7 @@ export async function registerGateway(
       });
       if (isCamera) continue;
 
-      // Đèn/quạt/rèm (mô phỏng) + điều hoà (thật, IR) của node cảm biến
+      // Đèn, quạt (relay), rèm (động cơ bước), điều hoà (IR) của node cảm biến — đều là thiết bị thật do Node điều khiển
       for (const item of NODE_APPLIANCES) {
         const uid = applianceUid(node.uid, item.appliance);
         const appliance = await upsertNodeAppliance(conn, {

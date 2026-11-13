@@ -1,10 +1,10 @@
 // Mô hình phần cứng thật khi Admin/Operator đăng ký gateway cho khách (features/register-gateway) — cùng mô hình với
 // công cụ dev scripts/register-hardware.ts: 1 gateway + các node cảm biến nhiệt/ẩm và camera đã nạp device_id/secret.
-// Mỗi node cảm biến kèm 4 thiết bị điều khiển của phòng (màn hình TFT của Node đọc cùng 4 trường lamp/fan/curtain/ac):
-// điều hoà là thiết bị THẬT (Node học + phát mã IR, lệnh đi MQTT); đèn/quạt/rèm CHƯA có phần cứng nhận lệnh nên là relay
-// MÔ PHỎNG (simulator ack). device_id của chúng = "<device_id node>-<appliance>" và cột devices.appliance = hậu tố —
-// ingest dựa vào cặp này để đồng bộ điều hoà của Node. Tên chứa từ khoá ("Đèn", "Quạt", "Rèm", "Điều hòa") để web/mobile
-// chọn đúng kiểu điều khiển.
+// Mỗi node cảm biến kèm 4 thiết bị điều khiển của phòng (màn hình TFT của Node đọc cùng 4 trường lamp/fan/curtain/ac),
+// cả 4 là thiết bị THẬT do Node điều khiển — đèn/quạt qua relay, rèm qua động cơ bước, điều hoà qua IR; lệnh đi MQTT →
+// gateway → Node (ESP-NOW, params.target = hậu tố). device_id của chúng = "<device_id node>-<appliance>" và cột
+// devices.appliance = hậu tố — ingest dựa vào cặp này để đồng bộ trạng thái từ telemetry của Node. Tên chứa từ khoá ("Đèn",
+// "Quạt", "Rèm", "Điều hòa") để web/mobile chọn đúng kiểu điều khiển.
 import type { Appliance } from "../../devices";
 
 export const HARDWARE_NODE_KINDS = ["node", "camera"] as const;
@@ -21,9 +21,9 @@ export const DEFAULT_ROOM: Readonly<Record<HardwareNodeKind, { name: string; typ
 };
 
 export const NODE_APPLIANCES: ReadonlyArray<{ appliance: Appliance; label: string; simulated: boolean }> = [
-  { appliance: "lamp", label: "Đèn", simulated: true },
-  { appliance: "fan", label: "Quạt", simulated: true },
-  { appliance: "curtain", label: "Rèm cửa", simulated: true },
+  { appliance: "lamp", label: "Đèn", simulated: false },
+  { appliance: "fan", label: "Quạt", simulated: false },
+  { appliance: "curtain", label: "Rèm cửa", simulated: false },
   { appliance: "ac", label: "Điều hòa", simulated: false },
 ];
 

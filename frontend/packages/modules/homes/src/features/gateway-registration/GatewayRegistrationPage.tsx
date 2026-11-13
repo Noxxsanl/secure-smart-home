@@ -273,7 +273,7 @@ export default function GatewayRegistrationPage() {
                         id={`register-node-id-${node.key}`} type="text" value={node.deviceId} maxLength={64} disabled={submitting}
                         autoComplete="off" spellCheck={false}
                         onChange={(e) => updateNode(node.key, { deviceId: e.target.value })}
-                        placeholder={node.kind === "camera" ? "VD: cam-door-01" : "VD: node-living-01"} className={`${INPUT} font-mono`}
+                        placeholder={node.kind === "camera" ? "VD: camera-01" : "VD: node-living-01"} className={`${INPUT} font-mono`}
                       />
                     </div>
                     <div>

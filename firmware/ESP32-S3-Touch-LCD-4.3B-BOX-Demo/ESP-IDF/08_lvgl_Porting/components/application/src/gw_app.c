@@ -10,6 +10,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_random.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -80,6 +81,7 @@ typedef enum {
     EV_DEVICE_CMD,
     EV_GATEWAY_CMD,
     EV_PAGE,         /* người dùng chạm 1 mục trên nav */
+    EV_LOCAL_CMD,    /* người dùng gạt công tắc / chạm nút mức rèm ở trang LIVING ROOM */
     EV_LIVE_STATE,   /* gw_camera_live đổi trạng thái */
     EV_RELAY_ENDED,  /* phiên xem từ xa tự kết thúc (Server đóng, bị từ chối, hết số lần nối lại) */
 } ev_type_t;
@@ -119,6 +121,10 @@ typedef struct {
             gw_ui_page_t page;
         } nav;
         struct {
+            char target[ACTION_MAX + 1];
+            char action[ACTION_MAX + 1];
+        } lcmd;
+        struct {
             size_t idx;
             gw_live_state_t state;
             gw_live_err_t err;
@@ -151,6 +157,11 @@ typedef struct {
     char device_id[ID_MAX + 1];   /* UID trong topic lệnh — ack trả về topic này (node hoặc "<node>-ac") */
     size_t idx;
     int64_t deadline_us;
+    /* Lệnh cục bộ từ màn hình: không có home/MQTT, kết quả báo lên dòng trạng thái thay vì ack lên Server. */
+    bool local;
+    /* Thiết bị con ("fan|ac|lamp|curtain") và action — cả lệnh cục bộ lẫn lệnh Server; dùng cập nhật màn hình ngay khi ack. */
+    char target[ACTION_MAX + 1];
+    char action[ACTION_MAX + 1];
 } pending_t;
 
 /* Camera báo chuyển động, chờ ảnh để gửi kèm. */
@@ -169,6 +180,7 @@ static bool s_api_ok;
 static char s_home_id[GW_HOME_ID_MAX + 1];
 static pending_t s_pending[PENDING_MAX];
 static motion_t s_motion[GW_REGISTRY_MAX];
+static int s_room_idx = -1;   /* Node gửi telemetry gần nhất (cùng quy tắc chọn node với trang LIVING ROOM) */
 
 /*
  * Màn hình + xem trực tiếp (chỉ task gw_app, trừ 2 biến atomic). MỘT luồng camera duy nhất (gw_camera_live) cho 2 nơi:
@@ -302,6 +314,15 @@ static void on_ui_page(gw_ui_page_t page, void *ctx)
 {
     app_event_t ev = {.type = EV_PAGE, .nav = {.page = page}};
     post(&ev, "page change");
+}
+
+/* Task LVGL (đang giữ khoá LVGL) — chỉ đẩy vào hàng đợi. */
+static void on_ui_control(const char *target, const char *action, void *ctx)
+{
+    app_event_t ev = {.type = EV_LOCAL_CMD};
+    strlcpy(ev.lcmd.target, target, sizeof(ev.lcmd.target));
+    strlcpy(ev.lcmd.action, action, sizeof(ev.lcmd.action));
+    post(&ev, "local command");
 }
 
 /* ==== xử lý trong task gw_app ============================================================================ */
@@ -564,6 +585,9 @@ static void motion_show_camera(void)
 static void handle_telemetry(const app_event_t *ev)
 {
     const gw_device_info_t *dev = gw_registry_get(ev->tel.idx);
+    if (dev->kind == GW_DEV_NODE) {
+        s_room_idx = (int)ev->tel.idx;
+    }
     gw_ui_set_telemetry(dev->device_id, ev->tel.payload, ev->tel.len);
 
     char *json = gw_envelope_telemetry(ev->tel.payload, ev->tel.len);
@@ -597,6 +621,161 @@ static void handle_node_event(const app_event_t *ev)
     ESP_LOGI(TAG, "event %s from %s — not forwarded yet", ev->nev.event, dev->device_id);
 }
 
+/* ---- điều khiển cục bộ từ màn hình (Gateway → Node, không qua Server) ---------------------------------- */
+
+typedef enum {
+    LOCAL_OK,
+    LOCAL_ERROR,
+    LOCAL_TIMEOUT,
+} local_result_t;
+
+/* "bật quạt", "tắt điều hòa", "mở rèm 50%", "đóng rèm" — chỉ để hiện trên dòng trạng thái. */
+static void local_describe(const pending_t *p, char *buf, size_t cap)
+{
+    const bool curtain = strcmp(p->target, "curtain") == 0;
+    const char *name = "thiết bị";
+    if (strcmp(p->target, "fan") == 0) {
+        name = "quạt";
+    } else if (strcmp(p->target, "ac") == 0) {
+        name = "điều hòa";
+    } else if (strcmp(p->target, "lamp") == 0) {
+        name = "đèn";
+    } else if (curtain) {
+        name = "rèm";
+    }
+    int pos = -1;
+    if (curtain && sscanf(p->action, "set_pos_%d", &pos) == 1) {
+        snprintf(buf, cap, "mở rèm %d%%", pos);
+    } else if (strcmp(p->action, "turn_on") == 0) {
+        snprintf(buf, cap, "%s %s", curtain ? "mở" : "bật", name);
+    } else if (strcmp(p->action, "turn_off") == 0) {
+        snprintf(buf, cap, "%s %s", curtain ? "đóng" : "tắt", name);
+    } else {
+        snprintf(buf, cap, "%s", name);
+    }
+}
+
+static void local_result(const pending_t *p, local_result_t res)
+{
+    char what[40], msg[STATUS_MAX];
+    local_describe(p, what, sizeof(what));
+    switch (res) {
+    case LOCAL_OK:
+        ESP_LOGI(TAG, "local command %s → %s %s: Node acked ok", p->command_id, p->target, p->action);
+        snprintf(msg, sizeof(msg), "Đã gửi lệnh: %s", what);
+        gw_ui_set_status(msg, false);
+        break;
+    case LOCAL_ERROR:
+        ESP_LOGW(TAG, "local command %s → %s %s: Node acked error", p->command_id, p->target, p->action);
+        snprintf(msg, sizeof(msg), "Node báo lỗi khi %s", what);
+        gw_ui_control_failed(msg);
+        break;
+    default:
+        ESP_LOGW(TAG, "local command %s → %s %s: no CMD_ACK from Node within the ack timeout", p->command_id,
+                 p->target, p->action);
+        gw_ui_control_failed("Node không phản hồi");
+        break;
+    }
+}
+
+static void local_fail(const char *log, const char *ui_text)
+{
+    ESP_LOGW(TAG, "local command rejected: %s", log);
+    gw_ui_control_failed(ui_text);
+}
+
+/* Node phòng khách: node đang gửi telemetry, không có thì node đầu tiên đã ghép (giống trang LIVING ROOM). */
+static int room_node_idx(void)
+{
+    if (s_room_idx >= 0 && (size_t)s_room_idx < gw_registry_count() &&
+        gw_registry_get((size_t)s_room_idx)->kind == GW_DEV_NODE) {
+        return s_room_idx;
+    }
+    for (size_t i = 0; i < gw_registry_count(); i++) {
+        if (gw_registry_get(i)->kind == GW_DEV_NODE) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static void handle_local_cmd(const app_event_t *ev)
+{
+    const char *target = ev->lcmd.target;
+    const char *action = ev->lcmd.action;
+    const int idx = room_node_idx();
+    if (idx < 0) {
+        local_fail("no room node paired", "Chưa ghép Node phòng khách");
+        return;
+    }
+    int64_t now;
+    if (!gw_time_now(&now)) {
+        local_fail("gateway has no time", "Chưa có giờ, chưa điều khiển được");
+        return;
+    }
+    pending_t *slot = NULL;
+    for (size_t i = 0; i < PENDING_MAX; i++) {
+        pending_t *p = &s_pending[i];
+        if (p->used && p->local && strcmp(p->target, target) == 0) {
+            local_fail("previous command for this target still pending", "Đang chờ Node phản hồi");
+            return;
+        }
+        if (!p->used && slot == NULL) {
+            slot = p;
+        }
+    }
+    if (slot == NULL) {
+        local_fail("no free pending slot", "Gateway đang bận, thử lại sau");
+        return;
+    }
+    char cmd[ID_MAX + 1];
+    snprintf(cmd, sizeof(cmd), "gw-%08" PRIx32, esp_random());
+    if (gw_espnow_send_cmd((size_t)idx, cmd, action, target, now) != ESP_OK) {
+        local_fail("ESP-NOW send failed", "Không gửi được tới Node");
+        return;
+    }
+    *slot = (pending_t){
+        .used = true, .local = true, .idx = (size_t)idx, .deadline_us = esp_timer_get_time() + ACK_TIMEOUT_US};
+    strlcpy(slot->command_id, cmd, sizeof(slot->command_id));
+    strlcpy(slot->target, target, sizeof(slot->target));
+    strlcpy(slot->action, action, sizeof(slot->action));
+    ESP_LOGI(TAG, "local command %s → %s %s, waiting CMD_ACK", cmd, target, action);
+}
+
+/*
+ * CMD_ACK ok → cập nhật mô hình màn hình NGAY (không chờ telemetry kế tiếp của Node): công tắc và nền ô đổi tức thì.
+ * Chỉ áp cho node phòng khách (node mà trang LIVING ROOM đang hiện). Rèm: trạng thái lấy từ action (mang cả mức mở),
+ * thiết bị khác: ack.power, không có thì theo action turn_on/turn_off. Action khác (set_temp, learn_...) → bỏ qua.
+ */
+static void apply_ack_to_ui(const pending_t *p, int power)
+{
+    if (p->target[0] == '\0' || (int)p->idx != room_node_idx()) {
+        return;
+    }
+    int state;
+    if (strcmp(p->target, "curtain") == 0) {
+        int pos;
+        if (sscanf(p->action, "set_pos_%d", &pos) == 1) {
+            state = pos;
+        } else if (strcmp(p->action, "turn_on") == 0) {
+            state = 100;
+        } else if (strcmp(p->action, "turn_off") == 0) {
+            state = 0;
+        } else {
+            return;
+        }
+    } else if (power >= 0) {
+        state = power != 0 ? 1 : 0;
+    } else if (strcmp(p->action, "turn_on") == 0) {
+        state = 1;
+    } else if (strcmp(p->action, "turn_off") == 0) {
+        state = 0;
+    } else {
+        return;
+    }
+    gw_ui_set_actuator(p->target, state);
+}
+
 static void handle_cmd_ack(const app_event_t *ev)
 {
     const gw_device_info_t *dev = gw_registry_get(ev->ack.idx);
@@ -604,6 +783,14 @@ static void handle_cmd_ack(const app_event_t *ev)
         pending_t *p = &s_pending[i];
         /* Khớp cả command_id lẫn thiết bị: node khác không ack thay được. */
         if (p->used && p->idx == ev->ack.idx && strcmp(p->command_id, ev->ack.command_id) == 0) {
+            if (ev->ack.ok) {
+                apply_ack_to_ui(p, ev->ack.power);
+            }
+            if (p->local) {
+                local_result(p, ev->ack.ok ? LOCAL_OK : LOCAL_ERROR);
+                p->used = false;
+                return;
+            }
             publish_ack(p->home, p->device_id, p->command_id, ev->ack.ok, ev->ack.power);
             p->used = false;
             return;
@@ -746,6 +933,10 @@ static void handle_device_cmd(const app_event_t *ev)
     strlcpy(slot->command_id, cmd, sizeof(slot->command_id));
     strlcpy(slot->home, home, sizeof(slot->home));
     strlcpy(slot->device_id, dev_id, sizeof(slot->device_id));   /* ack về đúng UID Server đã gửi (kể cả "-ac") */
+    if (target != NULL) {
+        strlcpy(slot->target, target, sizeof(slot->target));     /* để cập nhật màn hình khi ack */
+        strlcpy(slot->action, action, sizeof(slot->action));
+    }
     ESP_LOGI(TAG, "command %s → %s (%s), waiting CMD_ACK", lid, dev_id, action);
 }
 
@@ -862,6 +1053,11 @@ static void tick(void)
     for (size_t i = 0; i < PENDING_MAX; i++) {
         pending_t *p = &s_pending[i];
         if (p->used && now_us >= p->deadline_us) {
+            if (p->local) {
+                local_result(p, LOCAL_TIMEOUT);
+                p->used = false;
+                continue;
+            }
             const gw_device_info_t *dev = gw_registry_get(p->idx);
             ESP_LOGW(TAG, "command %s: no CMD_ACK from %s within the ack timeout", p->command_id, dev->device_id);
             publish_ack(p->home, p->device_id, p->command_id, false, -1);
@@ -924,6 +1120,9 @@ static void app_task(void *arg)
                 break;
             case EV_PAGE:
                 handle_page(&ev);
+                break;
+            case EV_LOCAL_CMD:
+                handle_local_cmd(&ev);
                 break;
             case EV_LIVE_STATE:
                 handle_live_state(&ev);
@@ -1041,6 +1240,7 @@ esp_err_t gw_app_start(void)
         ESP_LOGW(TAG, "remote camera view disabled: relay not started (low PSRAM?)");   /* LCD vẫn xem được */
     }
     gw_ui_set_page_handler(on_ui_page, NULL);
+    gw_ui_set_control_handler(on_ui_control, NULL);
     gw_ui_show_page(s_page);   /* trang khởi động (menuconfig); luồng camera bật ở live_sync trong tick() */
 
     s_api_ok = gw_api_init(s_cfg.api_url) == ESP_OK;

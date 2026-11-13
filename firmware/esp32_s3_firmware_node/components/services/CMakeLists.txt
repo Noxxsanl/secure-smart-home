@@ -4,6 +4,7 @@
 #   node_link       ESP-NOW tới Gateway: dò kênh, peer mã hoá, heartbeat, lệnh + ack, chống trùng
 #   node_telemetry  dựng sensor_payload có HMAC lớp 1 (khớp backend)
 #   node_ir_store   lưu mã IR đã học vào NVS
+#   node_state_store trạng thái tải giữ qua mất điện (relay đèn/quạt, vị trí + hành trình rèm) trong NVS
 #
 # Không biết drivers/application. json (cJSON) public vì callback lệnh trả `params` dạng cJSON.
 idf_component_register(SRCS "src/node_config.c"
@@ -11,6 +12,7 @@ idf_component_register(SRCS "src/node_config.c"
                             "src/node_link.c"
                             "src/node_telemetry.c"
                             "src/node_ir_store.c"
+                            "src/node_state_store.c"
                        INCLUDE_DIRS "include"
                        REQUIRES json esp_common
                        PRIV_REQUIRES security_manager espnow_proto

@@ -51,10 +51,12 @@ export function applyRateLimits(app: Express): void {
   const deviceDataLimiter = makeLimiter(MINUTE, 60, "Device data rate limit exceeded");
   // Ảnh camera từ gateway: 30 request / phút (mỗi ảnh tới 200 KB nên chặt hơn /device/data)
   const cameraSnapshotLimiter = makeLimiter(MINUTE, 30, "Camera snapshot rate limit exceeded");
-  // Chung cho /api/**: 1500 request / 5 phút (SWR poll 5–15 s trên nhiều trang — 100/15 phút cũ sẽ chặn UI)
+  // Chung cho /api/**: 6000 request / 5 phút (20/s mỗi IP). Web khách poll 2 s (overview + thiết bị/phòng ≈ 1 req/s mỗi
+  // tab) và ở dev mọi trình duyệt sau nginx chung 1 IP (compose.yaml không bật TRUST_PROXY) — 1500 cũ chạm 429 với ~5 tab.
+  // Đăng nhập vẫn có hạn mức riêng chặt hơn bên dưới.
   const apiLimiter = makeLimiter(
     5 * MINUTE,
-    1500,
+    6000,
     "API rate limit exceeded",
     (req) => req.originalUrl.startsWith("/api/device/data") || req.originalUrl.startsWith("/api/device/camera/snapshot")
   );

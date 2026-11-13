@@ -122,7 +122,7 @@ File: `components/drivers/include/drv_display.h`, `components/drivers/src/lcd/dr
 
 ## 5. Giao diện và font tiếng Việt: `ui`
 
-- `components/ui/src/node_ui.c`: 2 ô nhiệt độ/độ ẩm, 4 ô trạng thái thiết bị (Đèn, Quạt, Rèm cửa, Điều hòa — `node_ui_set_device`), kết nối Gateway ở góc phải, thanh toạ độ chạm + chấm xanh theo ngón tay để kiểm hiệu chuẩn; cùng bảng màu với `gw_ui.c`. Dựng trong `drv_display_lock/unlock`.
+- `components/ui/src/node_ui.c`: tiêu đề "Living Room" + ngày giờ + chấm kết nối Gateway; 2 ô nhiệt độ/độ ẩm; lưới 2×2 ô thiết bị (Đèn, Quạt, Rèm cửa, Điều hòa) với công tắc `lv_switch` (không chữ trạng thái — nền xanh = bật; Điều hòa hiện nhiệt độ đặt, Rèm hiện "Đang chạy"), ô Rèm có 2 nút mức 50 / 100 %; dòng dưới cùng = biểu tượng kết nối + thông báo (`node_ui_set_notice`); bảng Điều hòa (công tắc nguồn, − / +, thanh kéo, lưới học mã có đếm ngược) và bảng Rèm (DỪNG + hiệu chuẩn). Chấm theo ngón tay + toạ độ để kiểm hiệu chuẩn cảm ứng chỉ có khi bật `CONFIG_NODE_UI_TOUCH_TEST`. Cùng bảng màu với `gw_ui.c`. Dựng trong `drv_display_lock/unlock`; ngày giờ cập nhật bằng `lv_timer` 1 s.
 - Font Montserrat có sẵn của LVGL **chỉ có ASCII**. UI tiếng Việt có dấu (bất biến 10) dùng `components/ui/fonts/node_font_vi_16.c` và `node_font_vi_24.c`, chép từ `gw_font_vi_16/24.c` của Gateway và chỉ đổi tên symbol.
 - Font gồm: ASCII, dấu độ, 134 chữ cái tiếng Việt, và 7 biểu tượng `LV_SYMBOL_` (HOME, OK, WIFI, WARNING, LIST, VIDEO, UPLOAD). Chữ hoặc biểu tượng ngoài bộ font hiện thành ô trống.
 - Thêm cỡ chữ, ký tự hoặc biểu tượng: sửa `components/ui/fonts/gen_fonts.sh` (danh sách `size`, `SYMBOLS`) rồi chạy bằng Git Bash. Script cần Node.js (`npx` tải `lv_font_conv@1.5.2` vào cache npm) và font nguồn trong `components/lvgl__lvgl/scripts/built_in_font/`. Cỡ mới phải thêm vào `ui/CMakeLists.txt` và `LV_FONT_DECLARE` trong code.
@@ -281,10 +281,10 @@ I app_main: display up (touch on); sensors/relay/ESP-NOW wait for the GPIO map
 
 | Kiểm | Đạt khi |
 |---|---|
-| Hướng, kích thước | Tiêu đề "Node phòng khách" ở góc trên trái, chữ có dấu đầy đủ |
+| Hướng, kích thước | Tiêu đề "Living Room" ở góc trên trái, chữ có dấu đầy đủ ở các ô |
 | Màu | Nền xanh đen, nút xanh dương. Đỏ ↔ xanh dương đảo: đổi BGR; âm bản: đổi đảo màu |
-| Ảnh | Không sọc, không rách khi chấm xanh chạy. Có sọc: hạ xung nhịp |
-| Cảm ứng | Chấm xanh nằm đúng dưới ngón tay ở cả 4 góc; bấm nút thì số đếm tăng |
+| Ảnh | Không sọc, không rách khi gạt công tắc / mở bảng. Có sọc: hạ xung nhịp |
+| Cảm ứng | Bật `CONFIG_NODE_UI_TOUCH_TEST`: chấm xanh nằm đúng dưới ngón tay ở cả 4 góc; gạt được công tắc ở cả 4 ô |
 | Nhớ | Log không có `no mem` của `drv_display` / `drv_ili9488` |
 
 ---
