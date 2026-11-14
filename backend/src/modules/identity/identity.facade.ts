@@ -2,6 +2,7 @@
 // infrastructure/ và guards/.
 export { authenticateAccessToken, revokeAllRefreshTokens } from "./domain/session.service";
 export { authenticatePortalCookie, requireDashboard, requireMobileUser, requirePortalUser } from "./guards/auth.guards";
+export { loadCustomerAuthContext } from "./domain/system-auth";
 export { findAuthUserById } from "./infrastructure/auth.repository";
 export {
   findActiveCustomerById,

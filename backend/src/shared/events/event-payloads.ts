@@ -38,6 +38,36 @@ export interface CustomerNotification {
   created_at: string;
 }
 
+/** Trạng thái tải (đèn/quạt/rèm/điều hoà) trước hoặc sau một lần đổi; level = % mở rèm hoặc nhiệt độ đặt điều hoà, null = không áp dụng/chưa biết. */
+export interface ApplianceLoadState {
+  power: boolean | null;
+  level: number | null;
+}
+
+/** Nhiệt độ/độ ẩm do Node báo trong chính gói telemetry đã làm đổi trạng thái (null = gói không có). */
+export interface ApplianceClimate {
+  temperature: number | null;
+  humidity: number | null;
+}
+
+/**
+ * Trạng thái một tải thật của Node đổi, thấy qua telemetry (bấm trên màn hình Gateway/Node đi thẳng ESP-NOW nên server
+ * chỉ biết sau ~1 s; hoặc telemetry về trước ack của lệnh server). Phát từ devices/domain/appliance-sync, nghe ở
+ * control (ghi user_behavior_logs).
+ */
+export interface ApplianceChange {
+  device_id: number;
+  home_id: number;
+  room_id: number | null;
+  appliance: "lamp" | "fan" | "curtain" | "ac";
+  is_simulated: boolean;
+  before: ApplianceLoadState;
+  after: ApplianceLoadState;
+  /** Thời điểm server nhận telemetry (ISO). */
+  at: string;
+  climate: ApplianceClimate | null;
+}
+
 /** Tóm tắt một ảnh chụp camera gửi qua bus/WebSocket `camera_snapshot` và API danh sách ảnh (không lộ khoá lưu trữ). */
 export interface CameraSnapshotSummary {
   id: number;

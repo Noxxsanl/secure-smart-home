@@ -9,7 +9,7 @@ import type { TelemetryRange, TelemetrySeries } from "../domain/telemetry.types"
 // `key` chỉ nhận đúng hai literal của kiểu union (không phải input người dùng) nên nối thẳng vào SQL an toàn.
 // Làm tròn 2 chữ số bằng ROUND thay vì ép NUMERIC(8,2): số lớn bất thường trong payload không làm cả truy vấn
 // lỗi "numeric field overflow".
-function jsonNumberSql(key: "temperature" | "humidity"): string {
+export function jsonNumberSql(key: "temperature" | "humidity"): string {
   const path = `payload->'${key}'`;
   return `CASE WHEN jsonb_typeof(${path}) = 'number' THEN ROUND((payload->>'${key}')::numeric, 2) ELSE NULL END`;
 }

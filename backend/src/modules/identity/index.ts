@@ -11,6 +11,7 @@ export {
   findCustomerByTag,
   getCustomerByUserId,
   listRecentActivations,
+  loadCustomerAuthContext,
   requireDashboard,
   requireMobileUser,
   requirePortalUser,

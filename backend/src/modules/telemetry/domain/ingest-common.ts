@@ -3,6 +3,7 @@
 // nên không thể lệch nhau về cách cập nhật trạng thái thiết bị.
 import { isValidAcCodes, isValidAcSetpoint, markDeviceSeen, parseReportedCurtainPos, syncNodeAppliances } from "../../devices";
 import type { NodeApplianceReport } from "../../devices";
+import { parseClimateValue } from "./climate-range";
 
 /** Bật/tắt trong số đo: 0/1 hoặc boolean; khác → null (bỏ qua). */
 function parseOnOff(value: unknown): boolean | null {
@@ -24,7 +25,12 @@ function parseCurtainOpen(value: unknown): boolean | null {
  */
 export function parseApplianceReport(data: unknown): NodeApplianceReport {
   const raw = typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+  // Nhiệt độ/độ ẩm của chính gói này → ngữ cảnh cho nhật ký hành vi khi trạng thái tải đổi (appliance_changed)
+  // (miền chung ở climate-range.ts: ngoài dải SHT31 → null, không làm hỏng dòng hành vi NUMERIC(5,2))
+  const temperature = parseClimateValue("temperature", raw.temperature);
+  const humidity = parseClimateValue("humidity", raw.humidity);
   return {
+    climate: temperature === null && humidity === null ? null : { temperature, humidity },
     power: {
       lamp: parseOnOff(raw.lamp),
       fan: parseOnOff(raw.fan),

@@ -17,10 +17,12 @@ import { isOnline } from "../../../../shared/time";
 import type { CustomerChannel } from "../../../../shared/types/domain";
 import { logEvent } from "../../../audit";
 import { assertHomeWritable } from "../../../homes";
+import { getRoomClimate } from "../../../telemetry";
 import {
   getDeviceRow,
   getGatewaySigner,
   learnSlotMask,
+  lockDeviceLoadState,
   CURTAIN_POS_MAX,
   CURTAIN_POS_MIN,
   parseLearnAction,
@@ -35,34 +37,15 @@ import {
   toDeviceStateEvent,
 } from "../../../devices";
 import type { CustomerDevice, DeviceCommandAction, DeviceRow } from "../../../devices";
-import type { BehaviorSource } from "../../domain/behavior.types";
+import { behaviorSourceOf, deriveBehaviorAction, powerLabel } from "../../domain/behavior-derive";
+import type { LoadState } from "../../domain/behavior.types";
 import { gatewayBaseTopic } from "../../domain/command-topics";
-import type {
-  CommandChannel,
-  CommandSource,
-  CommandSummary,
-  SendDeviceCommandInput,
-  SendDeviceCommandResult,
-} from "../../domain/command.types";
+import type { CommandSummary, SendDeviceCommandInput, SendDeviceCommandResult } from "../../domain/command.types";
 import { ackTimeoutMs, registerPending, type AckOutcome } from "../../domain/pending-acks";
 import { getSimulatedHandler, runSimulated } from "../../domain/simulated-command";
 import { isCommandBrokerConnected, publishJson } from "../../infrastructure/command-mqtt.client";
-import { logBehavior } from "../../infrastructure/behavior-log.repository";
+import { recordBehavior } from "../../infrastructure/behavior-log.repository";
 import { insertCommandRow, markCommand, markCommandAcked } from "../../infrastructure/device-command.repository";
-
-function defaultBehaviorSource(source: CommandSource, channel: CommandChannel): BehaviorSource {
-  if (source === "automation") return "automation";
-  if (source === "operator" || channel === "dashboard") return "dashboard";
-  return channel === "mobile" ? "mobile" : "manual";
-}
-
-function powerLabel(on: boolean | null): string | null {
-  return on === null ? null : on ? "ON" : "OFF";
-}
-
-function tempLabel(setpoint: number | null): string | null {
-  return setpoint === null ? null : `${setpoint}°C`;
-}
 
 async function runMqttDeviceCommand(device: DeviceRow, action: DeviceCommandAction, commandUuid: string, rowId: number): Promise<AckOutcome> {
   if (device.gateway_device_id === null || device.gateway_uid === null || device.home_id === null) {
@@ -205,10 +188,23 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
   // power_state + ac_setpoint/curtain_pos (bảng devices, qua facade) + device_commands → acked: cùng thành công hoặc cùng huỷ (invariant 9)
   // learn_*: ack ok = Node đã học + lưu mã xong → chỉ bật bit của ô đó trong ac_codes; KHÔNG đụng power_state/ac_setpoint
   // (học mã không bật/tắt điều hoà thật, nên bỏ qua `power` trong ack)
+  // `lockedBefore`: trạng thái tải đọc kèm KHOÁ dòng devices ngay trước khi ghi — "trạng thái trước" của nhật ký hành vi.
+  // Không dùng `device` đọc đầu hàm (có thể cũ vì telemetry/bấm tại chỗ chen vào trong lúc chờ ack). Dòng devices là trọng
+  // tài duy nhất: appliance-sync cũng khoá cùng cách, nên telemetry đã đổi trạng thái trước thì ở đây before == after
+  // → không ghi (dòng do telemetry ghi sẽ được gán cho lệnh này vì lệnh chưa có log); ngược lại ta đổi trước thì
+  // telemetry sau đó không thấy thay đổi.
+  let lockedBefore = null as LoadState | null; // gán trong closure → ép kiểu để TS không thu hẹp thành null
   await withTransaction(async (conn) => {
     if (learnSlot !== null) {
       await setDeviceAcCodesBit(device.id, learnSlotMask(learnSlot), conn);
     } else {
+      const locked = await lockDeviceLoadState(device.id, conn);
+      if (locked) {
+        lockedBefore = {
+          power: locked.power,
+          level: device.appliance === "curtain" ? locked.curtainPos : device.appliance === "ac" ? locked.acSetpoint : null,
+        };
+      }
       await setDevicePowerState(device.id, newPower, conn);
       if (setpoint !== null) await setDeviceAcSetpoint(device.id, setpoint, conn);
       if (newCurtainPos !== null) await setDeviceCurtainPos(device.id, newCurtainPos, conn);
@@ -224,32 +220,53 @@ export async function sendDeviceCommand(input: SendDeviceCommandInput): Promise<
   const stateEvent = toDeviceStateEvent(updated);
   if (stateEvent) eventBus.emit("device_state", stateEvent);
 
-  // Học mã remote không phải hành vi dùng thiết bị → không ghi user_behavior_logs (khỏi làm bẩn gợi ý thói quen)
+  // Đường 1 của nhật ký hành vi: lệnh từ server đã ack ok. Học mã remote không phải hành vi dùng thiết bị → không ghi.
+  // Ghi đúng 1 dòng khi trạng thái tải ĐỔI THẬT (deriveBehaviorAction: before = giá trị VỪA KHOÁ trong transaction ở trên,
+  // after = trạng thái vừa ghi) — bật khi đã bật (kể cả vì telemetry của Node đã báo "đã bật" trước ack) thì không có
+  // dòng ở đây; dòng đó do đường 2 (record-behavior.listener) ghi và gán cho lệnh này. device_command_id = rowId + unique
+  // index là lưới an toàn nếu hai đường vẫn cùng ghi.
   if (learnSlot === null) {
-    await logBehavior({
-      homeId: device.home_id,
-      timezone: device.home_timezone ?? "Asia/Ho_Chi_Minh",
-      userId: input.issuedBy,
-      roomId: device.room_id,
-      deviceId: device.id,
-      deviceCategory: device.category,
-      // set_pos không có action riêng trong nhật ký hành vi (gợi ý thói quen chỉ hiểu bật/tắt): N > 0 → TURN_ON, N = 0 → TURN_OFF
-      action:
-        setpoint !== null
-          ? "SET_TEMP"
-          : curtainTarget !== null
-          ? curtainTarget > 0
-            ? "TURN_ON"
-            : "TURN_OFF"
-          : input.action === "turn_on"
-          ? "TURN_ON"
-          : "TURN_OFF",
-      previousState:
-        setpoint !== null ? tempLabel(device.ac_setpoint) : powerLabel(device.power_state === null ? null : toBool(device.power_state)),
-      newState: setpoint !== null ? tempLabel(setpoint) : powerLabel(newPower),
-      source: input.behaviorSource ?? defaultBehaviorSource(input.source, input.channel),
-      at: ackedAt,
-    });
+    // Không khoá được (thiết bị vừa bị xoá) → lùi về `device` đọc đầu hàm
+    const before: LoadState = lockedBefore ?? {
+      power: device.power_state === null ? null : toBool(device.power_state),
+      level: device.appliance === "curtain" ? device.curtain_pos : device.appliance === "ac" ? device.ac_setpoint : null,
+    };
+    // level sau: khi lệnh không đụng level (turn_on/turn_off điều hoà, đèn…) giữ level hiện có (giá trị vừa khoá)
+    const after: LoadState = {
+      power: newPower,
+      level:
+        device.appliance === "curtain"
+          ? newCurtainPos ?? before.level
+          : device.appliance === "ac"
+          ? setpoint ?? before.level
+          : null,
+    };
+    const behaviorAction = deriveBehaviorAction(device.appliance, before, after);
+    if (behaviorAction !== null) {
+      // Khí hậu phòng: số đo mới nhất ≤ 10 phút của cảm biến cùng phòng (lệnh web không mang số đo kèm theo)
+      const climate = await getRoomClimate(device.room_id, ackedAt);
+      await recordBehavior({
+        homeId: device.home_id,
+        timezone: device.home_timezone ?? "Asia/Ho_Chi_Minh",
+        userId: input.issuedBy,
+        roomId: device.room_id,
+        deviceId: device.id,
+        deviceCategory: device.category,
+        appliance: device.appliance,
+        action: behaviorAction,
+        previousState: powerLabel(before.power),
+        newState: powerLabel(after.power),
+        levelBefore: before.level,
+        levelAfter: after.level,
+        temperature: climate.temperature,
+        humidity: climate.humidity,
+        deviceCommandId: rowId,
+        isSimulated: device.is_simulated,
+        // behaviorSource (automation: 'ai_suggested' cho rule sinh từ gợi ý) thắng nguồn suy từ lệnh
+        source: input.behaviorSource ?? behaviorSourceOf(input.source, input.channel),
+        at: ackedAt,
+      });
+    }
   }
   await logEvent({
     ...failureBase,

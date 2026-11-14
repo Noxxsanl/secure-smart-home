@@ -11,7 +11,7 @@
 >
 > Tài liệu liên quan: [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) §9–10 (API và MQTT đích), [IoT Node Network](firmware/IOT_NODE_NETWORK.md) (phần cứng và giao thức từng chặng), [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) §15 (API provisioning), [Bảo mật](SECURITY_ARCHITECTURE.md), `backend/src/modules/README.md` (quy ước code).
 >
-> Cập nhật: 2026-10-26.
+> Cập nhật: 2026-10-26; hẹn giờ một lần và dữ liệu hành vi cho AI (mục 5.1): 2026-11-14.
 
 ---
 
@@ -199,6 +199,9 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 | Camera | GET | `/devices/:deviceId/snapshots?limit=` | `view` | Ảnh gần đây của camera (`limit` 1–50, mặc định 20; mới nhất trước): `{device_id, items: [{id, trigger: "motion"\|"request", size_bytes, captured_at}]}`. Thiết bị không phải camera → 404. Chỉ liệt kê ảnh chụp khi camera đang ở nhà hiện tại (`home_id` ảnh = `home_id` camera) |
 | | GET | `/snapshots/:snapshotId/image` | `view` | Tải ảnh JPEG (`Cache-Control: private, max-age=86400, immutable`); không tồn tại / không có quyền / file mất / ảnh chụp ở nhà khác với nhà hiện tại của camera → 404 (ảnh chỉ thuộc về nhà lúc chụp). Web dùng thẳng `/api/portal/snapshots/<id>/image` trong `<img src>` (cookie `sh_user`), mobile gửi `Authorization: Bearer` |
 | | POST | `/devices/:deviceId/commands` | `control_device` | Bật/tắt (`turn_on` / `turn_off`); điều hòa (`appliance = "ac"`) thêm `{action: "set_temp", temperature: 16..30}` → MQTT `set_temp_<NN>`; học mã remote IR `{action: "learn_code", slot: "off" \| 16..30}` → MQTT `learn_off` / `learn_t<NN>` (chỉ điều hòa, khác → 400 `NOT_CONTROLLABLE`; ack ok = đã học xong, chỉ bật bit trong `ac_codes`, không đổi `power`/`ac_setpoint`). rèm (`appliance = "curtain"`) thêm `{action: "set_pos", position: 0..100}` (số nguyên; web và màn hình Node/Gateway dùng 0 = đóng, 50, 100) → MQTT `set_pos_<N>` (không đệm số 0; chỉ rèm, khác → 400 `NOT_CONTROLLABLE`; `position` thiếu/không phải số nguyên/ngoài 0..100 → 400 `INVALID_INPUT`; ack ok → `curtain_pos = N`, `power = ack.power ?? N > 0`; `turn_on` trên rèm → `curtain_pos = 100`, `turn_off` → 0). Chờ ack ≤ 5 giây (`learn_*`: ≤ 15 giây — Node chờ người dùng bấm remote tối đa 10 giây). `CustomerDevice` và sự kiện WebSocket `device_state` có `appliance`, `ac_setpoint`, `ac_codes` (bitmask mã IR đã học: bit 0 = TẮT, bit `t−15` = BẬT ở t°C; `null` = chưa học/chưa biết), `curtain_pos` (rèm: % mở 0..100, 0 = đóng; `null` = chưa biết hoặc không phải rèm) |
+| Hẹn giờ | GET | `/homes/:homeId/schedules?scope=upcoming\|history&limit=` | `view` (thành viên nhà) | Lịch hẹn giờ một lần của nhà (`scope` mặc định `upcoming`; `limit` 1–100, mặc định 50) → `{items: Schedule[]}`. GUEST chỉ thấy lịch do mình tạo. Chi tiết: "Hẹn giờ một lần" bên dưới |
+| | POST | `/homes/:homeId/schedules` | `control_device` (thiết bị) | Tạo lịch (`ScheduleInput`) → 201 `Schedule` |
+| | POST | `/schedules/:scheduleId/cancel` | người tạo hoặc OWNER | Huỷ lịch còn `scheduled` → 200 `Schedule` |
 | Tự động hoá | GET | `/homes/:homeId/automations` | `view_automation` | Danh sách luật |
 | | POST | `/homes/:homeId/automations` | `create_automation` | Tạo luật IF/THEN |
 | | PATCH | `/automations/:ruleId` | `create_automation` (+ chủ luật hoặc `manage_any_rule`) | Sửa, bật/tắt luật |
@@ -241,6 +244,63 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 - **Phiên do Backend làm chủ** (chỉ trong RAM, không ghi đĩa/DB): người xem đầu tiên mở → tạo `session_id` (UUID v4) + gửi MQTT `live_start` (mục 9.1); người xem cuối rời → chờ 10 giây rồi `live_stop` và đóng luồng lên. Chưa có luồng sau 10 giây → gửi lại `live_start` 1 lần.
 - **Audit:** `CAMERA_LIVE_VIEW_START` khi qua kiểm quyền, `CAMERA_LIVE_VIEW_END` kèm `{duration_s, reason}`.
 - Web: `frontend/packages/modules/devices/src/features/camera-live/`; dev nối thẳng backend bằng `NEXT_PUBLIC_LIVE_WS_ORIGIN` ([Lên Server](guides/LEN_SERVER.md) §6, "Xem trực tiếp camera trên web").
+
+#### Hẹn giờ một lần
+
+Module `modules/schedules` (cập nhật 2026-11-14), gắn qua móc `customer` nên có ở cả `/api/portal` (kênh ghi nhận `web`) và `/api/mobile` (`mobile`). Chỉ cho **relay có `appliance` ∈ {lamp, fan, curtain, ac}**; chạy đúng **một lần**, không lặp (lặp lại là việc của Automation). Bảng: `scheduled_actions` ([Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8).
+
+**`ScheduleInput`** (`POST /homes/:homeId/schedules`):
+
+```json
+{ "device_id": 41,
+  "action": "turn_on | turn_off | set_temp | set_pos",
+  "temperature": 26, "position": 50,
+  "when": { "at": "20:00", "date": "2026-11-15" } }
+```
+
+- `action` theo loại: đèn/quạt `turn_on`, `turn_off` · rèm `turn_on`, `turn_off`, `set_pos` (`position` ∈ {0, 50, 100}) · điều hoà `turn_on`, `turn_off`, `set_temp` (`temperature` 16–30). Không hợp loại hoặc không phải relay có `appliance` ở trên → 400 `NOT_CONTROLLABLE`.
+- `when` có **đúng một** trong hai: `{at: "HH:MM", date?: "YYYY-MM-DD"}` hoặc `{after_minutes: 1..10080}`. Quy đổi `run_at` theo `smart_homes.timezone` của nhà (hàm thuần `resolveWhen`, `modules/schedules/domain/when.ts`): `at` không `date` = hôm nay lúc HH:MM, đã qua (< now + 30 giây) thì sang ngày mai; `at` + `date` = đúng giờ đó, giây = 0; `after_minutes` = now + N phút. Bắt buộc `now + 30 giây ≤ run_at ≤ now + 7 ngày`.
+- Thứ tự kiểm khi tạo: `requireDeviceAccess(control_device)` (404/403 như API lệnh) → thiết bị không thuộc `:homeId` → 404 → nhà tạm ngưng → 409 `HOME_SUSPENDED` → loại thiết bị/thao tác → 400 `NOT_CONTROLLABLE` → nhà đã có ≥ 50 lịch `scheduled` → 409 `SCHEDULE_LIMIT`. Thiếu trường → 400 `MISSING_FIELDS`, sai giá trị → 400 `INVALID_INPUT`. **Không** kiểm online lúc tạo (lúc chạy mới kiểm).
+- Huỷ: lịch không có / không thuộc quyền / GUEST không phải người tạo → cùng 404 "Schedule not found"; không phải người tạo và không phải OWNER → 403; `status ≠ scheduled` (kể cả runner vừa giành lịch) → 409 `SCHEDULE_NOT_CANCELLABLE`. Huỷ được cả khi nhà tạm ngưng.
+- Audit: `SCHEDULE_CREATED`, `SCHEDULE_CANCELLED` (category `automation`).
+
+**`Schedule`** (snake_case): `id`, `home_id`, `timezone`, `device_id`, `device_name`, `room_name`, `appliance` (3 trường đầu của thiết bị là `null` khi thiết bị đã xoá; `room_name` `null` khi chưa gán phòng), `action` (`turn_on|turn_off|set_temp|set_pos`), `temperature`, `position` (`null` nếu không áp dụng), `action_label` (backend sinh, tiếng Việt, không chứa tên phòng: "Bật Đèn", "Mở Rèm 50%", "Đặt Điều hoà 26°C"), `run_at` (ISO UTC), `status`, `origin` (`user|ai_agent`), `channel` (`web|mobile`), `created_by_user_id`, `created_by_name`, `error_code`, `executed_at`, `cancelled_at`, `created_at`, `can_cancel` (`status = scheduled` và người gọi là người tạo hoặc OWNER).
+
+- `status`: `scheduled` → `running` → `done|skipped|failed|missed`, hoặc `cancelled`. Tab "sắp chạy" = `scheduled`+`running` (xếp theo `run_at` tăng), tab "lịch sử" = các trạng thái còn lại (mới nhất trước).
+- `error_code`: `DEVICE_OFFLINE`, `TIMEOUT`, `COMMAND_FAILED`, `DEVICE_BLOCKED`, `HOME_SUSPENDED`, `NOT_CONTROLLABLE`, `NO_DEVICE`, `ACCESS_REVOKED`, `ALREADY_IN_STATE`, `INTERRUPTED`, `UNKNOWN`.
+
+**Runner** (worker `scheduleRunner`, `modules/schedules/schedules.module.ts`): tick 5 giây, không chạy chồng, lỗi bắt tại chỗ. Lịch `running` quá 10 phút (backend tắt giữa chừng) → `failed`/`INTERRUPTED`; việc dọn chạy lúc khởi động và mỗi ~1 phút, giả định chỉ một tiến trình backend. Mỗi tick giành tối đa 20 lịch tới hạn theo thứ tự `(run_at, id)` bằng một câu `UPDATE … FOR UPDATE SKIP LOCKED` rồi xử lý từng lịch theo thứ tự:
+
+1. Quá hạn > 5 phút (backend tắt đè qua giờ) → `missed`, không chạy bù.
+2. Thiết bị đã xoá hoặc không còn thuộc nhà → `failed`/`NO_DEVICE`.
+3. Người tạo bị khoá hoặc mất quyền `control_device` (kể cả GUEST hết hạn) → `cancelled`/`ACCESS_REVOKED`, không thông báo.
+4. Thiết bị đã ở trạng thái đích → `skipped`/`ALREADY_IN_STATE`, không gửi lệnh.
+5. Còn lại gọi lại đúng `sendDeviceCommand` của lệnh tay (kênh `system`, `source = schedule`, hoặc `ai_agent` khi `origin = ai_agent`) → `done` kèm `device_command_id`; `HttpError` → `failed` với mã lỗi của nó nếu nằm trong 11 mã trên (`NOT_FOUND` → `NO_DEVICE`, mã khác → `UNKNOWN`). Lệnh tự ghi `device_commands`, audit và hành vi như lệnh tay, runner không ghi trùng.
+
+Thông báo cho **người tạo** (`related_device_id` = thiết bị): `SCHEDULE_DONE` (success), `SCHEDULE_SKIPPED` (info), `SCHEDULE_FAILED` (warning, kèm lý do tiếng Việt), `SCHEDULE_MISSED` (warning). Đi qua cơ chế thông báo thường: Mobile nhận tin WebSocket `notification` (mục 6); web không có WebSocket, chỉ poll `/notifications` mỗi 15 giây (kể cả khi tab ẩn, để popup trình duyệt vẫn chạy).
+
+`device_commands.source` (và `CommandSource` trong code) gồm `user`, `automation`, `operator`, **`schedule`**, **`ai_agent`**; `ai_agent` chừa cho trợ lý AI ([Đề xuất AI Agent](proposals/DE_XUAT_AI_AGENT.md)), chưa có nơi nào ghi.
+
+#### Dữ liệu hành vi cho AI
+
+Mục tiêu: **mỗi lần trạng thái tải (đèn, quạt, rèm, điều hoà) đổi = đúng 1 dòng `user_behavior_logs`**, bất kể đổi từ đâu ([PRD](PRD_SMART_HOME.md) FR-7.3; [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.12). Không có API đọc riêng; dữ liệu cho gợi ý thói quen và cho việc huấn luyện sau này.
+
+| Đường | Khi nào | Nguồn (`source`) | Người (`user_id`) |
+|---|---|---|---|
+| 1. Lệnh từ server | `sendDeviceCommand` nhận ack ok (trừ `learn_*`) | `automation` / `schedule` / `ai_agent` / `dashboard` (Operator hoặc kênh dashboard) / `mobile` / `manual` (web khách); `ai_suggested` của Automation vẫn thắng | `issued_by` |
+| 2. Telemetry của Node | Bấm tại chỗ (màn hình Gateway/Node đi thẳng ESP-NOW, server chỉ thấy qua telemetry), hoặc telemetry về trước ack | Gán cho lệnh `device_commands` cùng thiết bị chưa có dòng log (xem "Chống trùng" dưới) → nguồn của lệnh đó; không khớp → `local` | Của lệnh khớp, hoặc `NULL` |
+
+- Đường 2 phát sự kiện `appliance_changed` từ `syncNodeAppliances` (`modules/devices/domain/appliance-sync.ts`) khi power đổi, rèm đổi `curtain_pos` hoặc điều hoà đổi `ac_setpoint` (không tính `ac_codes`, không tính việc chỉ vừa online lại); listener ở `modules/control/features/record-behavior/`. Vì đi qua `telemetry/domain/ingest-common.ts` dùng chung nên HTTP và MQTT ghi giống nhau (bất biến 4). Hạn chế: đường 2 không biết lệnh `ai_suggested` nên ghi `automation`.
+- **Chống trùng:** dòng `devices` là trọng tài. Cả đường lệnh (trong transaction ack) lẫn đường telemetry đều khoá dòng (`SELECT … FOR UPDATE`) rồi mới đọc trạng thái cũ và ghi trạng thái mới; chỉ bên thực sự làm đổi trạng thái mới ghi dòng hành vi, hai gói telemetry đồng thời được tuần tự hoá bằng chính khoá này. Đường telemetry gán nguồn cho lệnh chưa có dòng log nếu lệnh có `issued_at ≤ lúc nhận + 2 s` và thuộc một trong các dạng: `pending`/`sent` phát ra trong 20 s trước (quá 20 s coi là lệnh mồ côi); `acked` trong 3 s; `timeout` trong 20 s. Dòng từ lệnh mang `device_command_id`; unique index một phần trên cột đó + `ON CONFLICT DO NOTHING` chỉ là lưới an toàn. Lệnh không đổi trạng thái (bật khi đã bật) = không có dòng; lệnh timeout không sinh dòng ở đường lệnh, nhưng nếu telemetry chứng tỏ tải đã đổi thì đường telemetry ghi dòng gắn `device_command_id` của lệnh đó. Việc ghi **không bao giờ ném lỗi** làm hỏng lệnh.
+- **Hành động:** `TURN_ON`, `TURN_OFF`, `SET_TEMP`, `SET_POS` (rèm) suy từ cặp trạng thái trước/sau (`deriveBehaviorAction`, `modules/control/domain/`). Điều hoà đang tắt đặt 26 °C = một dòng `TURN_ON` có `level_after = 26`. `previous_state`/`new_state` là `ON`/`OFF` theo power; mức (vị trí rèm, nhiệt độ đặt) nằm ở `level_before`/`level_after`.
+- **Ngữ cảnh khí hậu:** `temperature`/`humidity` của phòng lúc đổi — lấy từ chính telemetry của Node (có SHT31) nếu có, không thì từ cảm biến cùng phòng trong 10 phút gần nhất (`getRoomClimate`, facade telemetry); không có → `NULL`. Chỉ nhận giá trị trong miền hợp lệ (nhiệt độ −40…125 °C, độ ẩm 0…100 %); ngoài miền → `NULL` trong dòng hành vi và bị bỏ qua khi rollup.
+- Mô phỏng: `is_simulated` copy từ thiết bị; gợi ý thói quen (`recommendations`) chỉ đọc nguồn `mobile`, `manual`, `local`.
+
+#### Khí hậu dài hạn và xuất dữ liệu
+
+`sensor_data` chỉ giữ `TELEMETRY_RETENTION_DAYS` = 8 ngày nên worker `telemetryRollup` (module `telemetry`) tổng hợp nhiệt độ/độ ẩm theo giờ vào **`telemetry_history`** (`bucket_type = hourly`: avg/min/max/số mẫu theo thiết bị và chỉ số; chạy ngay khi khởi động lấp 7 ngày, rồi mỗi giờ lấp 3 giờ; chỉ giờ đã trọn).
+
+`npm run export:behavior -- --home <id> [--from YYYY-MM-DD --to YYYY-MM-DD] [--include-simulated]` (`backend/src/scripts/export-behavior.ts`, mặc định 30 ngày gần nhất, UTC, bỏ dòng mô phỏng) ghi 2 file CSV vào `backend/storage/exports/` (gitignore): `behavior_home<id>_<from>_<to>.csv` từ view `v_behavior_training` (thêm `seconds_since_prev_change`) và `climate_home<id>_<from>_<to>.csv` từ `telemetry_history`. Không có tên, email hay secret.
 
 ### 5.2. Dự kiến
 
@@ -479,6 +539,7 @@ Backend hiện gửi `turn_on`/`turn_off` (cộng `set_temp_*`, `learn_*` cho đ
 | Gắn phần cứng thật cho khách | Dashboard `POST /smart-homes/register-gateway` (nhà đã có chủ ngay) → WS `home_changed`; gateway ghi `cloud/home_id` vào NVS | Đã có (console: trang Đăng ký Gateway) |
 | Telemetry | Node ESP-NOW `TELEMETRY` → MQTT `gateway/+/data` (hoặc `POST /api/device/data`) → WS `telemetry` | Backend đã có; ESP-NOW dự kiến |
 | Bật/tắt thiết bị | `POST /devices/:id/commands` → MQTT `.../command` → ESP-NOW `CMD` → `CMD_ACK` → MQTT `.../command/ack` → HTTP 200 + WS `device_state` | Backend đã có; firmware dự kiến |
+| Hẹn giờ một lần | `POST /homes/:id/schedules` → (runner 5 giây, khi tới `run_at`) `sendDeviceCommand` như bật/tắt thiết bị (kèm WS `device_state` cho Mobile) → thông báo `SCHEDULE_*` (Mobile qua WS `notification`; web poll `/notifications` 15 giây); huỷ: `POST /schedules/:id/cancel` | Backend + web user đã hiện thực (2026-11-14); chưa thử trên phần cứng |
 | Thao tác trên màn hình Gateway | ESP-NOW `CMD`/`CMD_ACK` → MQTT `.../status` (`source: gateway_local`) → WS `device_state` | Dự kiến |
 | Chuyển động → ảnh | ESP-NOW `EVENT` → `POST /local/camera/snapshot` → `POST /api/device/camera/snapshot` → MQTT `camera/event` → thông báo `CAMERA_MOTION` + WS `camera_snapshot` | Backend đã có (module `camera`); firmware Gateway đã gửi |
 | Xem trực tiếp trên Gateway | `GET /stream` (Camera) → hiển thị LCD | Đã chạy trên board (2026-11-08, VGA q=12 ≈ 3,3 fps); pipeline 2 task + `esp_new_jpeg` (2026-11-13) đã build, chưa đo lại trên board |

@@ -19,6 +19,12 @@ export interface TelemetrySeries {
   latest: Reading | null;
 }
 
+/** Nhiệt độ (°C) và độ ẩm (%) gần nhất của một phòng; chỉ số không có số đo trong cửa sổ → null. */
+export interface RoomClimate {
+  temperature: number | null;
+  humidity: number | null;
+}
+
 export interface TelemetryIngestInput {
   /** devices.id của sensor đã xác thực. */
   sensorDbId: number;

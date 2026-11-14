@@ -7,6 +7,8 @@ import { relativeTime } from "@shh/utils";
 import type { Severity } from "@shh/api-client/portal";
 import { HomeGate } from "@shh/auth";
 import { useHomeNotifications } from "../../api/useHomeNotifications";
+import { useBrowserNotificationPermission } from "../../api/useBrowserNotify";
+import BrowserNotificationToggle from "../../ui/BrowserNotificationToggle";
 
 type Filter = Severity | "all" | "unread";
 
@@ -22,6 +24,7 @@ const FILTERS: { value: Filter; label: string }[] = [
 function Notifications() {
   const { notifications, unreadCount, isLoading, error, markRead, markAllRead, refresh } = useHomeNotifications();
   const [filter, setFilter] = useState<Filter>("all");
+  const browser = useBrowserNotificationPermission();
 
   const filtered = notifications.filter((n) =>
     filter === "all" ? true : filter === "unread" ? !n.is_read : n.severity === filter
@@ -45,6 +48,8 @@ function Notifications() {
           </button>
         )}
       </div>
+
+      <BrowserNotificationToggle state={browser.state} onEnable={() => void browser.request()} />
 
       <div className="flex flex-wrap items-center gap-1.5">
         {FILTERS.map(({ value, label }) => (

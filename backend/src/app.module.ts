@@ -12,6 +12,7 @@
 //   /mobile/auth/**, /mobile/** – app khách hàng (Bearer + refresh token); /mobile/ws là WebSocket (module realtime)
 //   WebSocket (không qua router Express — đăng ký vào core/ws/upgrade-router.ts ở main.ts): /mobile/ws (realtime),
 //   /device/camera/live (uplink gateway, HMAC) và /portal/cameras/:deviceId/live (viewer web, cookie sh_user) (camera)
+//   /portal|mobile/homes/:homeId/schedules, /schedules/:id/cancel – hẹn giờ một lần (module schedules)
 //   /service/**                 – dịch vụ nội bộ (AI Agent): Bearer SERVICE_API_TOKEN; nginx chặn từ bên ngoài
 // Router /auth LUÔN mount trước guard của cùng kênh, nếu không login sẽ bị chặn 401.
 import { Router } from "express";
@@ -37,6 +38,7 @@ import { legacyModule } from "./modules/legacy";
 import { notificationsModule } from "./modules/notifications";
 import { otaModule } from "./modules/ota";
 import { recommendationsModule } from "./modules/recommendations";
+import { schedulesModule } from "./modules/schedules";
 import { simulatorModule } from "./modules/simulator";
 import { statsModule } from "./modules/stats";
 import { telemetryModule } from "./modules/telemetry";
@@ -53,6 +55,7 @@ export const APP_MODULES: readonly AppModule[] = [
   cameraModule,
   controlModule,
   automationModule,
+  schedulesModule,
   recommendationsModule,
   notificationsModule,
   otaModule,

@@ -23,7 +23,7 @@ frontend/
 │   ├── admin/                  Dashboard, Customers, Smart Homes, Đăng ký Gateway, Gateways, Devices, OTA & Firmware,
 │   │                           AI Usage, Notification Center, Logs, Team / Operator Access (chỉ Admin)
 │   ├── operator/               như Admin nhưng không có Team/Operator Access, chỉ 5 loại log
-│   └── user/                   cổng khách hàng: Tổng quan, Phòng, Thiết bị, Tự động hoá, Thông báo, Thành viên, …
+│   └── user/                   cổng khách hàng: Tổng quan, Phòng, Thiết bị, Hẹn giờ, Tự động hoá, Thông báo, Thành viên, …
 └── packages/
     ├── config/                 @shh/config      tsconfig.base.json
     ├── utils/                  @shh/utils       cn, định dạng ngày/giờ/nhiệt độ, hook nhỏ (debounce, now), parseRouteId
@@ -38,8 +38,9 @@ frontend/
         │                       thành viên, lời mời, kích hoạt (khách)
         ├── devices/            thiết bị, gateway, bộ mô phỏng · danh sách, chi tiết, điều khiển (khách)
         ├── telemetry/          biểu đồ/bảng số đo cảm biến
-        ├── automation/         quy tắc tự động hoá + gợi ý thói quen
-        ├── notifications/      trung tâm thông báo (console), thông báo theo nhà (khách)
+        ├── automation/         quy tắc tự động hoá + gợi ý thói quen · hẹn giờ một lần (khách: trang /schedules +
+        │                       mục "Hẹn giờ" ở chi tiết thiết bị)
+        ├── notifications/      trung tâm thông báo (console), thông báo theo nhà (khách) + popup trình duyệt khi tab ẩn
         ├── audit/              log theo loại + tab Log của Smart Home
         ├── ota/                firmware + triển khai OTA (tab OTA & Firmware của Admin/Operator)
         ├── users/              khách hàng, Team, quyền truy cập nhà của Operator
@@ -96,7 +97,7 @@ export default function Page() {
 }
 ```
 
-Các slot hiện có: thiết bị ← số đo (`renderTelemetry`, console + khách); chi tiết thiết bị của khách ← camera (`renderCamera`: `HomeCameraLive` xem trực tiếp + `HomeCameraSnapshots` ảnh chụp); gateway ← bảng log và Smart Home ← tab Log (`renderLogs`); Tổng quan/Phòng của khách ← `DeviceGrid` (`renderDevices`); Thành viên ← lời mời của tôi (`invitationsSlot`); màn hình "chưa có nhà" của `HomeGate` ← lời mời (`CurrentHomeProvider noHomeSlot`, ở `apps/user/src/app/(private)/layout.tsx`). Trang không cần ghép thì chỉ re-export: `export { DevicesPage as default } from "@shh/devices";`.
+Các slot hiện có: thiết bị ← số đo (`renderTelemetry`, console + khách); chi tiết thiết bị của khách ← camera (`renderCamera`: `HomeCameraLive` xem trực tiếp + `HomeCameraSnapshots` ảnh chụp) và ← hẹn giờ (`renderSchedule`: `DeviceSchedule` của `@shh/automation`, chỉ relay đèn/quạt/rèm/điều hoà mà tài khoản điều khiển được); gateway ← bảng log và Smart Home ← tab Log (`renderLogs`); Tổng quan/Phòng của khách ← `DeviceGrid` (`renderDevices`); Thành viên ← lời mời của tôi (`invitationsSlot`); màn hình "chưa có nhà" của `HomeGate` ← lời mời (`CurrentHomeProvider noHomeSlot`, ở `apps/user/src/app/(private)/layout.tsx`). Trang không cần ghép thì chỉ re-export: `export { DevicesPage as default } from "@shh/devices";`.
 
 **Lựa chọn có chủ đích** (để giữ R3/R4 mà không chép code):
 
@@ -162,6 +163,11 @@ Trang **Đăng ký Gateway** (`/gateways/register`, `@shh/homes` → `GatewayReg
 ### Tab AI Usage (Admin + Operator xem; Admin sửa giá, ngân sách, tỷ giá)
 
 `/ai-usage` (`@shh/ai` → `AiUsagePage`) đọc `/api/dashboard/ai-usage/**`. Số liệu đến từ AI Agent qua `POST /api/service/ai-usage` (backend `SERVICE_API_TOKEN` = agent `BACKEND_SERVICE_TOKEN`); chưa có lượt gọi nào thì tab hiện hướng dẫn kết nối, không có dữ liệu mẫu. Gồm: thẻ KPI (chi phí USD + VNĐ, lượt gọi/yêu cầu, tỉ lệ lỗi, token vào/ra/cache, độ trễ TB/p50/p95/token đầu, chi phí mỗi yêu cầu), thanh ngân sách hôm nay, 3 biểu đồ một trục (chi phí, token vào/ra, p95 — cặp màu đã kiểm CVD), bảng theo model/mục đích/nhà, 50 lượt gọi gần nhất, bảng giá model. Giá mặc định tra ngày 2026-11-13 trên trang giá chính thức OpenAI/Anthropic (có link nguồn); nút **Đồng bộ giá** (xem trước danh sách thay đổi rồi mới áp dụng) lấy từ kho giá LiteLLM, giữ giá Admin nhập tay.
+
+### Hẹn giờ một lần + popup thông báo (app `user`)
+
+- **Hẹn giờ** (`/schedules`, `@shh/automation` → `SchedulesPage`; mục "Hẹn giờ" ở chi tiết thiết bị = `DeviceSchedule`): hẹn bật/tắt đèn/quạt, mở/đóng rèm (0/50/100%), bật/tắt/đặt nhiệt độ điều hoà (16–30 °C) **một lần**, "Lúc HH:MM" (lần tới / ngày mai / chọn ngày) hoặc "Sau N phút" (1–10080, tối đa 7 ngày). Khác "Tự động hoá" (quy tắc lặp hằng tuần / theo ngưỡng cảm biến). API: `GET/POST /api/portal/homes/:id/schedules?scope=upcoming|history`, `POST /api/portal/schedules/:id/cancel` (hợp đồng ở `docs/API_DESIGN.md`); SWR "sắp chạy" 10 s, "đã chạy" 30 s. Giờ hiển thị và xem trước theo múi giờ của nhà (`Schedule.timezone`), không theo trình duyệt; backend mới là nơi quy đổi `run_at`. VIEWER chỉ xem; thiết bị phải có `appliance` do backend gán (không đoán theo tên). Lịch do Trợ lý AI tạo (`origin = ai_agent`) có huy hiệu riêng. Hộp thoại tạo (`ui/CreateScheduleDialog`) nhận `onSubmit` từ feature nên dùng chung cho cả hai nơi mà không vi phạm R3.
+- **Popup thông báo** (`@shh/notifications`): `useHomeNotifications` (chuông + trang Thông báo) nhớ id thông báo đã thấy; thông báo chưa đọc mới xuất hiện sau lần tải đầu → tab ẩn: `new Notification(...)` của hệ điều hành (cần người dùng đã cấp quyền), tab đang xem: toast. Quyền chỉ được xin khi bấm **Bật thông báo trên trình duyệt** ở `/notifications` (`BrowserNotificationToggle`; hiện hướng dẫn khi không hỗ trợ / không phải HTTPS hoặc localhost / đã chặn). Popup hoạt động cả khi tab ẩn nhờ poll 15 s của danh sách thông báo nhà (`refreshWhenHidden: true` ở `useNotificationList`, chỉ riêng danh sách này; mỗi id chỉ báo 1 lần, không báo lại backlog). Điều kiện: tab vẫn còn mở (không có Service Worker / Web Push nên đóng tab hoặc trình duyệt thì không có popup; trình duyệt có thể làm chậm timer của tab nền) và trang chạy trên HTTPS hoặc localhost.
 
 ## Còn là mock
 

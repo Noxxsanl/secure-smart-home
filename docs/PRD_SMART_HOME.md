@@ -309,6 +309,7 @@ Quy ước: **FR-x.y**, ưu tiên **M**/**S**/**C** (Must/Should/Could). Tiêu c
 | FR-5.7 | Owner/Controller đổi tên nhà, phòng, thiết bị | S |
 | FR-5.8 | Xem snapshot camera cửa. Live view là tuỳ chọn. *Trạng thái (2026-11-13): live view trên **web user** đã hiện thực (backend `modules/camera/features/live-relay/` + `@shh/devices`, chưa thử đầu-cuối với phần cứng); trên Mobile vẫn chưa làm — [API](API_DESIGN.md) §5.1, §8* | C |
 | FR-5.9 | Chỉ thành viên có quyền điều khiển (Owner/Controller/Guest trong phạm vi) mới gửi được lệnh. Mọi lệnh ghi Device Command Log | M |
+| FR-5.10 | **Hẹn giờ một lần** cho đèn, quạt, rèm, điều hoà: bật/tắt (rèm: mở/đóng 0/50/100%, điều hoà: đặt 16–30 °C) lúc HH:MM hoặc sau N phút, tối đa 7 ngày. Người dùng huỷ được trước giờ chạy; hệ thống báo kết quả (đã chạy / không cần chạy / không chạy được / bị bỏ lỡ) và không chạy bù lịch quá hạn quá 5 phút. Quyền như lệnh tay (kiểm lại lúc chạy); mỗi nhà tối đa 50 lịch đang chờ. *Trạng thái (2026-11-14): backend `modules/schedules` + web user (trang Hẹn giờ) đã hiện thực, chưa thử trên phần cứng; Mobile chưa có giao diện — [API](API_DESIGN.md) §5.1* | S |
 
 **Nghiệm thu FR-5.3:** *Cho trước* relay đèn phòng khách đang online, *khi* Controller bấm bật, *thì* relay đổi trạng thái vật lý và UI hiển thị trạng thái đã xác nhận trong mục tiêu NFR-P1. *Khi* thiết bị không phản hồi, *thì* UI quay về trạng thái cũ và báo lỗi.
 
@@ -331,7 +332,7 @@ Quy ước: **FR-x.y**, ưu tiên **M**/**S**/**C** (Must/Should/Could). Tiêu c
 |---|---|:---:|
 | FR-7.1 | Tạo rule dạng **IF** (cảm biến vượt ngưỡng / thời gian / trạng thái thiết bị) **THEN** (bật/tắt relay / gửi thông báo) | S |
 | FR-7.2 | Bật/tắt rule, xem lịch sử lần chạy | S |
-| FR-7.3 | Mọi hành động điều khiển thủ công được ghi vào `user_behavior_logs` (ai, thiết bị, hành động, thời điểm, nguồn) | M |
+| FR-7.3 | Mọi lần đèn/quạt/rèm/điều hoà đổi trạng thái được ghi **đúng 1 dòng** vào `user_behavior_logs` (ai, thiết bị, hành động, thời điểm, nguồn, nhiệt độ/độ ẩm phòng lúc đó): lệnh thủ công, **thao tác tại chỗ** trên màn hình Gateway/Node (nguồn `local`, không có người dùng), lệnh **hẹn giờ** (FR-5.10) và Automation. Lệnh lỗi/không đổi trạng thái không sinh dòng. Dữ liệu xuất ra CSV (`npm run export:behavior`) để huấn luyện AI sau này. *Trạng thái (2026-11-14): đã hiện thực ở backend, chưa thử trên phần cứng — [API](API_DESIGN.md) §5.1, [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.12* | M |
 | FR-7.4 | **Gợi ý thói quen:** định kỳ phân tích `user_behavior_logs`. Nếu cùng một hành động trên cùng thiết bị lặp lại trong cửa sổ ±15 phút ở ít nhất 5 trong 7 ngày gần nhất, tạo gợi ý tự động hoá | S |
 | FR-7.5 | Gợi ý chỉ được thực thi sau khi người dùng **chấp nhận**. Hệ thống không bao giờ tự điều khiển thiết bị dựa trên gợi ý chưa được duyệt | M |
 | FR-7.6 | Phản hồi Chấp nhận/Bỏ qua ghi vào `user_feedback`. Mẫu đã bị bỏ qua thì không gợi ý lại trong 30 ngày | S |
@@ -579,7 +580,7 @@ M1–M3 là đường găng. Nếu trễ, M4–M5 được cắt theo thứ tự
 
 | Nội dung đề tài | Yêu cầu đáp ứng |
 |---|---|
-| Nút IoT điều khiển đèn, quạt, cảm biến | FR-5.3, FR-5.4, FR-4.3 |
+| Nút IoT điều khiển đèn, quạt, cảm biến | FR-5.3, FR-5.4, FR-5.10, FR-4.3 |
 | Gateway IoT | FR-4.1 → 4.5, FR-9.1, FR-12.1 |
 | Server và Web Dashboard | E2, E9, E10, E11 |
 | Xác thực thiết bị | FR-12.1, FR-12.2, FR-12.7 |
@@ -594,7 +595,7 @@ M1–M3 là đường găng. Nếu trễ, M4–M5 được cắt theo thứ tự
 | E1, E6 | [Kiến trúc sản phẩm](SMART_HOME_PRODUCT_ARCHITECTURE.md) §2, §7, §11 · [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) |
 | E2, E3 | [Kiến trúc sản phẩm](SMART_HOME_PRODUCT_ARCHITECTURE.md) §4–6 · [Frontend](architecture/FRONTEND_REFACTOR_SMARTHOME.md) |
 | E4 | [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) · [Firmware](firmware/EMBEDDED_ARCHITECTURE_ESP_IDF.md) |
-| E5, E8 | [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) · [Mobile](architecture/MOBILE_APP_ARCHITECTURE.md) |
+| E5, E8 | [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) · [Mobile](architecture/MOBILE_APP_ARCHITECTURE.md) · hẹn giờ FR-5.10: [API](API_DESIGN.md) §5.1 · [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8 |
 | E7 | [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) §18 · [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.12 |
 | E9 | [Frontend](architecture/FRONTEND_REFACTOR_SMARTHOME.md) · [Firmware](firmware/EMBEDDED_ARCHITECTURE_ESP_IDF.md) §14–15 |
 | E10, E11 | [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) · [Frontend](architecture/FRONTEND_REFACTOR_SMARTHOME.md) |

@@ -3,7 +3,8 @@ import type { RequestMeta } from "../../../core/http/request-meta";
 import type { DeviceCommandAction, DeviceRow, GatewayAction } from "../../devices";
 import type { BehaviorSource } from "./behavior.types";
 
-export type CommandSource = "user" | "automation" | "operator";
+/** device_commands.source — 'schedule' = lịch hẹn giờ một lần (module schedules), 'ai_agent' = lịch/lệnh do Trợ lý AI tạo. */
+export type CommandSource = "user" | "automation" | "operator" | "schedule" | "ai_agent";
 export type CommandChannel = "mobile" | "web" | "dashboard" | "system";
 
 export interface SendDeviceCommandInput {

@@ -310,6 +310,54 @@ export type HabitSuggestion = {
 export type AcceptSuggestionResult = { suggestion: HabitSuggestion; rule: AutomationRule };
 export type DismissSuggestionResult = { suggestion: HabitSuggestion };
 
+// --- Hẹn giờ một lần: GET/POST /homes/:id/schedules, POST /schedules/:id/cancel ---
+export type ScheduleAction = "turn_on" | "turn_off" | "set_temp" | "set_pos";
+export type ScheduleStatus = "scheduled" | "running" | "done" | "skipped" | "failed" | "cancelled" | "missed";
+export type ScheduleScope = "upcoming" | "history";
+
+export type Schedule = {
+  id: number;
+  home_id: number;
+  // Múi giờ IANA của nhà — giờ hiển thị phải theo múi giờ này, không theo trình duyệt.
+  timezone: string;
+  // null khi thiết bị đã bị xoá.
+  device_id: number | null;
+  device_name: string | null;
+  room_name: string | null;
+  appliance: DeviceAppliance | null;
+  action: ScheduleAction;
+  temperature: number | null;
+  position: number | null;
+  // Backend sinh sẵn, VD "Đặt Điều hoà 26°C" (không chứa tên phòng).
+  action_label: string;
+  run_at: string;
+  status: ScheduleStatus;
+  origin: "user" | "ai_agent";
+  channel: "web" | "mobile";
+  created_by_user_id: number | null;
+  created_by_name: string | null;
+  // DEVICE_OFFLINE | TIMEOUT | COMMAND_FAILED | DEVICE_BLOCKED | HOME_SUSPENDED | NOT_CONTROLLABLE | NO_DEVICE |
+  // ACCESS_REVOKED | ALREADY_IN_STATE | INTERRUPTED | UNKNOWN | null
+  error_code: string | null;
+  executed_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  can_cancel: boolean;
+};
+
+/** `when`: đúng MỘT trong hai dạng — giờ trong ngày (kèm ngày tuỳ chọn) hoặc sau N phút. */
+export type ScheduleWhen = { at: string; date?: string } | { after_minutes: number };
+
+export type ScheduleInput = {
+  device_id: number;
+  action: ScheduleAction;
+  temperature?: number;
+  position?: number;
+  when: ScheduleWhen;
+};
+
+export type ScheduleList = { items: Schedule[] };
+
 export type ClaimResult = { home: Home; role: "OWNER" };
 
 export type CustomerProfile = {

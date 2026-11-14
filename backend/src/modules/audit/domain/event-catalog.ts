@@ -112,6 +112,8 @@ export const EVENT_CATALOG_ENTRIES: ReadonlyArray<readonly [string, LogCategory,
   ["SUGGESTION_CREATED", "automation", "info"],
   ["SUGGESTION_ACCEPTED", "automation", "info"],
   ["SUGGESTION_DISMISSED", "automation", "info"],
+  ["SCHEDULE_CREATED", "automation", "info"], // thêm: khách tạo hẹn giờ một lần (module schedules)
+  ["SCHEDULE_CANCELLED", "automation", "info"], // thêm: huỷ hẹn giờ trước giờ chạy
   // ota
   ["FIRMWARE_UPLOADED", "ota", "info"],
   ["OTA_DEPLOYED", "ota", "info"],

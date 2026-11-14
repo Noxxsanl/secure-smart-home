@@ -13,6 +13,9 @@ export const notificationsKey = (homeId: number | null) =>
 export function useNotificationList(homeId: number | null) {
   return useApi<NotificationList>(notificationsKey(homeId), {
     refreshInterval: POLL_NOTIFICATIONS_MS,
+    // SWR mặc định ngừng poll khi tab ẩn; popup hệ điều hành (useAnnounceNewNotifications) cần đúng lúc đó,
+    // nên chỉ danh sách thông báo nhà được poll tiếp khi tab ẩn (15 s/lần, nhẹ).
+    refreshWhenHidden: true,
     revalidateOnFocus: true,
   });
 }

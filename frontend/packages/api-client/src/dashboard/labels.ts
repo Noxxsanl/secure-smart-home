@@ -94,6 +94,8 @@ export const COMMAND_SOURCE_LABELS: Record<DeviceCommandRecord["source"], string
   user: "Khách hàng",
   automation: "Automation",
   operator: "Nhân viên",
+  schedule: "Hẹn giờ",
+  ai_agent: "Trợ lý AI",
 };
 
 export const COMMAND_CHANNEL_LABELS: Record<DeviceCommandRecord["channel"], string> = {

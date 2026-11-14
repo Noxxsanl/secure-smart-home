@@ -325,7 +325,7 @@ export type DeviceCommandRecord = {
   id: number;
   command: string;
   status: DeviceCommandStatus;
-  source: "user" | "automation" | "operator";
+  source: "user" | "automation" | "operator" | "schedule" | "ai_agent";
   channel: "mobile" | "web" | "dashboard" | "system";
   issued_by_name: string | null;
   issued_at: string;

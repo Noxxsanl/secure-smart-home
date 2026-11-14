@@ -95,6 +95,9 @@ export async function orAcCodes(deviceDbId: number, mask: number, db: Queryable 
 
 export interface NodeApplianceRow {
   id: number;
+  /** Cùng nhà với Node (JOIN ép a.home_id = n.home_id, Node phải có nhà) nên luôn có giá trị. */
+  home_id: number;
+  room_id: number | null;
   /** CHECK ck_devices_appliance bảo đảm miền; câu SELECT lọc NULL. */
   appliance: Appliance;
   power_state: boolean | null;
@@ -111,7 +114,7 @@ export interface NodeApplianceRow {
  */
 export async function listNodeAppliances(nodeDbId: number, db: Queryable = pool): Promise<NodeApplianceRow[]> {
   return queryRows<NodeApplianceRow>(
-    `SELECT a.id, a.appliance, a.power_state, a.ac_setpoint, a.ac_codes, a.curtain_pos, a.last_seen
+    `SELECT a.id, a.home_id, a.room_id, a.appliance, a.power_state, a.ac_setpoint, a.ac_codes, a.curtain_pos, a.last_seen
        FROM devices n
        JOIN devices a ON a.home_id = n.home_id
                      AND a.is_simulated = FALSE
@@ -122,6 +125,30 @@ export async function listNodeAppliances(nodeDbId: number, db: Queryable = pool)
     [nodeDbId],
     db
   );
+}
+
+/** Trạng thái tải (và last_seen) của MỘT thiết bị, đọc kèm khoá dòng. */
+export interface LockedApplianceState {
+  power_state: boolean | null;
+  ac_setpoint: number | null;
+  ac_codes: number | null;
+  curtain_pos: number | null;
+  last_seen: Date | null;
+}
+
+/**
+ * `SELECT … FOR UPDATE` dòng devices: dòng này là TRỌNG TÀI DUY NHẤT của "trạng thái trước" cho nhật ký hành vi. Đường
+ * telemetry (syncNodeAppliances) và đường lệnh (sendDeviceCommand sau ack) đều khoá rồi mới đọc cũ + ghi mới trong cùng
+ * transaction, nên với mỗi lần đổi trạng thái chỉ MỘT bên thấy "cũ ≠ mới" và ghi dòng hành vi. PHẢI gọi trong transaction
+ * (db = PoolClient) — ngoài transaction khoá nhả ngay sau câu lệnh. Không có dòng (thiết bị đã xoá) → null.
+ */
+export async function lockApplianceState(deviceDbId: number, db: Queryable): Promise<LockedApplianceState | null> {
+  const row = await queryOne<LockedApplianceState>(
+    "SELECT power_state, ac_setpoint, ac_codes, curtain_pos, last_seen FROM devices WHERE id = ? FOR UPDATE",
+    [deviceDbId],
+    db
+  );
+  return row ?? null;
 }
 
 /** last_seen = NOW() cho một relay của Node, ghi kèm power_state/ac_setpoint/ac_codes/curtain_pos (giữ nguyên giá trị cũ nếu truyền lại). */

@@ -8,6 +8,7 @@
 // POST không khớp và được chuyển tiếp (next) tới đây.
 import type { AppModule } from "../../shared/module";
 import { startCommandAckListener } from "./features/command-ack/command-ack.consumer";
+import { startBehaviorRecorder } from "./features/record-behavior/record-behavior.listener";
 import { sendDeviceCommandController } from "./features/send-device-command/send-device-command.controller";
 import { sendGatewayCommandController } from "./features/send-gateway-command/send-gateway-command.controller";
 
@@ -20,5 +21,8 @@ export const controlModule: AppModule = {
   customer: (router, channel) => {
     router.post("/devices/:deviceId/commands", sendDeviceCommandController(channel));
   },
-  workers: [{ name: "commandAckListener", start: startCommandAckListener }], // subscribe ack lệnh (Broker MQTT, TLS)
+  workers: [
+    { name: "commandAckListener", start: startCommandAckListener }, // subscribe ack lệnh (Broker MQTT, TLS)
+    { name: "behaviorRecorder", start: startBehaviorRecorder }, // record-behavior: ghi user_behavior_logs khi telemetry cho thấy tải đổi
+  ],
 };

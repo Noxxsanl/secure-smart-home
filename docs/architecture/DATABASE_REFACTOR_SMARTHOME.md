@@ -814,6 +814,8 @@ erDiagram
 
 **Unique:** `(device_sensor_id, bucket_type, bucket_start)`. **Index:** `KEY(bucket_start)`.
 
+> **Đã hiện thực 2026-11 (biến thể, `migrate.ts` + `001_schema.sql`).** Chưa có `device_sensors`/`telemetry` thô (hiện là `sensor_data`, giữ `TELEMETRY_RETENTION_DAYS` = 8 ngày), nên bảng thật khác thiết kế ở các điểm: khoá theo `device_id` (FK → `devices.id` ON DELETE CASCADE) + `metric` (`CHECK IN ('temperature','humidity')`) thay cho `device_sensor_id`; thêm `home_id`, `room_id` (INT NULL, không FK, chụp từ `devices` lúc tổng hợp để truy vấn theo nhà không phải join); `created_at`. Unique `(device_id, metric, bucket_type, bucket_start)`, index `(bucket_start)` và `(home_id, bucket_start)`. `bucket_type` đã có CHECK `('hourly','daily')` nhưng **hiện chỉ ghi `hourly`**: worker `telemetryRollup` (module `telemetry`) chạy ngay khi khởi động (lấp 7 ngày) rồi mỗi giờ (lấp 3 giờ), chỉ lấy giờ đã trọn và chỉ giá trị JSON là số trong miền hợp lệ (nhiệt độ −40…125 °C, độ ẩm 0…100 %; ngoài miền bị bỏ qua), ghi bằng `ON CONFLICT … DO UPDATE`. Nguồn cho `npm run export:behavior` ([API](../API_DESIGN.md) §5.1).
+
 #### `alerts`
 **Purpose:** Cảnh báo phát sinh từ Telemetry vượt ngưỡng hoặc sự kiện thiết bị.
 
@@ -940,6 +942,27 @@ erDiagram
 | next_run_at | TIMESTAMPTZ | NULL | Tính sẵn để job scheduler không phải parse cron mỗi lần quét |
 
 **Index:** `KEY(next_run_at)`.
+
+#### `scheduled_actions`
+**Purpose:** Hẹn giờ **một lần** cho một thiết bị ("tắt quạt sau 30 phút", "bật đèn lúc 20:00") — khác `schedules` ở trên (trigger lặp của luật Automation). **Đã hiện thực 2026-11** (`migrate.ts`: `create_scheduled_actions_table`; module `backend/src/modules/schedules`; API ở [API](../API_DESIGN.md) §5.1, "Hẹn giờ một lần").
+
+| Cột | Kiểu | Ràng buộc | Mô tả |
+|---|---|---|---|
+| id | BIGINT | PK, IDENTITY | |
+| home_id | INT | NOT NULL, FK → smart_homes.id ON DELETE CASCADE | |
+| device_id | INT | NULL, FK → devices.id ON DELETE SET NULL | NULL khi thiết bị đã bị xoá |
+| action | VARCHAR(32) | NOT NULL | Chuỗi `DeviceCommandAction`: `turn_on`, `turn_off`, `set_temp_<NN>`, `set_pos_<N>` |
+| run_at | TIMESTAMPTZ | NOT NULL | Đã quy đổi theo `smart_homes.timezone` lúc tạo; tối đa 7 ngày sau |
+| status | VARCHAR + CHECK IN ('scheduled','running','done','skipped','failed','cancelled','missed') | NOT NULL DEFAULT 'scheduled' | `running` = runner đã giành lịch; `skipped` = thiết bị đã ở trạng thái đích; `missed` = quá giờ > 5 phút lúc backend sống lại |
+| origin | VARCHAR + CHECK IN ('user','ai_agent') | NOT NULL DEFAULT 'user' | `ai_agent` chừa cho trợ lý AI, chưa ai ghi |
+| channel | VARCHAR + CHECK IN ('web','mobile') | NOT NULL | Kênh lúc tạo |
+| created_by_user_id, cancelled_by_user_id | INT | NULL, FK → users.id ON DELETE SET NULL | |
+| error_code | VARCHAR(32) | NULL | Lý do `failed`/`skipped`/`cancelled` (`DEVICE_OFFLINE`, `ALREADY_IN_STATE`, `ACCESS_REVOKED`, `INTERRUPTED`, …) |
+| device_command_id | BIGINT | NULL, FK → device_commands.id ON DELETE SET NULL | Lệnh runner đã gửi |
+| executed_at, cancelled_at | TIMESTAMPTZ | NULL | |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | `updated_at` còn dùng để nhận ra lịch `running` bị bỏ dở |
+
+**Index:** `(status, run_at)` (runner quét lịch tới hạn), `(home_id, run_at DESC)` (danh sách của nhà). **Relationship:** 1 smart_home → N `scheduled_actions`; runner giành lịch bằng `UPDATE … FOR UPDATE SKIP LOCKED`. Lệnh sinh ra ghi `device_commands.source = 'schedule'` (CHECK `ck_device_commands_source` đã thêm `schedule`, `ai_agent`).
 
 ### 7.9. Domain: OTA
 
@@ -1104,6 +1127,13 @@ erDiagram
 | created_at | TIMESTAMPTZ(3) | DEFAULT CURRENT_TIMESTAMP(3) | |
 
 **Index:** `KEY(smart_home_id, timestamp DESC)`, `KEY(device_id, timestamp DESC)`, `KEY(room_id, timestamp DESC)`, `KEY(action, timestamp)`. **Partition:** RANGE theo tháng (Phần 10.1). **Retention:** không giới hạn cứng như `sensor_data` hiện tại — bảng hiện thực hoá nguyên tắc "Raw Data không được ghi đè" (Phần 11).
+
+> **Đã hiện thực (bản rút gọn, `001_schema.sql` + `migrate.ts`; cập nhật 2026-11-14).** Bảng thật không có khoá `events` (`event_id` là UUID ngẫu nhiên, **không** FK) và bỏ các cột chưa có dữ liệu (`brightness`, `fan_speed`, `ambient_light`, `motion`, `door_status`, `camera_status`, `season`, `weather`, `latency`); thêm `minute_of_day` (SMALLINT, phút trong ngày giờ nhà — cho gợi ý thói quen). Mục tiêu: **mỗi lần trạng thái tải đèn/quạt/rèm/điều hoà đổi = đúng 1 dòng**, kể cả bấm tại chỗ trên màn hình Gateway/Node (cách ghi: [API](../API_DESIGN.md) §5.1, "Dữ liệu hành vi cho AI"). Thay đổi so với bản đầu:
+>
+> - `source` thêm `local` (bấm tại chỗ, không khớp lệnh nào), `schedule` (hẹn giờ một lần, §7.8), `ai_agent` (chừa cho trợ lý AI); `action` thêm `SET_POS` (rèm).
+> - Cột mới: `appliance` (`lamp|fan|curtain|ac`, CHECK), `level_before`/`level_after` (SMALLINT: vị trí rèm 0–100 hoặc nhiệt độ đặt của điều hoà; NULL với đèn/quạt), `temperature`/`humidity` (khí hậu phòng lúc đổi, NUMERIC(5,2)), `device_command_id` (BIGINT NULL, **unique một phần** `WHERE device_command_id IS NOT NULL` — lưới an toàn chống trùng giữa đường lệnh và đường telemetry; trọng tài chính là khoá dòng `devices`, xem API §5.1), `is_simulated` (BOOLEAN, copy từ thiết bị). `previous_state`/`new_state` là `ON`/`OFF` theo power (cả điều hoà; nhiệt độ ở `level_*`); dòng `SET_TEMP` cũ giữ nguyên dạng "24°C". Các dòng cũ được backfill `appliance` từ `devices`.
+> - View **`v_behavior_training`** (chỉ đọc, đặt cuối `001_schema.sql`): `user_behavior_logs` đổi tên `smart_home_id → home_id`, thêm `seconds_since_prev_change` (giây kể từ lần đổi trước của cùng thiết bị, `LAG … PARTITION BY device_id`). Là nguồn của `npm run export:behavior`; không có tên/email.
+> - Gợi ý thói quen (`recommendations`) chỉ đọc nguồn `mobile`, `manual`, `local`. Chưa partition (Phần 10.1 vẫn là đích).
 
 #### `device_usage_logs`
 **Purpose:** 1 dòng = 1 phiên sử dụng thiết bị hoàn chỉnh (ON → OFF), đã tính sẵn `duration`.

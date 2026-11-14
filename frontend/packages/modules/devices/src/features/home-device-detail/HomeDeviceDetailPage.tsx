@@ -35,10 +35,20 @@ type HomeDeviceDetailPageProps = {
   renderTelemetry?: (props: { deviceId: number; deviceName: string }) => React.ReactNode;
   /** Camera — app ghép `HomeCameraLive` (xem trực tiếp) + `HomeCameraSnapshots` (ảnh chụp); cùng module, feature khác nên đi qua slot. */
   renderCamera?: (props: { deviceId: number; deviceName: string }) => React.ReactNode;
+  /** Hẹn giờ một lần — app ghép `DeviceSchedule` của @shh/automation; chỉ với relay đèn/quạt/rèm/điều hoà mà tài khoản điều khiển được. */
+  renderSchedule?: (props: HomeDeviceScheduleSlotProps) => React.ReactNode;
 };
 
+export type HomeDeviceScheduleSlotProps = {
+  deviceId: number;
+  deviceName: string;
+  appliance: "lamp" | "fan" | "curtain" | "ac" | null;
+};
+
+const SCHEDULABLE_APPLIANCES = ["lamp", "fan", "curtain", "ac"] as const;
+
 // GET /devices/:id (polling 5 s); lịch sử số đo của cảm biến do slot `renderTelemetry` hiển thị.
-export default function DeviceDetailPage({ renderTelemetry, renderCamera }: HomeDeviceDetailPageProps) {
+export default function DeviceDetailPage({ renderTelemetry, renderCamera, renderSchedule }: HomeDeviceDetailPageProps) {
   const params = useParams<{ id: string }>();
   const deviceId = parseRouteId(params.id);
   const { data, error, mutate } = useDevice(deviceId);
@@ -74,6 +84,9 @@ export default function DeviceDetailPage({ renderTelemetry, renderCamera }: Home
   const acPanel = kind === "ac" && isAirConditioner(device);
   const words = APPLIANCE_TEXT[kind ?? "switch"];
   const categoryLabel = kind ? words.label : CATEGORY_LABELS[device.category];
+  // Backend chỉ nhận hẹn giờ cho relay đã gán đồ vật (không đoán theo tên) và người dùng điều khiển được.
+  const scheduleAppliance =
+    isRelay && device.can_control && device.appliance && SCHEDULABLE_APPLIANCES.includes(device.appliance) ? device.appliance : null;
 
   async function rename(name: string): Promise<string | null> {
     try {
@@ -209,6 +222,7 @@ export default function DeviceDetailPage({ renderTelemetry, renderCamera }: Home
       {/* Chỉ cảm biến nhiệt/ẩm mới có lịch sử; relay / cửa / camera không gọi telemetry. */}
       {device.category === "sensor" && renderTelemetry?.({ deviceId: device.id, deviceName: device.device_name })}
       {device.category === "camera" && renderCamera?.({ deviceId: device.id, deviceName: device.device_name })}
+      {scheduleAppliance && renderSchedule?.({ deviceId: device.id, deviceName: device.device_name, appliance: scheduleAppliance })}
     </div>
   );
 }

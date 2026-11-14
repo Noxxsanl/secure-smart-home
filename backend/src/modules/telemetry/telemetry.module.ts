@@ -1,5 +1,5 @@
-// Module telemetry: nhận số đo (HTTP fallback + MQTT gateway/+/data), lưu sensor_data, dọn dữ liệu cũ, đọc chuỗi số đo.
-// Sở hữu sensor_data. Hai đường ingest phải giữ cùng logic xác thực (invariant 4):
+// Module telemetry: nhận số đo (HTTP fallback + MQTT gateway/+/data), lưu sensor_data, dọn dữ liệu cũ, đọc chuỗi số đo,
+// tổng hợp khí hậu theo giờ sang telemetry_history (worker telemetryRollup). Sở hữu sensor_data, telemetry_history. Hai đường ingest phải giữ cùng logic xác thực (invariant 4):
 //   HTTP: features/ingest-http (validate-device.middleware → ingest-http.controller/handler)
 //   MQTT: features/ingest-mqtt (ingest-mqtt.consumer → ingest-mqtt.handler)
 // cùng gọi verifyGatewayHMAC/verifyDeviceHMAC/registerAuthFailure của module devices và domain/ingest-common.
@@ -16,6 +16,7 @@ import { ingestHttpController } from "./features/ingest-http/ingest-http.control
 import { validateDevice } from "./features/ingest-http/validate-device.middleware";
 import { startMqttDataService } from "./features/ingest-mqtt/ingest-mqtt.consumer";
 import { startRetentionJob } from "./features/purge-old-telemetry/purge-old-telemetry.job";
+import { startTelemetryRollup } from "./features/rollup-telemetry/rollup-telemetry.job";
 
 export const telemetryModule: AppModule = {
   name: "telemetry",
@@ -33,5 +34,6 @@ export const telemetryModule: AppModule = {
   workers: [
     { name: "mqttDataService", start: startMqttDataService }, // subscribe gateway/+/data trên Broker MQTT
     { name: "retentionJob", start: startRetentionJob }, // purge-old-telemetry
+    { name: "telemetryRollup", start: startTelemetryRollup }, // rollup-telemetry: sensor_data → telemetry_history theo giờ
   ],
 };

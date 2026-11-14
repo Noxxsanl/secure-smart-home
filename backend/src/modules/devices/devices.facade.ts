@@ -2,9 +2,16 @@
 //
 // Bảng devices và secret_key chỉ module này được ghi/đọc (quy tắc T1, invariant 1) — telemetry và control không tự
 // UPDATE devices mà gọi các hàm "ghi trạng thái" bên dưới, truyền `db` khi đang trong transaction của mình.
-import type { Queryable } from "../../infrastructure/database/db";
+import { toBoolOrNull, type Queryable } from "../../infrastructure/database/db";
 import type { DeviceRow } from "./domain/device.types";
-import { markProvisioned, orAcCodes, updateAcSetpoint, updateCurtainPos, updatePowerState } from "./infrastructure/device.repository";
+import {
+  lockApplianceState,
+  markProvisioned,
+  orAcCodes,
+  updateAcSetpoint,
+  updateCurtainPos,
+  updatePowerState,
+} from "./infrastructure/device.repository";
 
 // ── Đọc thiết bị (read model) ───────────────────────────────────────────────
 export {
@@ -72,6 +79,25 @@ export async function markDevicesProvisioned(rows: readonly DeviceRow[], db?: Qu
 /** Trạng thái relay sau khi thiết bị ack lệnh bật/tắt. */
 export async function setDevicePowerState(deviceDbId: number, power: boolean, db?: Queryable): Promise<void> {
   await updatePowerState(deviceDbId, power, db);
+}
+
+/** Trạng thái tải của một thiết bị tại thời điểm khoá dòng (power null = server chưa biết). */
+export interface DeviceLoadState {
+  power: boolean | null;
+  acSetpoint: number | null;
+  curtainPos: number | null;
+}
+
+/**
+ * Khoá dòng devices (`SELECT … FOR UPDATE`) rồi đọc trạng thái hiện tại — gọi TRONG transaction (db = client của giao dịch),
+ * TRƯỚC khi setDevicePowerState/setDeviceAcSetpoint/setDeviceCurtainPos. Giá trị trả về là "trạng thái trước" đáng tin
+ * cho nhật ký hành vi: dòng devices là trọng tài duy nhất giữa đường lệnh và đường telemetry (appliance-sync cũng khoá
+ * cùng cách), nên chỉ bên thật sự làm đổi trạng thái mới ghi dòng. Thiết bị không còn → null.
+ */
+export async function lockDeviceLoadState(deviceDbId: number, db: Queryable): Promise<DeviceLoadState | null> {
+  const row = await lockApplianceState(deviceDbId, db);
+  if (!row) return null;
+  return { power: toBoolOrNull(row.power_state), acSetpoint: row.ac_setpoint, curtainPos: row.curtain_pos };
 }
 
 /** Đánh dấu một ô mã IR đã học: ac_codes = COALESCE(ac_codes, 0) | mask (NULL coi như 0). */

@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, DoorClosed, Lightbulb, Zap, Bell, Users, QrCode, UserCircle,
+  LayoutDashboard, DoorClosed, Lightbulb, Zap, Bell, Users, QrCode, UserCircle, AlarmClock,
 } from "lucide-react";
 import type { NavSection } from "@shh/ui";
 
@@ -15,6 +15,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     section: "Tiện ích",
     items: [
+      { label: "Hẹn giờ", href: "/schedules", icon: AlarmClock },
       { label: "Tự động hoá", href: "/automation", icon: Zap, badgeKey: "pendingSuggestions" },
       { label: "Thông báo", href: "/notifications", icon: Bell, badgeKey: "unreadNotifications" },
     ],
@@ -38,6 +39,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   home: "Tổng quan",
   rooms: "Phòng",
   devices: "Thiết bị",
+  schedules: "Hẹn giờ",
   automation: "Tự động hoá",
   notifications: "Thông báo",
   members: "Thành viên",

@@ -5,6 +5,7 @@ import { useRevalidate, overviewKey, portalErrorMessage } from "@shh/api-client/
 import { markAllNotificationsRead, markNotificationRead, useNotificationList } from "./portalNotifications.api";
 import type { NotificationList } from "@shh/api-client/portal";
 import { useCurrentHome } from "@shh/auth";
+import { useAnnounceNewNotifications } from "./useBrowserNotify";
 
 // Đánh dấu "đã đọc" ngay trên cache (optimistic) để chuông và huy hiệu đổi tức thì,
 // rồi mới đợi API; API lỗi thì SWR hoàn tác về dữ liệu cũ.
@@ -30,6 +31,8 @@ export function useHomeNotifications() {
   const { data, error, isLoading, mutate } = useNotificationList(homeId);
   const { showToast } = useToast();
   const revalidate = useRevalidate();
+  // Thông báo mới (hẹn giờ đã chạy, cảnh báo thiết bị…): popup hệ điều hành khi tab ẩn, toast khi đang xem.
+  useAnnounceNewNotifications(homeId, data?.notifications);
 
   async function markAs(call: () => Promise<void>, ids: number[] | "all") {
     try {

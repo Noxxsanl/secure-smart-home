@@ -9,14 +9,17 @@ export async function listActiveHomes(): Promise<{ id: number; timezone: string 
   );
 }
 
-/** Thao tác BẬT/TẮT do người dùng của nhà từ `since`; chỉ relay còn tồn tại của ĐÚNG nhà này. */
+/**
+ * Thao tác BẬT/TẮT do người dùng của nhà từ `since`; chỉ relay còn tồn tại của ĐÚNG nhà này. Gồm cả bấm tại chỗ
+ * trên màn hình Gateway/Node ('local'); loại automation/hẹn giờ/AI (không phải thói quen thủ công).
+ */
 export async function loadBehaviorEvents(homeId: number, since: Date): Promise<BehaviorEvent[]> {
   // Join thiết bị để chỉ xét relay còn tồn tại của ĐÚNG nhà này (NFR-S4: truy vấn theo nhà)
   return queryRows<BehaviorEvent>(
     `SELECT l.device_id, d.device_name, l.action, l."timestamp"
        FROM user_behavior_logs l
        JOIN devices d ON d.id = l.device_id AND d.home_id = l.smart_home_id AND d.category = 'relay'
-      WHERE l.smart_home_id = ? AND l."timestamp" >= ? AND l.source IN ('mobile', 'manual')
+      WHERE l.smart_home_id = ? AND l."timestamp" >= ? AND l.source IN ('mobile', 'manual', 'local')
         AND l.action IN ('TURN_ON', 'TURN_OFF')`,
     [homeId, since]
   );

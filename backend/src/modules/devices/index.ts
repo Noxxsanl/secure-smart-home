@@ -24,6 +24,7 @@ export {
   jsonHasNul,
   learnSlotMask,
   latestReadings,
+  lockDeviceLoadState,
   listDeviceRowsByIds,
   listGatewayAndSensorTypeStatus,
   listHomeDeviceRows,
@@ -59,6 +60,7 @@ export {
 } from "./devices.facade";
 export type {
   AuthFailureResult,
+  DeviceLoadState,
   DeviceTypeStatus,
   ExistingDeviceRef,
   GatewaySigner,
