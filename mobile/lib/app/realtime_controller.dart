@@ -13,6 +13,15 @@ import '../modules/notifications/notifications.dart';
 import '../modules/realtime/realtime.dart';
 import 'shell/shell_providers.dart';
 
+/// Notification types that change the list of one-off schedules (FR-5.10).
+const _scheduleNotificationTypes = {
+  'SCHEDULE_DONE',
+  'SCHEDULE_SKIPPED',
+  'SCHEDULE_FAILED',
+  'SCHEDULE_MISSED',
+  'AGENT_SCHEDULED',
+};
+
 /// Keeps the app in sync (FR-5.6): applies WebSocket events to the providers
 /// and, while the socket is down, polls REST every 15 s (docs/architecture/MOBILE_APP_ARCHITECTURE.md §11.3).
 /// Lives in the composition root because one event fans out to several
@@ -119,6 +128,10 @@ class RealtimeController extends Notifier<RealtimeStatus> {
     ref.read(notificationsProvider.notifier).onRealtime(notification);
     if (notification.type == 'MEMBER_INVITED') {
       ref.invalidate(invitationsProvider);
+    }
+    if (_scheduleNotificationTypes.contains(notification.type)) {
+      // A schedule ran / failed / was set by the assistant: reload its lists.
+      invalidateSchedules(ref, event.homeId);
     }
     if (notification.isRead) return;
     final selectTab = ref.read(shellTabProvider.notifier).select;

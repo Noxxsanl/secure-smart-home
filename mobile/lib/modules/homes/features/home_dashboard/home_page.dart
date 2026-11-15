@@ -14,11 +14,13 @@ import '../../../devices/devices.dart';
 import '../../application/homes_providers.dart';
 import '../../domain/home.dart';
 import '../../domain/overview.dart';
-import '../../ui/room_card.dart';
 import 'home_switcher.dart';
 
+/// Room left under the lists.
+const _scrollBottomPadding = 24.0;
+
 /// "Trang chủ" (FR-5.1): home name + role, gateway status, per-room climate,
-/// devices on, open alerts, AI suggestions, quick relay controls, rooms.
+/// devices on, open alerts, AI suggestions, quick relay controls, cameras.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -97,7 +99,7 @@ class _HomeContent extends ConsumerWidget {
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, _scrollBottomPadding),
       children: [
         Row(
           children: [
@@ -203,7 +205,15 @@ class _HomeContent extends ConsumerWidget {
           ],
         ],
         const SizedBox(height: 20),
-        const SectionHeader('Điều khiển nhanh'),
+        SectionHeader(
+          'Điều khiển nhanh',
+          trailing: TextButton(
+            key: const ValueKey<String>('all-devices'),
+            onPressed: () =>
+                Navigator.of(context).openDeviceList(homeId: home.id),
+            child: const Text('Tất cả thiết bị'),
+          ),
+        ),
         if (relays.isEmpty)
           const Text(
             'Chưa có thiết bị bật/tắt nào.',
@@ -214,11 +224,13 @@ class _HomeContent extends ConsumerWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: relays.length,
+            // Fixed height: a curtain tile carries three level buttons and an
+            // air-conditioner tile a set-point row under the name.
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
               mainAxisSpacing: 16,
               crossAxisSpacing: 16,
-              childAspectRatio: 0.95,
+              mainAxisExtent: 184,
             ),
             itemBuilder: (context, index) {
               final device = relays[index];
@@ -231,28 +243,27 @@ class _HomeContent extends ConsumerWidget {
               );
             },
           ),
-        const SizedBox(height: 24),
-        const SectionHeader('Phòng'),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: overview.rooms.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            mainAxisSpacing: 16,
-            crossAxisSpacing: 16,
-            childAspectRatio: 1.1,
-          ),
-          itemBuilder: (context, index) {
-            final room = overview.rooms[index];
-            return RoomCard(
-              room: room,
-              onTap: () => Navigator.of(
+        if (overview.cameras.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          const SectionHeader('Camera'),
+          for (final camera in overview.cameras) ...[
+            CameraCard(
+              device: camera,
+              onOpen: () => Navigator.of(
                 context,
-              ).openRoom(homeId: home.id, roomId: room.id),
-            );
-          },
-        ),
+              ).openDevice(homeId: home.id, deviceId: camera.id),
+              // An offline camera cannot stream: just open its page.
+              onWatchLive: () => camera.online
+                  ? Navigator.of(
+                      context,
+                    ).openCameraLive(homeId: home.id, deviceId: camera.id)
+                  : Navigator.of(
+                      context,
+                    ).openDevice(homeId: home.id, deviceId: camera.id),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ],
       ],
     );
   }

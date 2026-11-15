@@ -42,7 +42,7 @@ class MockAuthRepository implements AuthRepository {
     required String password,
   }) async {
     final account = await _backend.respond(() {
-      final found = _backend.accountByEmail(email);
+      final found = _findLoginAccount(email);
       if (found == null || found.password != password) {
         throw const ApiException(
           code: ApiErrorCode.invalidCredentials,
@@ -59,6 +59,22 @@ class MockAuthRepository implements AuthRepository {
       return found;
     });
     return _startSession(account);
+  }
+
+  /// Like the backend's `findLoginUser`: the identifier is an email or a
+  /// customer's user tag (`ten#1234`), both case-insensitive. Staff have no
+  /// user tag, so only customer accounts match by tag.
+  MockAccount? _findLoginAccount(String identifier) {
+    final byEmail = _backend.accountByEmail(identifier);
+    if (byEmail != null) return byEmail;
+    final tag = identifier.trim().toLowerCase();
+    if (tag.isEmpty) return null;
+    for (final account in _backend.accounts) {
+      if (account.role == 'user' && account.userTag.toLowerCase() == tag) {
+        return account;
+      }
+    }
+    return null;
   }
 
   @override

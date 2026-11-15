@@ -4,40 +4,62 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/config/app_config.dart';
+import '../../../../core/network/error_messages.dart' show networkErrorMessage;
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/app_widgets.dart';
-import '../../application/device_providers.dart';
+import '../../application/camera_live_providers.dart';
 import '../../domain/camera_live.dart';
 import '../../domain/device.dart';
 
-/// "Xem trực tiếp": 4:3 player for a camera's live stream.
+/// "Xem trực tiếp": 4:3 player for a camera's live stream (FR-5.8).
 ///
 /// The stream only runs after the user taps play (the ESP32-CAM serves few
 /// clients and every frame costs bandwidth) and stops when the page closes.
-/// Frames come from [cameraLiveSourceProvider]; while no source is registered
-/// (the backend does not relay the stream yet) the player stays in
-/// [CameraLiveStatus.unavailable] and explains where to watch live today.
+/// Events come from [cameraLiveSourceProvider]: pictures, the relay's state
+/// ("Đang kết nối camera…", "Mất tín hiệu, đang kết nối lại…") and the final
+/// guidance sentence when the stream ends. Mock mode plays an animated sample
+/// scene; while no source is registered the player stays in
+/// [CameraLiveStatus.unavailable] and says why.
 /// Full screen reuses the same subscription, so it never opens a second
 /// connection to the camera.
 class CameraLiveView extends ConsumerStatefulWidget {
-  const CameraLiveView({super.key, required this.device});
+  const CameraLiveView({
+    super.key,
+    required this.device,
+    this.autoStart = false,
+  });
 
   final CustomerDevice device;
+
+  /// Start streaming right after the first frame of the page (an offline
+  /// camera or a build without a live source just shows the player).
+  final bool autoStart;
 
   @override
   ConsumerState<CameraLiveView> createState() => _CameraLiveViewState();
 }
 
 class _CameraLiveViewState extends ConsumerState<CameraLiveView> {
-  /// No frame for this long while playing → treat the stream as lost.
-  static const _stallTimeout = Duration(seconds: 8);
-
   final _frame = ValueNotifier<Uint8List?>(null);
-  StreamSubscription<Uint8List>? _subscription;
-  Timer? _stallTimer;
+  StreamSubscription<CameraLiveEvent>? _subscription;
   CameraLiveStatus _status = CameraLiveStatus.idle;
 
+  /// Sentence for the current non-playing status (connecting, reconnecting,
+  /// failed); `null` falls back to the generic text.
+  String? _message;
+
   CameraLiveSource? get _source => ref.read(cameraLiveSourceProvider);
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.autoStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _subscription == null) _start();
+      });
+    }
+  }
 
   CameraLiveStatus get _shownStatus {
     if (ref.watch(cameraLiveSourceProvider) == null) {
@@ -50,37 +72,62 @@ class _CameraLiveViewState extends ConsumerState<CameraLiveView> {
     final source = _source;
     if (source == null || !widget.device.online) return;
     _stop(keepFrame: false);
-    setState(() => _status = CameraLiveStatus.connecting);
-    _armStallTimer();
+    setState(() {
+      _status = CameraLiveStatus.connecting;
+      _message = cameraLiveConnectingMessage;
+    });
     _subscription = source
-        .frames(widget.device.id)
+        .watch(widget.device.id)
         .listen(
-          (bytes) {
-            _frame.value = bytes;
-            _armStallTimer();
-            if (_status != CameraLiveStatus.playing && mounted) {
-              setState(() => _status = CameraLiveStatus.playing);
-            }
+          _onEvent,
+          onError: (Object _) => _fail(networkErrorMessage),
+          onDone: () {
+            // The source always sends CameraLiveEnded first; a bare close is
+            // an unexpected stop.
+            if (_subscription != null) _fail(cameraLiveEndedMessage);
           },
-          onError: (Object _) => _fail(),
-          onDone: _fail,
           cancelOnError: true,
         );
   }
 
-  void _armStallTimer() {
-    _stallTimer?.cancel();
-    _stallTimer = Timer(_stallTimeout, _fail);
+  void _onEvent(CameraLiveEvent event) {
+    if (!mounted) return;
+    switch (event) {
+      case CameraLiveFrame(:final bytes):
+        _frame.value = bytes;
+        if (_status != CameraLiveStatus.playing) {
+          setState(() {
+            _status = CameraLiveStatus.playing;
+            _message = null;
+          });
+        }
+      case CameraLiveStateChanged(:final state):
+        // `live` only says the relay is up; the status flips on the first frame.
+        if (state == CameraLiveState.live) return;
+        setState(() {
+          _status = state == CameraLiveState.connecting
+              ? (_frame.value == null
+                    ? CameraLiveStatus.connecting
+                    : CameraLiveStatus.reconnecting)
+              : CameraLiveStatus.reconnecting;
+          _message = cameraLiveStateMessage(state);
+        });
+      case CameraLiveEnded(:final message):
+        _fail(message);
+    }
   }
 
-  void _fail() {
+  void _fail(String message) {
     _stop(keepFrame: true);
-    if (mounted) setState(() => _status = CameraLiveStatus.failed);
+    if (mounted) {
+      setState(() {
+        _status = CameraLiveStatus.failed;
+        _message = message;
+      });
+    }
   }
 
   void _stop({required bool keepFrame}) {
-    _stallTimer?.cancel();
-    _stallTimer = null;
     unawaited(_subscription?.cancel());
     _subscription = null;
     if (!keepFrame) _frame.value = null;
@@ -88,14 +135,22 @@ class _CameraLiveViewState extends ConsumerState<CameraLiveView> {
 
   void _pause() {
     _stop(keepFrame: true);
-    setState(() => _status = CameraLiveStatus.idle);
+    setState(() {
+      _status = CameraLiveStatus.idle;
+      _message = null;
+    });
   }
 
   @override
   void didUpdateWidget(covariant CameraLiveView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Camera went offline while watching → stop instead of waiting for a stall.
-    if (!widget.device.online && _subscription != null) _fail();
+    // Camera went offline while watching → stop instead of waiting for the relay.
+    if (!widget.device.online && _subscription != null) {
+      _fail(
+        'Camera đang ngoại tuyến. Kiểm tra nguồn điện của camera và WiFi '
+        'của Gateway.',
+      );
+    }
   }
 
   @override
@@ -143,6 +198,10 @@ class _CameraLiveViewState extends ConsumerState<CameraLiveView> {
     final status = _shownStatus;
     final online = widget.device.online;
     final playing = status == CameraLiveStatus.playing;
+    final reconnecting = status == CameraLiveStatus.reconnecting;
+    final running =
+        playing || reconnecting || status == CameraLiveStatus.connecting;
+    final useMock = ref.watch(appConfigProvider).useMock;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -157,17 +216,23 @@ class _CameraLiveViewState extends ConsumerState<CameraLiveView> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (status == CameraLiveStatus.playing ||
+                  if (playing ||
+                      reconnecting ||
                       status == CameraLiveStatus.failed)
                     _FrameView(frame: _frame, fit: BoxFit.cover),
                   if (!playing)
-                    _Overlay(status: status, online: online, onPlay: _start),
+                    _Overlay(
+                      status: status,
+                      online: online,
+                      message: _message,
+                      onPlay: _start,
+                    ),
                   Positioned(
                     top: 12,
                     left: 12,
                     child: _LiveBadge(live: playing),
                   ),
-                  if (playing)
+                  if (running)
                     Positioned(
                       right: 4,
                       bottom: 4,
@@ -182,17 +247,18 @@ class _CameraLiveViewState extends ConsumerState<CameraLiveView> {
                             ),
                             onPressed: _pause,
                           ),
-                          IconButton(
-                            key: const ValueKey<String>(
-                              'camera-live-fullscreen',
+                          if (playing || reconnecting)
+                            IconButton(
+                              key: const ValueKey<String>(
+                                'camera-live-fullscreen',
+                              ),
+                              tooltip: 'Toàn màn hình',
+                              icon: const Icon(
+                                Icons.fullscreen,
+                                color: Colors.white,
+                              ),
+                              onPressed: _openFullScreen,
                             ),
-                            tooltip: 'Toàn màn hình',
-                            icon: const Icon(
-                              Icons.fullscreen,
-                              color: Colors.white,
-                            ),
-                            onPressed: _openFullScreen,
-                          ),
                         ],
                       ),
                     ),
@@ -203,26 +269,36 @@ class _CameraLiveViewState extends ConsumerState<CameraLiveView> {
         ),
         const SizedBox(height: 8),
         Text(
-          _caption(status, online),
+          _caption(status, online, useMock),
           style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
         ),
       ],
     );
   }
 
-  static String _caption(CameraLiveStatus status, bool online) {
+  String _failedCaption() {
+    final text = _message ?? cameraLiveGenericCloseMessage;
+    final sentence = text.endsWith('.') ? text : '$text.';
+    return '$sentence Bấm thử lại.';
+  }
+
+  String _caption(CameraLiveStatus status, bool online, bool useMock) {
     if (status == CameraLiveStatus.unavailable) {
-      return 'Hình trực tiếp hiện xem trên màn hình Gateway trong nhà. '
-          'Ứng dụng sẽ phát được ngay khi máy chủ hỗ trợ chuyển tiếp luồng camera.';
+      return 'Xem trực tiếp chưa dùng được trên máy chủ này. Hình vẫn xem được '
+          'trên màn hình Gateway trong nhà.';
     }
     if (!online) {
       return 'Camera đang ngoại tuyến. Kiểm tra nguồn điện của camera và WiFi của Gateway.';
     }
     return switch (status) {
       CameraLiveStatus.playing =>
-        'Đang phát trực tiếp. Hình sẽ dừng khi bạn rời trang này.',
-      CameraLiveStatus.failed =>
-        'Mất kết nối tới camera. Bấm thử lại; nếu vẫn lỗi, kiểm tra WiFi của Gateway.',
+        useMock
+            ? 'Đang phát hình mô phỏng (chế độ thử, không có camera thật). Hình sẽ dừng khi bạn rời trang này.'
+            : 'Đang phát trực tiếp. Hình sẽ dừng khi bạn rời trang này.',
+      CameraLiveStatus.connecting || CameraLiveStatus.reconnecting =>
+        'Camera có thể mất vài giây để bắt đầu truyền hình. Hình sẽ dừng khi '
+            'bạn rời trang này.',
+      CameraLiveStatus.failed => _failedCaption(),
       _ => 'Bấm nút phát để xem hình trực tiếp từ camera.',
     };
   }
@@ -256,27 +332,39 @@ class _Overlay extends StatelessWidget {
   const _Overlay({
     required this.status,
     required this.online,
+    required this.message,
     required this.onPlay,
   });
 
   final CameraLiveStatus status;
   final bool online;
+  final String? message;
   final VoidCallback onPlay;
 
   @override
   Widget build(BuildContext context) {
-    if (status == CameraLiveStatus.connecting) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 12),
-            Text(
-              'Đang kết nối tới camera…',
-              style: TextStyle(color: Colors.white70),
-            ),
-          ],
+    if (status == CameraLiveStatus.connecting ||
+        status == CameraLiveStatus.reconnecting) {
+      return ColoredBox(
+        color: status == CameraLiveStatus.reconnecting
+            ? Colors.black45
+            : Colors.transparent,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const CircularProgressIndicator(color: Colors.white),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  message ?? cameraLiveConnectingMessage,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -285,7 +373,7 @@ class _Overlay extends StatelessWidget {
     final (IconData icon, String label) = switch (status) {
       CameraLiveStatus.unavailable => (
         Icons.videocam_off_outlined,
-        'Chưa hỗ trợ xem trực tiếp trên ứng dụng',
+        'Chưa xem trực tiếp được',
       ),
       _ when !online => (Icons.videocam_off_outlined, 'Camera ngoại tuyến'),
       CameraLiveStatus.failed => (Icons.refresh, 'Thử lại'),

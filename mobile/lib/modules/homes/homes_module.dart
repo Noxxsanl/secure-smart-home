@@ -12,7 +12,6 @@ import 'features/room_detail/room_detail_page.dart';
 
 export 'features/home_dashboard/home_page.dart' show HomePage;
 export 'features/onboarding/onboarding_page.dart' show OnboardingPage;
-export 'features/room_list/room_list_page.dart' show RoomListPage;
 
 /// Builds the [AppRoutes] owned by this module; null for any other route.
 Route<void>? homesRoute(RouteSettings settings) {

@@ -6,18 +6,29 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// - `API_BASE_URL`: backend origin without the `/api` suffix, e.g.
 ///   `https://smarthome.example.com`. Defaults to `http://10.0.2.2:5000` on
 ///   Android (emulator → host machine) and `http://localhost:5000` elsewhere.
+/// - `AGENT_BASE_URL`: AI Agent endpoint of the voice/text assistant, e.g.
+///   `http://10.0.2.2:8000/v1` (Android emulator → agent on the host). Defaults
+///   to `<API_BASE_URL>/api/agent` (nginx forwards it to the agent).
 /// - `USE_MOCK=true`: run on the in-memory mock repositories (no backend).
 class AppConfig {
-  const AppConfig({required this.apiBaseUrl, this.useMock = false});
+  const AppConfig({
+    required this.apiBaseUrl,
+    this.useMock = false,
+    String? agentBaseUrl,
+  }) : agentBaseUrl = agentBaseUrl ?? '$apiBaseUrl/api/agent';
 
   factory AppConfig.fromEnvironment() {
     const definedUrl = String.fromEnvironment('API_BASE_URL');
+    const definedAgentUrl = String.fromEnvironment('AGENT_BASE_URL');
     const useMock = bool.fromEnvironment('USE_MOCK');
     return AppConfig(
       apiBaseUrl: normalizeBaseUrl(
         definedUrl.trim().isEmpty ? defaultApiBaseUrl() : definedUrl,
       ),
       useMock: useMock,
+      agentBaseUrl: definedAgentUrl.trim().isEmpty
+          ? null
+          : normalizeBaseUrl(definedAgentUrl),
     );
   }
 
@@ -29,6 +40,10 @@ class AppConfig {
 
   /// Prefix of every REST call made by the app (docs/architecture/MOBILE_APP_ARCHITECTURE.md §10).
   String get mobileApiBaseUrl => '$apiBaseUrl/api/mobile';
+
+  /// Prefix of the AI Agent calls (`/homes/:id/messages|voice`), no trailing
+  /// slash.
+  final String agentBaseUrl;
 
   /// Realtime endpoint (contract §4.3).
   Uri get webSocketUri => deriveWebSocketUri(apiBaseUrl);

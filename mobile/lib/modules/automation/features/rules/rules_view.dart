@@ -16,14 +16,16 @@ import '../../ui/suggestion_card.dart';
 import 'rule_editor_page.dart';
 import 'rule_history_page.dart';
 
-/// "Tự động" tab (FR-7.1, 7.2): rules, history and AI suggestions.
-class AutomationPage extends ConsumerWidget {
-  const AutomationPage({super.key});
+/// "Tự động hoá" tab of Tự động (FR-7.1, 7.2): rules, history and AI
+/// suggestions. The frame (app bar + tabs) is `AutomationPage`; the add button
+/// is in the content, not a floating button.
+class RulesView extends ConsumerWidget {
+  const RulesView({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final home = ref.watch(currentHomeProvider);
-    if (home == null) return const Scaffold(body: LoadingView());
+    if (home == null) return const LoadingView();
     final role = home.role;
 
     Widget body;
@@ -44,24 +46,7 @@ class AutomationPage extends ConsumerWidget {
             );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        title: const Text('Tự động'),
-      ),
-      body: body,
-      floatingActionButton: role.canEditAutomation && !home.home.isSuspended
-          ? FloatingActionButton.extended(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => RuleEditorPage(homeId: home.id),
-                ),
-              ),
-              icon: const Icon(Icons.add),
-              label: const Text('Tạo quy tắc'),
-            )
-          : null,
-    );
+    return body;
   }
 }
 
@@ -98,8 +83,21 @@ class _Content extends ConsumerWidget {
       },
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
         children: [
+          if (canEdit && !home.home.isSuspended) ...[
+            FilledButton.icon(
+              key: const ValueKey<String>('rule-add'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => RuleEditorPage(homeId: home.id),
+                ),
+              ),
+              icon: const Icon(Icons.add),
+              label: const Text('Tạo quy tắc'),
+            ),
+            const SizedBox(height: 16),
+          ],
           if (!canEdit) ...[
             const InlineBanner(
               message:
@@ -194,7 +192,8 @@ class _RuleCard extends ConsumerWidget {
                     final ok = await confirmDialog(
                       context,
                       title: 'Xoá quy tắc?',
-                      message: 'Quy tắc “${rule.name}” sẽ bị xoá và không còn chạy nữa.',
+                      message:
+                          'Quy tắc “${rule.name}” sẽ bị xoá và không còn chạy nữa.',
                       confirmLabel: 'Xoá',
                       destructive: true,
                     );

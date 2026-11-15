@@ -20,5 +20,4 @@ export 'domain/members_repository.dart';
 export 'domain/overview.dart';
 export 'domain/room.dart';
 export 'domain/room_repository.dart';
-export 'ui/room_card.dart';
 export 'ui/room_presentation.dart';

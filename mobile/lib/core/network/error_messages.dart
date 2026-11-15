@@ -133,9 +133,13 @@ const _contextMessages = <ErrorContext, Map<String, String>>{
   ErrorContext.login: {
     ApiErrorCode.tooManyRequests:
         'Bạn đã đăng nhập sai quá nhiều lần. Vui lòng đợi 15 phút rồi thử lại.',
+    ApiErrorCode.invalidCredentials:
+        'Email/mã người dùng hoặc mật khẩu không đúng. Kiểm tra lại rồi thử '
+        'lại.',
     ApiErrorCode.invalidInput:
-        'Vui lòng nhập email và mật khẩu hợp lệ.',
-    ApiErrorCode.missingFields: 'Vui lòng nhập email và mật khẩu.',
+        'Vui lòng nhập email (hoặc mã người dùng) và mật khẩu hợp lệ.',
+    ApiErrorCode.missingFields:
+        'Vui lòng nhập email (hoặc mã người dùng) và mật khẩu.',
   },
   ErrorContext.register: {
     ApiErrorCode.invalidInput:
@@ -215,11 +219,18 @@ const _contextMessages = <ErrorContext, Map<String, String>>{
 
 /// Maps an error [code] to Vietnamese guidance (NFR-U2). Never returns the
 /// raw code.
+///
+/// [overrides] lets a module keep its own wording next to its domain (e.g.
+/// schedule or assistant codes) without editing this shared table; it wins
+/// over every built-in message, including the rate-limit text.
 String messageForCode(
   String code, {
   ErrorContext context = ErrorContext.general,
   int? retryAfterSeconds,
+  Map<String, String>? overrides,
 }) {
+  final override = overrides?[code];
+  if (override != null) return override;
   if (code == ApiErrorCode.rateLimited ||
       (code == ApiErrorCode.tooManyRequests && retryAfterSeconds != null)) {
     final waitText = _waitText(retryAfterSeconds);
@@ -256,9 +267,13 @@ String? errorCodeOf(Object error) {
 }
 
 /// User-facing Vietnamese message for any error thrown by repositories.
+///
+/// [overrides] maps API error codes (and the client codes of [ApiErrorCode],
+/// e.g. `CLIENT_TIMEOUT`) to module-specific wording; see [messageForCode].
 String userMessageFor(
   Object error, {
   ErrorContext context = ErrorContext.general,
+  Map<String, String>? overrides,
 }) {
   final unwrapped = unwrapError(error);
   if (unwrapped is ApiException) {
@@ -266,13 +281,26 @@ String userMessageFor(
       unwrapped.code,
       context: context,
       retryAfterSeconds: unwrapped.retryAfterSeconds,
+      overrides: overrides,
     );
   }
   if (unwrapped is TimeoutException) {
-    return messageForCode(ApiErrorCode.clientTimeout, context: context);
+    return messageForCode(
+      ApiErrorCode.clientTimeout,
+      context: context,
+      overrides: overrides,
+    );
   }
   if (unwrapped is FormatException) {
-    return messageForCode(ApiErrorCode.invalidResponse, context: context);
+    return messageForCode(
+      ApiErrorCode.invalidResponse,
+      context: context,
+      overrides: overrides,
+    );
   }
-  return messageForCode(ApiErrorCode.unknown, context: context);
+  return messageForCode(
+    ApiErrorCode.unknown,
+    context: context,
+    overrides: overrides,
+  );
 }

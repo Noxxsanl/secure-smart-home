@@ -11,6 +11,8 @@ abstract final class AppRoutes {
   static const members = '/homes/members';
   static const roomDetail = '/homes/room';
   static const deviceDetail = '/devices/detail';
+  static const deviceList = '/devices';
+  static const cameraLive = '/devices/camera-live';
 }
 
 /// Arguments of [AppRoutes.members].
@@ -19,7 +21,10 @@ typedef MembersRouteArgs = ({int homeId});
 /// Arguments of [AppRoutes.roomDetail].
 typedef RoomRouteArgs = ({int homeId, int roomId});
 
-/// Arguments of [AppRoutes.deviceDetail].
+/// Arguments of [AppRoutes.deviceList].
+typedef DeviceListRouteArgs = ({int homeId});
+
+/// Arguments of [AppRoutes.deviceDetail] and [AppRoutes.cameraLive].
 typedef DeviceRouteArgs = ({int homeId, int deviceId});
 
 /// Typed entry points, so callers cannot pass the wrong arguments.
@@ -39,8 +44,18 @@ extension AppNavigation on NavigatorState {
         roomId: roomId,
       ));
 
+  Future<void> openDeviceList({required int homeId}) =>
+      _open<DeviceListRouteArgs>(AppRoutes.deviceList, (homeId: homeId));
+
   Future<void> openDevice({required int homeId, required int deviceId}) =>
       _open<DeviceRouteArgs>(AppRoutes.deviceDetail, (
+        homeId: homeId,
+        deviceId: deviceId,
+      ));
+
+  /// Camera page that starts the live stream by itself.
+  Future<void> openCameraLive({required int homeId, required int deviceId}) =>
+      _open<DeviceRouteArgs>(AppRoutes.cameraLive, (
         homeId: homeId,
         deviceId: deviceId,
       ));

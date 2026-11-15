@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/network/api_exception.dart';
+import '../../../core/network/error_messages.dart';
 import '../../../core/network/network_providers.dart';
 import '../../../core/storage/session_storage.dart';
 import '../../../mock/mock_providers.dart';
@@ -84,10 +85,7 @@ class HomesNotifier extends AsyncNotifier<HomesState> {
       final homes = await ref.read(homeRepositoryProvider).listHomes();
       if (!ref.mounted) return;
       state = AsyncData(
-        HomesState(
-          homes: homes,
-          currentId: _pick(homes, previous?.currentId),
-        ),
+        HomesState(homes: homes, currentId: _pick(homes, previous?.currentId)),
       );
     } on Object {
       if (throwOnError) rethrow;
@@ -150,8 +148,24 @@ class HomeOverviewNotifier extends AsyncNotifier<HomeOverview> {
 
   final int homeId;
 
+  /// Bấm −/+ liên tục chỉ gửi 1 lệnh `set_temp` sau khoảng lặng này.
+  static const setpointDebounce = Duration(milliseconds: 600);
+
+  final _setpointTimers = <int, Timer>{};
+  final _setpointWaiters = <int, Completer<void>>{};
+
   @override
   Future<HomeOverview> build() {
+    ref.onDispose(() {
+      for (final timer in _setpointTimers.values) {
+        timer.cancel();
+      }
+      _setpointTimers.clear();
+      for (final waiter in _setpointWaiters.values) {
+        if (!waiter.isCompleted) waiter.complete();
+      }
+      _setpointWaiters.clear();
+    });
     final userId = ref.watch(sessionUserIdProvider);
     final repository = ref.watch(homeRepositoryProvider);
     if (userId == null) {
@@ -210,7 +224,9 @@ class HomeOverviewNotifier extends AsyncNotifier<HomeOverview> {
   /// `GET /devices/:id`: refresh one device (FR-5.3).
   Future<void> refreshDevice(int deviceId) async {
     try {
-      final detail = await ref.read(deviceRepositoryProvider).getDevice(deviceId);
+      final detail = await ref
+          .read(deviceRepositoryProvider)
+          .getDevice(deviceId);
       if (!ref.mounted) return;
       _update((o) {
         var next = o.upsertDevice(detail.device);
@@ -232,13 +248,16 @@ class HomeOverviewNotifier extends AsyncNotifier<HomeOverview> {
     if (device == null || !device.canToggle || device.power == on) return;
     final pending = ref.read(pendingCommandsProvider.notifier);
     if (ref.read(pendingCommandsProvider).contains(deviceId)) return;
+    // An air conditioner being adjusted or taught keeps its own command order.
+    if (ref.read(setpointDraftsProvider).containsKey(deviceId)) return;
+    if (ref.read(acLearnProvider).isLearningDevice(deviceId)) return;
 
     pending.begin(deviceId);
     _update((o) => o.upsertDevice(device.copyWith(power: on)));
     try {
       final result = await ref
           .read(deviceRepositoryProvider)
-          .sendCommand(deviceId, PowerAction.forPower(on));
+          .sendCommand(deviceId, DeviceCommand.power(on));
       if (!ref.mounted) return;
       _update((o) => o.upsertDevice(result.device));
     } on Object {
@@ -258,8 +277,190 @@ class HomeOverviewNotifier extends AsyncNotifier<HomeOverview> {
     }
   }
 
+  /// Curtain `set_pos` (0..100): like [setPower] the tile shows the target
+  /// (position, and on/off = position > 0) at once, and goes back to the old
+  /// position when the Node does not confirm in time or refuses.
+  Future<void> setCurtainPosition(int deviceId, int position) async {
+    final device = state.value?.deviceById(deviceId);
+    if (device == null || !device.canToggle) return;
+    if (ApplianceKind.of(device) != ApplianceKind.curtain) return;
+    if (ref.read(pendingCommandsProvider).contains(deviceId)) return;
+    final target = position < 0 ? 0 : (position > 100 ? 100 : position);
+    if (device.curtainPos == target) return;
+    final pending = ref.read(pendingCommandsProvider.notifier);
+
+    pending.begin(deviceId);
+    _update(
+      (o) => o.upsertDevice(
+        device.copyWith(power: target > 0, curtainPos: target),
+      ),
+    );
+    try {
+      final result = await ref
+          .read(deviceRepositoryProvider)
+          .sendCommand(deviceId, DeviceCommand.setPosition(target));
+      if (!ref.mounted) return;
+      _update((o) => o.upsertDevice(result.device));
+    } on Object {
+      if (ref.mounted) {
+        _update((o) {
+          final latest = o.deviceById(deviceId);
+          // Roll back unless a newer realtime event already moved it.
+          if (latest != null && latest.curtainPos == target) {
+            return o.upsertDevice(
+              latest
+                  .copyWith(power: device.power)
+                  .withLiveValues(
+                    acSetpoint: latest.acSetpoint,
+                    acCodes: latest.acCodes,
+                    curtainPos: device.curtainPos,
+                  ),
+            );
+          }
+          return o;
+        });
+      }
+      rethrow;
+    } finally {
+      if (ref.mounted) pending.end(deviceId);
+    }
+  }
+
+  /// −/+ of an air conditioner: moves the set point by [delta] °C (kept in
+  /// 16..30). See [setSetpoint].
+  Future<void> adjustSetpoint(int deviceId, int delta) {
+    final device = state.value?.deviceById(deviceId);
+    if (device == null) return Future<void>.value();
+    final shown =
+        ref.read(setpointDraftsProvider)[deviceId] ?? device.acSetpoint;
+    final next = clampSetpoint((shown ?? acSetpointStart) + delta);
+    if (next == shown) return Future<void>.value();
+    return setSetpoint(deviceId, next);
+  }
+
+  /// `set_temp` of an air conditioner the backend has classified. The value is
+  /// shown at once (a draft) and many taps in a row send ONE command, after
+  /// [setpointDebounce] of quiet; an idle air conditioner is switched on by it.
+  /// When the command ends the server's device replaces the draft; on failure
+  /// the old value comes back.
+  ///
+  /// The returned future ends with the command this call leads to (and throws
+  /// what it throws); a call overtaken by a later tap ends at once.
+  Future<void> setSetpoint(int deviceId, int temperature) {
+    final device = state.value?.deviceById(deviceId);
+    if (device == null || !device.isAirConditioner || !device.canToggle) {
+      return Future<void>.value();
+    }
+    // A command is already on its way: its answer comes first.
+    if (ref.read(pendingCommandsProvider).contains(deviceId) ||
+        ref.read(acLearnProvider).isLearningDevice(deviceId)) {
+      return Future<void>.value();
+    }
+    final drafts = ref.read(setpointDraftsProvider.notifier);
+    final next = clampSetpoint(temperature);
+    final shown =
+        ref.read(setpointDraftsProvider)[deviceId] ?? device.acSetpoint;
+    if (next == shown && device.power == true) return Future<void>.value();
+
+    drafts.put(deviceId, next);
+    _setpointTimers.remove(deviceId)?.cancel();
+    final overtaken = _setpointWaiters.remove(deviceId);
+    if (overtaken != null && !overtaken.isCompleted) overtaken.complete();
+    final waiter = Completer<void>();
+    _setpointWaiters[deviceId] = waiter;
+    _setpointTimers[deviceId] = Timer(setpointDebounce, () {
+      _setpointTimers.remove(deviceId);
+      _setpointWaiters.remove(deviceId);
+      _sendSetpoint(deviceId, next).then(
+        (_) => waiter.complete(),
+        onError: (Object error, StackTrace stack) =>
+            waiter.completeError(error, stack),
+      );
+    });
+    return waiter.future;
+  }
+
+  Future<void> _sendSetpoint(int deviceId, int temperature) async {
+    final drafts = ref.read(setpointDraftsProvider.notifier);
+    final device = state.value?.deviceById(deviceId);
+    // Back to what the server already has (and it is running): no command.
+    if (device == null ||
+        (temperature == device.acSetpoint && device.power == true)) {
+      drafts.remove(deviceId);
+      return;
+    }
+    final pending = ref.read(pendingCommandsProvider.notifier);
+    pending.begin(deviceId);
+    // `set_temp` switches an idle air conditioner on (the IR code carries it).
+    _update((o) => o.upsertDevice(device.copyWith(power: true)));
+    try {
+      final result = await ref
+          .read(deviceRepositoryProvider)
+          .sendCommand(deviceId, DeviceCommand.setTemperature(temperature));
+      if (!ref.mounted) return;
+      _update((o) => o.upsertDevice(result.device));
+    } on Object {
+      if (ref.mounted) {
+        _update((o) {
+          final latest = o.deviceById(deviceId);
+          if (latest != null && latest.power == true && device.power != true) {
+            return o.upsertDevice(latest.copyWith(power: device.power));
+          }
+          return o;
+        });
+      }
+      rethrow;
+    } finally {
+      if (ref.mounted) {
+        drafts.remove(deviceId);
+        pending.end(deviceId);
+      }
+    }
+  }
+
+  /// `learn_code`: the Node learns one IR code of the air conditioner from the
+  /// real remote. One slot at a time ([acLearnProvider] carries the 10 s
+  /// countdown for the UI). Never throws: the outcome is the returned notice
+  /// (also kept in [acLearnProvider]); `null` when nothing was started.
+  Future<AcLearnNotice?> learnCode(int deviceId, AcSlot slot) async {
+    final device = state.value?.deviceById(deviceId);
+    if (device == null || !device.isAirConditioner || !device.canToggle) {
+      return null;
+    }
+    if (ref.read(acLearnProvider).isLearning) return null;
+    if (ref.read(pendingCommandsProvider).contains(deviceId) ||
+        ref.read(setpointDraftsProvider).containsKey(deviceId)) {
+      return null;
+    }
+    final learn = ref.read(acLearnProvider.notifier);
+    learn.begin(deviceId, slot);
+    AcLearnNotice notice;
+    try {
+      final result = await ref
+          .read(deviceRepositoryProvider)
+          .sendCommand(deviceId, DeviceCommand.learnCode(slot));
+      if (ref.mounted) _update((o) => o.upsertDevice(result.device));
+      notice = AcLearnNotice.success(learnSuccessText(slot));
+    } on Object catch (error) {
+      notice = AcLearnNotice.failure(
+        userMessageFor(
+          error,
+          context: ErrorContext.deviceCommand,
+          overrides: acLearnMessages,
+        ),
+      );
+    }
+    if (!ref.mounted) return notice;
+    learn.finish(notice);
+    // The new `ac_codes` bit (the server also returns it with the command).
+    await refreshDevice(deviceId);
+    return notice;
+  }
+
   Future<void> renameRoom(int roomId, String name) async {
-    final room = await ref.read(roomRepositoryProvider).renameRoom(roomId, name);
+    final room = await ref
+        .read(roomRepositoryProvider)
+        .renameRoom(roomId, name);
     if (!ref.mounted) return;
     _update((o) {
       var next = o.upsertRoom(room);
@@ -311,13 +512,19 @@ class HomeOverviewNotifier extends AsyncNotifier<HomeOverview> {
     }
     _update(
       (o) => o.upsertDevice(
-        device.copyWith(
-          online: event.online,
-          lastSeen: event.lastSeen,
-          power: event.power,
-          status: event.status,
-          roomId: event.roomId,
-        ),
+        device
+            .copyWith(
+              online: event.online,
+              lastSeen: event.lastSeen,
+              power: event.power,
+              status: event.status,
+              roomId: event.roomId,
+            )
+            .withLiveValues(
+              acSetpoint: event.acSetpoint,
+              acCodes: event.acCodes,
+              curtainPos: event.curtainPos,
+            ),
       ),
     );
   }

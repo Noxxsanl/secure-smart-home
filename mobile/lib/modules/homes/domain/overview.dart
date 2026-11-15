@@ -56,6 +56,7 @@ class HomeOverview {
   final int unreadNotifications;
 
   List<CustomerDevice> get relays => devices.where((d) => d.isRelay).toList();
+  List<CustomerDevice> get cameras => devices.where((d) => d.isCamera).toList();
   int get onCount => devices.where((d) => d.isRelay && d.isOn).length;
   int get onlineCount => devices.where((d) => d.online).length;
 

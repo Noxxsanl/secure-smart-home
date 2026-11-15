@@ -8,8 +8,11 @@ import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/widgets/app_widgets.dart';
 import '../../application/auth_providers.dart';
+import 'forgot_password_page.dart';
 
-/// Email + password login (FR-1.1). Errors are shown as Vietnamese guidance.
+/// Login with email or user tag (`ten#1234`) + password (FR-1.1; the backend
+/// matches either in the `email` field). Errors are shown as Vietnamese
+/// guidance.
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
@@ -42,7 +45,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     try {
       await ref
           .read(authControllerProvider.notifier)
-          .login(_emailController.text, _passwordController.text);
+          .login(_emailController.text.trim(), _passwordController.text);
       // On success the root swaps this page for the app.
     } on Object catch (error) {
       if (!mounted) return;
@@ -96,17 +99,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
-                      autofillHints: const [AutofillHints.email],
+                      autofillHints: const [AutofillHints.username],
                       decoration: const InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: Icon(Icons.email_outlined),
+                        labelText: 'Email hoặc mã người dùng',
+                        hintText: 'email@vidu.com hoặc ten#1234',
+                        prefixIcon: Icon(Icons.person_outline),
                       ),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
-                          return 'Vui lòng nhập email';
-                        }
-                        if (!value.contains('@')) {
-                          return 'Email không hợp lệ';
+                          return 'Vui lòng nhập email hoặc mã người dùng';
                         }
                         return null;
                       },
@@ -161,6 +162,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           : const Text('ĐĂNG NHẬP'),
                     ),
                     const SizedBox(height: 8),
+                    TextButton(
+                      key: const ValueKey<String>('login-forgot-password'),
+                      onPressed: _busy
+                          ? null
+                          : () => Navigator.of(context).push<void>(
+                              MaterialPageRoute(
+                                builder: (_) => const ForgotPasswordPage(),
+                              ),
+                            ),
+                      child: const Text('Quên mật khẩu?'),
+                    ),
                     TextButton(
                       onPressed: _busy
                           ? null

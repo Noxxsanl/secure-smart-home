@@ -310,7 +310,7 @@ void main() {
         'device': _device(11, 'relay', power: true),
       }),
     );
-    expect(command.action, PowerAction.turnOn);
+    expect(command.action, CommandAction.turnOn);
     expect(command.device.isOn, isTrue);
 
     final mine = myHomeFromJson(

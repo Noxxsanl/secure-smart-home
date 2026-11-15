@@ -107,7 +107,7 @@ class _RoomDetailPageState extends ConsumerState<RoomDetailPage> {
             onRefresh: _refresh,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
               children: [
                 if (data.gatewayOffline) ...[
                   const InlineBanner(
@@ -137,7 +137,9 @@ class _RoomDetailPageState extends ConsumerState<RoomDetailPage> {
                               ),
                               const Text(
                                 'Nhiệt độ',
-                                style: TextStyle(color: AppColors.textSecondary),
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                ),
                               ),
                             ],
                           ),
@@ -169,10 +171,7 @@ class _RoomDetailPageState extends ConsumerState<RoomDetailPage> {
                       label: 'Online',
                       value: '${current.onlineCount}/${current.deviceCount}',
                     ),
-                    _StatTile(
-                      label: 'Đang bật',
-                      value: '${current.onCount}',
-                    ),
+                    _StatTile(label: 'Đang bật', value: '${current.onCount}'),
                   ],
                 ),
                 if (current.climateUpdatedAt != null) ...[
@@ -204,10 +203,9 @@ class _RoomDetailPageState extends ConsumerState<RoomDetailPage> {
                       child: DeviceRow(
                         device: device,
                         homeSuspended: data.home.isSuspended,
-                        onTap: () => Navigator.of(context).openDevice(
-                          homeId: data.home.id,
-                          deviceId: device.id,
-                        ),
+                        onTap: () => Navigator.of(
+                          context,
+                        ).openDevice(homeId: data.home.id, deviceId: device.id),
                       ),
                     ),
               ],
@@ -241,7 +239,10 @@ class _StatTile extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             label,
-            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
           ),
         ],
       ),

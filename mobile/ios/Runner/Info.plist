@@ -16,6 +16,8 @@
 	<string>6.0</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Smart Home cần dùng camera để quét mã QR kích hoạt in trên hộp sản phẩm.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Smart Home cần dùng micro để bạn nói yêu cầu với Trợ lý AI (ví dụ: "bật đèn phòng khách"). Ứng dụng không lưu giọng nói của bạn.</string>
 	<key>CFBundleName</key>
 	<string>smart_home_mobile</string>
 	<key>CFBundlePackageType</key>

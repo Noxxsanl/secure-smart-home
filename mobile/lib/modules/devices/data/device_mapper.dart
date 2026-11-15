@@ -1,6 +1,8 @@
 import '../../../core/utils/json.dart';
 import '../domain/camera_snapshot.dart';
+import '../domain/appliance.dart';
 import '../domain/device.dart';
+import '../domain/device_command.dart';
 
 /// Contract §3 `Reading`.
 Reading readingFromJson(Json json) => Reading(
@@ -28,6 +30,10 @@ CustomerDevice deviceFromJson(Json json) => CustomerDevice(
   power: json.readBoolOrNull('power'),
   latest: readingOrNull(json.readObjectOrNull('latest')),
   canControl: json.readBool('can_control'),
+  appliance: ApplianceKind.fromApi(json.readStringOrNull('appliance')),
+  acSetpoint: json.readIntOrNull('ac_setpoint'),
+  acCodes: json.readIntOrNull('ac_codes'),
+  curtainPos: json.readIntOrNull('curtain_pos'),
 );
 
 /// `POST /devices/:id/commands` response.
@@ -35,7 +41,7 @@ CommandResult commandResultFromJson(Json json) {
   final command = json.readObject('command');
   return CommandResult(
     id: command.readIntOrNull('id') ?? 0,
-    action: PowerAction.fromApi(command.readStringOrNull('action')),
+    action: CommandAction.fromApi(command.readStringOrNull('action')),
     status: command.readString('status', fallback: 'acked'),
     issuedAt: command.readDateOrNull('issued_at'),
     ackedAt: command.readDateOrNull('acked_at'),

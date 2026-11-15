@@ -55,11 +55,11 @@ class _FakeHomes implements HomeRepository {
 class _FakeDevices implements DeviceRepository {
   _FakeDevices(this.onCommand);
 
-  final Future<CommandResult> Function(PowerAction action) onCommand;
+  final Future<CommandResult> Function(DeviceCommand command) onCommand;
 
   @override
-  Future<CommandResult> sendCommand(int deviceId, PowerAction action) =>
-      onCommand(action);
+  Future<CommandResult> sendCommand(int deviceId, DeviceCommand command) =>
+      onCommand(command);
 
   @override
   Future<DeviceDetail> getDevice(int deviceId) => throw UnimplementedError();
@@ -83,7 +83,7 @@ class _FakeDevices implements DeviceRepository {
 
 ProviderContainer _container(
   CustomerDevice device,
-  Future<CommandResult> Function(PowerAction) onCommand,
+  Future<CommandResult> Function(DeviceCommand) onCommand,
 ) {
   final container = ProviderContainer(
     retry: (_, _) => null,
@@ -126,9 +126,9 @@ void main() {
   test('successful command keeps the acknowledged state', () async {
     final container = _container(
       _relay(),
-      (action) async => CommandResult(
+      (command) async => CommandResult(
         id: 1,
-        action: action,
+        action: command.action,
         status: 'acked',
         device: _relay(power: true),
       ),

@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 
+import 'appliance.dart';
+import 'device_command.dart';
+
 enum DeviceCategory {
   gateway('gateway'),
   sensor('sensor'),
@@ -70,6 +73,10 @@ class CustomerDevice {
     this.lastSeen,
     this.power,
     this.latest,
+    this.appliance,
+    this.acSetpoint,
+    this.acCodes,
+    this.curtainPos,
   });
 
   final int id;
@@ -92,12 +99,36 @@ class CustomerDevice {
   /// Relay && the caller's role allows it, regardless of online state.
   final bool canControl;
 
+  /// What the backend says the relay drives; `null` = not assigned (old data):
+  /// [ApplianceKind.of] then guesses from the name, but the extra commands and
+  /// the schedule stay closed.
+  final ApplianceKind? appliance;
+
+  /// Air conditioner set point 16..30 °C the Node last sent; `null` = unknown.
+  final int? acSetpoint;
+
+  /// Bitmask of learned IR codes: bit 0 = OFF, bit (t − 15) = t °C
+  /// (`domain/ac_codes.dart`); `null` = the Node has not reported it.
+  final int? acCodes;
+
+  /// Curtain position 0..100 (0 = closed); `null` = unknown.
+  final int? curtainPos;
+
   bool get isRelay => category == DeviceCategory.relay;
   bool get isSensor => category == DeviceCategory.sensor;
   bool get isDoorContact => category == DeviceCategory.doorContact;
   bool get isCamera => category == DeviceCategory.camera;
   bool get isOn => power ?? false;
   bool get isBlocked => status == DeviceStatus.blocked;
+
+  /// Only an air conditioner the backend has classified takes `set_temp` and
+  /// `learn_code` (a name that merely looks like one does not count).
+  bool get isAirConditioner => appliance == ApplianceKind.airConditioner;
+
+  /// A one-off schedule (FR-5.10) is accepted for a controllable relay the
+  /// backend has classified as lamp, fan, curtain or air conditioner.
+  bool get isSchedulable =>
+      isRelay && canControl && (appliance?.isSchedulable ?? false);
 
   /// FR-5.3/5.5: the switch is usable only for an online, active relay the
   /// caller may control.
@@ -113,6 +144,10 @@ class CustomerDevice {
     int? roomId,
     String? roomName,
     bool? canControl,
+    ApplianceKind? appliance,
+    int? acSetpoint,
+    int? acCodes,
+    int? curtainPos,
   }) => CustomerDevice(
     id: id,
     deviceUid: deviceUid,
@@ -127,22 +162,39 @@ class CustomerDevice {
     power: power ?? this.power,
     latest: latest ?? this.latest,
     canControl: canControl ?? this.canControl,
+    appliance: appliance ?? this.appliance,
+    acSetpoint: acSetpoint ?? this.acSetpoint,
+    acCodes: acCodes ?? this.acCodes,
+    curtainPos: curtainPos ?? this.curtainPos,
   );
-}
 
-enum PowerAction {
-  turnOn('turn_on'),
-  turnOff('turn_off');
-
-  const PowerAction(this.apiValue);
-
-  final String apiValue;
-
-  static PowerAction fromApi(String? value) =>
-      value == 'turn_on' ? PowerAction.turnOn : PowerAction.turnOff;
-
-  static PowerAction forPower(bool on) =>
-      on ? PowerAction.turnOn : PowerAction.turnOff;
+  /// Sets the three live relay values exactly as given — `null` included
+  /// ("unknown now"). [copyWith] cannot do that: `null` there means "keep".
+  /// Used for the realtime `device_state` frame and for undoing an optimistic
+  /// change.
+  CustomerDevice withLiveValues({
+    required int? acSetpoint,
+    required int? acCodes,
+    required int? curtainPos,
+  }) => CustomerDevice(
+    id: id,
+    deviceUid: deviceUid,
+    name: name,
+    category: category,
+    homeId: homeId,
+    roomId: roomId,
+    roomName: roomName,
+    status: status,
+    online: online,
+    lastSeen: lastSeen,
+    power: power,
+    latest: latest,
+    canControl: canControl,
+    appliance: appliance,
+    acSetpoint: acSetpoint,
+    acCodes: acCodes,
+    curtainPos: curtainPos,
+  );
 }
 
 /// Result of `POST /devices/:id/commands` (contract §4.2).
@@ -158,7 +210,9 @@ class CommandResult {
   });
 
   final int id;
-  final PowerAction action;
+
+  /// What the server executed (kept as sent, never turned into another action).
+  final CommandAction action;
   final String status;
   final DateTime? issuedAt;
   final DateTime? ackedAt;

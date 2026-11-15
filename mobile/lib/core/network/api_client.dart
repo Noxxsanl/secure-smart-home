@@ -16,20 +16,44 @@ import 'api_exception.dart';
 ///   (`POST /auth/refresh`), persists the rotated refresh token and retries the
 ///   request once. If the refresh is rejected the session is cleared and
 ///   [onSessionExpired] fires.
-/// - Never logs request/response bodies (they can contain passwords/tokens).
+/// - Absolute-URL calls ([postUrl], [postBytesUrl]) reach the AI Agent behind
+///   the same origin: same Bearer token and refresh handling, but the agent
+///   reports an expired access token as `401 SESSION_EXPIRED`, which also
+///   triggers the single refresh + retry.
+/// - Never logs request/response bodies (they can contain passwords/tokens,
+///   voice recordings or what the user said).
 class ApiClient {
+  /// 401 codes that mean "refresh the session" on an AI Agent call: the
+  /// backend ones plus the agent's own `SESSION_EXPIRED`.
+  static const agentTokenRejections = {
+    ...ApiErrorCode.tokenRejections,
+    ApiErrorCode.sessionExpired,
+  };
+
+  /// [trustedOrigins]: other API origins (e.g. the AI Agent's
+  /// `AppConfig.agentBaseUrl`) that [postUrl] / [postBytesUrl] may call with
+  /// the Bearer token; any other absolute URL is refused so the token never
+  /// leaves the configured servers.
   ApiClient({
     required String baseUrl,
     required http.Client httpClient,
     required SessionStorage storage,
     this.onSessionExpired,
     this.timeout = const Duration(seconds: 15),
+    Iterable<String> trustedOrigins = const <String>[],
   }) : baseUrl = baseUrl.endsWith('/')
            ? baseUrl.substring(0, baseUrl.length - 1)
            : baseUrl,
+       _trustedOrigins = {
+         Uri.parse(baseUrl).origin,
+         for (final url in trustedOrigins) Uri.parse(url).origin,
+       },
        _http = httpClient,
        // ignore: prefer_initializing_formals
        _storage = storage;
+
+  /// Origins (`scheme://host[:port]`) an absolute URL may point at.
+  final Set<String> _trustedOrigins;
 
   /// e.g. `http://10.0.2.2:5000/api/mobile` (no trailing slash).
   final String baseUrl;
@@ -176,6 +200,53 @@ class ApiClient {
   Future<Object?> delete(String path, {Duration? timeout}) =>
       _request('DELETE', path, timeout: timeout);
 
+  /// `POST` to an absolute [url] outside `/api/mobile` (the AI Agent, e.g.
+  /// `http://host/api/agent/homes/1/messages`) with the session Bearer token.
+  /// A `401` with `SESSION_EXPIRED`/`NO_TOKEN`/`INVALID_TOKEN`/`TOKEN_EXPIRED`
+  /// refreshes the session and re-sends the request exactly once.
+  Future<Object?> postUrl(
+    String url, {
+    Object? body,
+    Map<String, Object?>? query,
+    Duration? timeout,
+  }) async {
+    final response = await _execute(
+      'POST',
+      url,
+      body: body,
+      query: query,
+      timeout: timeout,
+      absolute: true,
+      rejections: agentTokenRejections,
+    );
+    return _parse(response);
+  }
+
+  /// Like [postUrl] with a raw [bytes] body (a voice recording) sent as
+  /// [contentType] plus optional [headers]. The same bytes are re-sent after a
+  /// session refresh.
+  Future<Object?> postBytesUrl(
+    String url, {
+    required List<int> bytes,
+    required String contentType,
+    Map<String, String>? headers,
+    Map<String, Object?>? query,
+    Duration? timeout,
+  }) async {
+    final response = await _execute(
+      'POST',
+      url,
+      rawBody: bytes,
+      contentType: contentType,
+      extraHeaders: headers,
+      query: query,
+      timeout: timeout,
+      absolute: true,
+      rejections: agentTokenRejections,
+    );
+    return _parse(response);
+  }
+
   /// Downloads a binary body (e.g. a camera JPEG) with the same Bearer +
   /// single refresh-and-retry handling as JSON calls, so the image URL needs no
   /// token handling in the UI. Non-2xx → [ApiException].
@@ -222,6 +293,11 @@ class ApiClient {
     Duration? timeout,
     bool authenticated = true,
     String accept = 'application/json',
+    bool absolute = false,
+    List<int>? rawBody,
+    String? contentType,
+    Map<String, String>? extraHeaders,
+    Set<String> rejections = ApiErrorCode.tokenRejections,
   }) async {
     final tokens = authenticated ? await readSession() : null;
     var response = await _send(
@@ -232,11 +308,15 @@ class ApiClient {
       timeout: timeout,
       accessToken: tokens?.accessToken,
       accept: accept,
+      absolute: absolute,
+      rawBody: rawBody,
+      contentType: contentType,
+      extraHeaders: extraHeaders,
     );
 
     if (authenticated &&
         response.statusCode == 401 &&
-        _isTokenRejection(response)) {
+        _isTokenRejection(response, rejections)) {
       final refreshed = await refreshSession(
         staleAccessToken: tokens?.accessToken,
       );
@@ -255,8 +335,13 @@ class ApiClient {
         timeout: timeout,
         accessToken: fresh?.accessToken,
         accept: accept,
+        absolute: absolute,
+        rawBody: rawBody,
+        contentType: contentType,
+        extraHeaders: extraHeaders,
       );
-      if (response.statusCode == 401 && _isTokenRejection(response)) {
+      if (response.statusCode == 401 &&
+          _isTokenRejection(response, rejections)) {
         // A brand-new token was refused too: the account is gone/locked.
         await _expire(notify: true);
         throw const ApiException(
@@ -276,14 +361,20 @@ class ApiClient {
     Duration? timeout,
     String? accessToken,
     String accept = 'application/json',
+    bool absolute = false,
+    List<int>? rawBody,
+    String? contentType,
+    Map<String, String>? extraHeaders,
   }) async {
-    final uri = _uri(path, query);
+    final uri = _uri(path, query, absolute: absolute);
     final headers = <String, String>{
       'Accept': accept,
+      ...?extraHeaders,
+      if (rawBody != null && contentType != null) 'Content-Type': contentType,
       if (body != null) 'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
     };
-    final encoded = body == null ? null : jsonEncode(body);
+    final Object? encoded = rawBody ?? (body == null ? null : jsonEncode(body));
     try {
       final Future<http.Response> request = switch (method) {
         'GET' => _http.get(uri, headers: headers),
@@ -300,8 +391,16 @@ class ApiClient {
     }
   }
 
-  Uri _uri(String path, Map<String, Object?>? query) {
-    final base = Uri.parse('$baseUrl$path');
+  Uri _uri(String path, Map<String, Object?>? query, {bool absolute = false}) {
+    final base = Uri.parse(absolute ? path : '$baseUrl$path');
+    if (absolute &&
+        !((base.isScheme('http') || base.isScheme('https')) &&
+            base.host.isNotEmpty &&
+            _trustedOrigins.contains(base.origin))) {
+      // Programming/configuration error: never attach the Bearer token to a
+      // server that is not one of ours.
+      throw ArgumentError.value(path, 'url', 'not a configured API origin');
+    }
     final params = <String, String>{
       ...base.queryParameters,
       if (query != null)
@@ -311,12 +410,12 @@ class ApiClient {
     return params.isEmpty ? base : base.replace(queryParameters: params);
   }
 
-  bool _isTokenRejection(http.Response response) {
+  bool _isTokenRejection(http.Response response, Set<String> codes) {
     final error = ApiException.fromHttp(
       response.statusCode,
       _tryDecode(response),
     );
-    return ApiErrorCode.tokenRejections.contains(error.code);
+    return codes.contains(error.code);
   }
 
   Object? _tryDecode(http.Response response) {

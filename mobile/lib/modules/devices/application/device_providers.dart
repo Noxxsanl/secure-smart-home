@@ -9,7 +9,6 @@ import '../../../mock/mock_providers.dart';
 import '../../auth/auth.dart';
 import '../data/device_mock_repository.dart';
 import '../data/device_remote_repository.dart';
-import '../domain/camera_live.dart';
 import '../domain/camera_snapshot.dart';
 import '../domain/device.dart';
 import '../domain/device_repository.dart';
@@ -80,11 +79,3 @@ final snapshotImageProvider = FutureProvider.autoDispose.family<Uint8List, int>(
     return ref.watch(deviceRepositoryProvider).snapshotImage(snapshotId);
   },
 );
-
-/// Where the camera live view reads frames from; `null` while the backend does
-/// not relay the camera stream yet (the player then explains that live view is
-/// not available, see [CameraLiveSource]). Plug the real source in here.
-final cameraLiveSourceProvider = Provider<CameraLiveSource?>((ref) {
-  ref.watch(sessionUserIdProvider);
-  return null;
-});

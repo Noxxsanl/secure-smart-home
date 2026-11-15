@@ -9,7 +9,10 @@ sealed class RealtimeEvent {
   final int homeId;
 }
 
-/// `{"type":"device_state","home_id","device":{id,room_id,online,last_seen,power,status}}`
+/// `{"type":"device_state","home_id","device":{id,room_id,online,last_seen,
+/// power,status,ac_setpoint,ac_codes,curtain_pos}}`. The last three are
+/// applied as sent, `null` included (the Node no longer knows the value); the
+/// frame has no `appliance`.
 class DeviceStateEvent extends RealtimeEvent {
   const DeviceStateEvent({
     required int homeId,
@@ -19,6 +22,9 @@ class DeviceStateEvent extends RealtimeEvent {
     this.lastSeen,
     this.power,
     this.status,
+    this.acSetpoint,
+    this.acCodes,
+    this.curtainPos,
   }) : super(homeId);
 
   final int deviceId;
@@ -27,6 +33,9 @@ class DeviceStateEvent extends RealtimeEvent {
   final DateTime? lastSeen;
   final bool? power;
   final DeviceStatus? status;
+  final int? acSetpoint;
+  final int? acCodes;
+  final int? curtainPos;
 }
 
 /// `{"type":"telemetry","home_id","room_id","device_id","reading":{…}}`

@@ -8,7 +8,6 @@ import 'package:smart_home_mobile/mock/mock_backend.dart';
 import 'package:smart_home_mobile/mock/mock_providers.dart';
 import 'package:smart_home_mobile/modules/devices/devices.dart';
 import 'package:smart_home_mobile/modules/homes/features/claim/mobile_scanner_view.dart';
-import 'package:smart_home_mobile/modules/homes/homes.dart';
 import 'package:smart_home_mobile/modules/realtime/realtime.dart';
 
 Widget _app({MemorySessionStorage? storage}) => ProviderScope(
@@ -34,7 +33,10 @@ Widget _app({MemorySessionStorage? storage}) => ProviderScope(
 );
 
 Future<void> _login(WidgetTester tester, String email, [String password = 'user123']) async {
-  await tester.enterText(find.widgetWithText(TextFormField, 'Email'), email);
+  await tester.enterText(
+    find.widgetWithText(TextFormField, 'Email hoặc mã người dùng'),
+    email,
+  );
   await tester.enterText(find.widgetWithText(TextFormField, 'Mật khẩu'), password);
   await tester.tap(find.text('ĐĂNG NHẬP'));
   await tester.pumpAndSettle();
@@ -63,7 +65,10 @@ void main() {
   ) async {
     await _pump(tester, _app());
     await _login(tester, 'user01@smarthome.local', 'sai-mat-khau');
-    expect(find.textContaining('Email hoặc mật khẩu không đúng'), findsOneWidget);
+    expect(
+      find.textContaining('Email/mã người dùng hoặc mật khẩu không đúng'),
+      findsOneWidget,
+    );
     expect(find.textContaining('INVALID_CREDENTIALS'), findsNothing);
   });
 
@@ -79,13 +84,25 @@ void main() {
     await _pump(tester, _app());
     await _login(tester, 'user01@smarthome.local');
 
-    expect(find.text('Nhà của Đạt'), findsOneWidget);
+    expect(find.text('Nhà của Nguyễn Hoàng Đạt'), findsOneWidget);
     expect(find.text('Xin chào, Đạt'), findsOneWidget);
     expect(find.text('Chủ nhà'), findsWidgets);
     expect(find.text('Gợi ý từ AI'), findsOneWidget);
-    for (final label in ['Trang chủ', 'Phòng', 'Tự động', 'Thông báo', 'Hồ sơ']) {
+    for (final label in ['Trang chủ', 'Tự động', 'Thông báo', 'Hồ sơ']) {
       expect(find.byKey(ValueKey<String>('nav-$label')), findsOneWidget);
     }
+    // No "Phòng" tab any more; the Assistant's mic sits in the middle.
+    expect(find.byKey(const ValueKey<String>('nav-Phòng')), findsNothing);
+    final mic = tester.getCenter(find.byKey(const ValueKey('assistant-mic')));
+    final left = tester.getCenter(find.byKey(const ValueKey('nav-Tự động')));
+    final right = tester.getCenter(find.byKey(const ValueKey('nav-Thông báo')));
+    expect(mic.dx, greaterThan(left.dx));
+    expect(mic.dx, lessThan(right.dx));
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('assistant-mic'))).dy,
+      lessThan(tester.getTopLeft(find.byKey(const ValueKey('nav-Tự động'))).dy),
+    );
+    expect(find.text('Trợ lý'), findsOneWidget);
 
     // First relay tile is "Đèn phòng khách" (on) → optimistic switch off.
     final firstSwitch = find.byType(Switch).first;
@@ -97,7 +114,9 @@ void main() {
     // Accepting the AI suggestion creates a rule (FR-7.5).
     await tester.tap(find.byKey(const ValueKey<String>('nav-Tự động')));
     await tester.pumpAndSettle();
-    expect(find.text('Phòng ngủ nóng → bật quạt'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('automation-tab-rules')));
+    await tester.pumpAndSettle();
+    expect(find.text('Phòng khách nóng → bật quạt'), findsOneWidget);
     await tester.tap(find.text('Chấp nhận'));
     await tester.pumpAndSettle();
     expect(find.text('Bật Đèn phòng khách lúc 23:00'), findsNothing);
@@ -105,7 +124,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey<String>('nav-Thông báo')));
     await tester.pumpAndSettle();
-    expect(find.text('Cửa chính vừa được mở'), findsOneWidget);
+    expect(find.text('Camera phát hiện chuyển động'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey<String>('nav-Hồ sơ')));
     await tester.pumpAndSettle();
@@ -125,19 +144,28 @@ void main() {
 
     await _login(tester, 'user01@smarthome.local');
 
-    // Home dashboard → room detail (homes, RoomRouteArgs).
+    // Home dashboard → all devices → room name → room detail (homes,
+    // RoomRouteArgs); the Home screen itself no longer lists rooms.
+    expect(find.text('Phòng'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey<String>('all-devices')));
+    await tester.pumpAndSettle();
     await tester.tap(
-      find.descendant(of: find.byType(RoomCard), matching: find.text('Phòng ngủ')),
+      find.descendant(
+        of: find.byKey(const ValueKey<String>('device-list-view')),
+        matching: find.text('Phòng khách'),
+      ),
     );
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Phòng ngủ'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Phòng khách'), findsOneWidget);
 
     // Room detail → device detail (devices, DeviceRouteArgs).
     await tester.tap(
-      find.descendant(of: find.byType(DeviceRow), matching: find.text('Quạt phòng ngủ')),
+      find.descendant(of: find.byType(DeviceRow), matching: find.text('Quạt phòng khách')),
     );
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Quạt phòng ngủ'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Quạt phòng khách'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.pageBack();
@@ -161,6 +189,8 @@ void main() {
     expect(tester.widget<Switch>(find.byType(Switch).first).onChanged, isNull);
 
     await tester.tap(find.byKey(const ValueKey<String>('nav-Tự động')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('automation-tab-rules')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Bạn chỉ có quyền xem'), findsOneWidget);
     expect(find.text('Tạo quy tắc'), findsNothing);
@@ -224,7 +254,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey<String>('onboarding-invitations')));
     await tester.pumpAndSettle();
-    expect(find.text('Nhà của Đạt'), findsOneWidget);
+    expect(find.text('Nhà của Nguyễn Hoàng Đạt'), findsOneWidget);
     await tester.tap(find.byType(FilledButton).first);
     await tester.pumpAndSettle();
     // Back on the root: the user now has a home → shell.
@@ -234,6 +264,10 @@ void main() {
     expect(find.byKey(const ValueKey<String>('nav-Trang chủ')), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey<String>('nav-Tự động')));
+    await tester.pumpAndSettle();
+    // The schedules tab stays usable for a guest; rules are explained.
+    expect(find.byKey(const ValueKey<String>('schedule-add')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey<String>('automation-tab-rules')));
     await tester.pumpAndSettle();
     expect(find.text('Khách không xem được tự động hoá'), findsOneWidget);
   });

@@ -43,5 +43,7 @@ final apiClientProvider = Provider<ApiClient>((ref) {
     httpClient: ref.watch(httpClientProvider),
     storage: ref.watch(sessionStorageProvider),
     onSessionExpired: bus.notifyExpired,
+    // The AI Agent may live on another origin (AGENT_BASE_URL).
+    trustedOrigins: [config.agentBaseUrl],
   );
 });

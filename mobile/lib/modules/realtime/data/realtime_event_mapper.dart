@@ -22,7 +22,12 @@ RealtimeEvent? parseRealtimeEvent(RealtimeMessage message) {
           online: device.readBoolOrNull('online'),
           lastSeen: device.readDateOrNull('last_seen'),
           power: device.readBoolOrNull('power'),
-          status: statusValue == null ? null : DeviceStatus.fromApi(statusValue),
+          status: statusValue == null
+              ? null
+              : DeviceStatus.fromApi(statusValue),
+          acSetpoint: device.readIntOrNull('ac_setpoint'),
+          acCodes: device.readIntOrNull('ac_codes'),
+          curtainPos: device.readIntOrNull('curtain_pos'),
         );
       case 'telemetry':
         return TelemetryEvent(

@@ -5,6 +5,7 @@ import '../../../core/utils/json.dart';
 import '../../homes/homes.dart';
 import '../domain/camera_snapshot.dart';
 import '../domain/device.dart';
+import '../domain/device_command.dart';
 import '../domain/device_repository.dart';
 import 'device_mapper.dart';
 
@@ -13,10 +14,6 @@ class RemoteDeviceRepository implements DeviceRepository {
   RemoteDeviceRepository(this._api);
 
   final ApiClient _api;
-
-  /// The server answers `504 TIMEOUT` after 5 s without an ack; allow a little
-  /// network slack before giving up locally (FR-5.3).
-  static const commandTimeout = Duration(seconds: 8);
 
   @override
   Future<DeviceDetail> getDevice(int deviceId) async {
@@ -40,11 +37,14 @@ class RemoteDeviceRepository implements DeviceRepository {
   }
 
   @override
-  Future<CommandResult> sendCommand(int deviceId, PowerAction action) async {
+  Future<CommandResult> sendCommand(int deviceId, DeviceCommand command) async {
+    // The server answers `504 TIMEOUT` after 5 s without an ack (learning: the
+    // Node waits ≤ 10 s for the remote, the server ≤ 15 s); the client allows
+    // network slack on top (FR-5.3).
     final data = await _api.post(
       '/devices/$deviceId/commands',
-      body: {'action': action.apiValue},
-      timeout: commandTimeout,
+      body: command.toJson(),
+      timeout: command.timeout,
     );
     return commandResultFromJson(asJson(data));
   }
