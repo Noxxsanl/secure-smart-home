@@ -328,7 +328,7 @@ export type Schedule = {
   action: ScheduleAction;
   temperature: number | null;
   position: number | null;
-  // Backend sinh sẵn, VD "Đặt Điều hoà 26°C" (không chứa tên phòng).
+  // Backend sinh sẵn, VD "Đặt điều hoà 26°C" (không chứa tên phòng).
   action_label: string;
   run_at: string;
   status: ScheduleStatus;
@@ -357,6 +357,70 @@ export type ScheduleInput = {
 };
 
 export type ScheduleList = { items: Schedule[] };
+
+// --- Trợ lý AI (giọng nói/chữ): AI Agent `/api/agent/**` + `/api/portal/agent/requests/**` ---
+// Hợp đồng: agent trả `AgentReply`; xác nhận/từ chối đi qua backend (`/api/portal/agent/requests/:id/...`).
+export type AgentReplyType = "answer" | "done" | "scheduled" | "confirm" | "mixed" | "clarify" | "refuse";
+export type AgentRequestStatus = "pending" | "confirmed" | "rejected" | "expired" | "completed";
+
+/** Một bước chờ xác nhận. `action_label` do backend sinh ("Bật đèn phòng khách"); `run_at = null` nghĩa là chạy ngay khi xác nhận. */
+export type AgentPendingStep = {
+  index: number;
+  device_id: number;
+  device_name: string;
+  room_name: string | null;
+  action_label: string;
+  run_at: string | null;
+  reason: string;
+};
+
+export type AgentPending = {
+  request_id: number;
+  /** SHA-256 hex của các bước chờ — gửi lại nguyên văn khi xác nhận (backend phát hiện bước bị đổi). */
+  request_hash: string;
+  expires_at: string;
+  steps: AgentPendingStep[];
+};
+
+export type AgentRejectedStep = {
+  index: number;
+  // NOT_FOUND | FORBIDDEN | HOME_SUSPENDED | NOT_CONTROLLABLE | INVALID_WHEN | SCHEDULE_LIMIT | …
+  code: string;
+  /** Câu tiếng Việt do agent soạn (backend trả thẳng thì không có). */
+  message?: string;
+};
+
+export type AgentClarification = { question: string; options: string[] };
+
+export type AgentReply = {
+  conversation_id: string;
+  type: AgentReplyType;
+  reply: string;
+  /** Chữ nhận dạng được từ giọng nói; null khi người dùng gõ chữ. */
+  transcript: string | null;
+  clarification: AgentClarification | null;
+  /** Bước lệnh rõ mà backend đã chạy ngay, kèm kết quả (status done/skipped/failed…, `error_code`). */
+  executed: Schedule[];
+  scheduled: Schedule[];
+  pending: AgentPending | null;
+  rejected: AgentRejectedStep[];
+};
+
+/** GET /agent/requests/:id — chỉ người tạo xem được. */
+export type AgentRequestDetail = {
+  id: number;
+  status: AgentRequestStatus;
+  summary: string;
+  input_kind: "voice" | "text";
+  created_at: string;
+  expires_at: string | null;
+  pending: AgentPending | null;
+  schedules: Schedule[];
+};
+
+/** POST /agent/requests/:id/confirm — `results` là lịch của từng bước đã chọn (đã chạy / chờ chạy / không chạy được). */
+export type AgentConfirmResult = { request_id: number; status: "completed"; results: Schedule[] };
+export type AgentRejectResult = { request_id: number; status: "rejected" };
 
 export type ClaimResult = { home: Home; role: "OWNER" };
 

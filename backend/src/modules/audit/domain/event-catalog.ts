@@ -114,6 +114,9 @@ export const EVENT_CATALOG_ENTRIES: ReadonlyArray<readonly [string, LogCategory,
   ["SUGGESTION_DISMISSED", "automation", "info"],
   ["SCHEDULE_CREATED", "automation", "info"], // thêm: khách tạo hẹn giờ một lần (module schedules)
   ["SCHEDULE_CANCELLED", "automation", "info"], // thêm: huỷ hẹn giờ trước giờ chạy
+  ["AGENT_REQUEST_CREATED", "automation", "info"], // thêm: Trợ lý AI nhận lệnh (module agent); details chỉ id + số bước, không có câu nói
+  ["AGENT_REQUEST_CONFIRMED", "automation", "info"], // thêm: người dùng xác nhận các bước Trợ lý đề xuất
+  ["AGENT_REQUEST_REJECTED", "automation", "info"], // thêm: người dùng từ chối đề xuất của Trợ lý
   // ota
   ["FIRMWARE_UPLOADED", "ota", "info"],
   ["OTA_DEPLOYED", "ota", "info"],

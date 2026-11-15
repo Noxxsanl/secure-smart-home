@@ -4,6 +4,7 @@
 //
 //   { after_minutes: N }          → now + N phút (giữ nguyên giây)
 //   { at: "HH:MM", date: "…" }    → đúng giờ địa phương đó của ngày đó, giây = 0
+//   { at: "HH:MM", day_offset: N }→ ngày địa phương hôm nay + N (0..6) lúc HH:MM, giây = 0 (loại trừ với date; Trợ lý AI dùng)
 //   { at: "HH:MM" }               → hôm nay (giờ nhà) lúc HH:MM; nếu < now + 30 s thì cộng 1 ngày
 // Bắt buộc now + 30 s ≤ run_at ≤ now + 7 ngày, ngoài khoảng → 400 INVALID_INPUT.
 import { HttpError } from "../../../shared/errors/http-error";
@@ -16,6 +17,8 @@ export const MIN_LEAD_MS = 30_000;
 /** Hẹn tối đa 7 ngày. */
 export const MAX_LEAD_MS = 7 * 24 * 60 * 60 * 1000;
 export const MAX_AFTER_MINUTES = 7 * 24 * 60;
+/** `day_offset` lớn nhất (ngày hôm nay + 6 vẫn có thể nằm trong 7 ngày tới). */
+export const MAX_DAY_OFFSET = 6;
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -72,6 +75,7 @@ export function parseWhen(value: unknown): ScheduleWhen {
 
   if (hasAfter) {
     if (!isBlank(body.date)) throw invalid("when.date can only be used with when.at");
+    if (!isBlank(body.day_offset)) throw invalid("when.day_offset can only be used with when.at");
     const minutes = body.after_minutes;
     if (typeof minutes !== "number" || !Number.isInteger(minutes) || minutes < 1 || minutes > MAX_AFTER_MINUTES) {
       throw invalid(`when.after_minutes must be an integer between 1 and ${MAX_AFTER_MINUTES}`);
@@ -81,6 +85,14 @@ export function parseWhen(value: unknown): ScheduleWhen {
 
   if (typeof body.at !== "string" || parseHhmm(body.at.trim()) === null) throw invalid("when.at must be HH:MM (00:00-23:59)");
   const at = body.at.trim();
+  if (!isBlank(body.day_offset)) {
+    if (!isBlank(body.date)) throw invalid("when.date and when.day_offset are mutually exclusive");
+    const offset = body.day_offset;
+    if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > MAX_DAY_OFFSET) {
+      throw invalid(`when.day_offset must be an integer between 0 and ${MAX_DAY_OFFSET}`);
+    }
+    return { at, dayOffset: offset };
+  }
   if (isBlank(body.date)) return { at };
   if (typeof body.date !== "string" || parseDateKey(body.date.trim()) === null) throw invalid("when.date must be a real date YYYY-MM-DD");
   return { at, date: body.date.trim() };
@@ -102,6 +114,13 @@ export function resolveWhen(when: ScheduleWhen, timezone: string, now: Date): Da
     if (when.date !== undefined) {
       if (parseDateKey(when.date) === null) throw invalid("date must be a real date YYYY-MM-DD");
       runMs = localToUtcMs(when.date, minuteOfDay, timezone);
+    } else if (when.dayOffset !== undefined) {
+      if (!Number.isInteger(when.dayOffset) || when.dayOffset < 0 || when.dayOffset > MAX_DAY_OFFSET) {
+        throw invalid(`day_offset must be an integer between 0 and ${MAX_DAY_OFFSET}`);
+      }
+      // Ngày địa phương hôm nay + offset. Giờ đã qua KHÔNG tự chuyển sang ngày sau (người nói "tối nay 9h" mà đã quá 21:00
+      // thì phải báo INVALID_INPUT ở kiểm khoảng dưới) — khác dạng không có day_offset.
+      runMs = localToUtcMs(addDays(homeLocalParts(now, timezone).dateKey, when.dayOffset), minuteOfDay, timezone);
     } else {
       const today = homeLocalParts(now, timezone).dateKey;
       runMs = localToUtcMs(today, minuteOfDay, timezone);

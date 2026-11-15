@@ -1,5 +1,15 @@
-"""Client backend — sẽ sinh từ contracts/openapi.json.
+"""Client backend viết tay (kênh /api/service/agent/**) — xem client.py."""
 
-openapi.json hiện còn rỗng (chưa có công cụ sinh từ backend); hợp đồng thật vẫn ở
-docs/API_DESIGN.md. Không sửa tay code sinh ra ở thư mục này.
-"""
+from .client import BackendClient, Credential, build_http_client
+from .models import CreateRequestResult, DeviceInfo, HomeContext, RejectedByBackend, RoomInfo
+
+__all__ = [
+    "BackendClient",
+    "CreateRequestResult",
+    "Credential",
+    "DeviceInfo",
+    "HomeContext",
+    "RejectedByBackend",
+    "RoomInfo",
+    "build_http_client",
+]

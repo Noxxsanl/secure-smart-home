@@ -1,5 +1,6 @@
 import json
-from datetime import UTC, datetime
+import re
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -15,6 +16,12 @@ from smarthome_agent.usage import (
 )
 
 TOKEN = "t" * 40
+
+# Sao y ISO_DATE_RE của backend (backend/src/shared/validation/validate.ts):
+# occurred_at sai mẫu là cả lô bị 400.
+BACKEND_ISO_DATE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$"
+)
 
 
 def _record(**overrides) -> UsageRecord:
@@ -66,6 +73,19 @@ def test_anthropic_usage_is_normalized_to_total_input():
     tokens = anthropic_usage(usage)
     assert tokens.input_tokens == 2400
     assert (tokens.cached_input_tokens, tokens.cache_write_tokens) == (2000, 300)
+
+
+def test_occurred_at_is_sent_in_utc_milliseconds_accepted_by_backend():
+    # datetime.now(UTC) có micro giây — pydantic mặc định in ".448588Z", backend trả 400.
+    with_micro = _record(occurred_at=datetime(2026, 11, 15, 0, 52, 53, 448588, tzinfo=UTC))
+    assert with_micro.model_dump(mode="json")["occurred_at"] == "2026-11-15T00:52:53.448Z"
+    ict = timezone(timedelta(hours=7))
+    local = _record(occurred_at=datetime(2026, 11, 15, 7, 52, 53, 448588, tzinfo=ict))
+    assert local.model_dump(mode="json")["occurred_at"] == "2026-11-15T00:52:53.448Z"
+    for record in (with_micro, local, _record(occurred_at=datetime.now(UTC))):
+        assert BACKEND_ISO_DATE_RE.match(record.model_dump(mode="json")["occurred_at"])
+    # Chế độ python vẫn là datetime (chỉ đổi khi gửi JSON)
+    assert isinstance(with_micro.model_dump()["occurred_at"], datetime)
 
 
 def test_record_rejects_content_fields_and_bad_tokens():

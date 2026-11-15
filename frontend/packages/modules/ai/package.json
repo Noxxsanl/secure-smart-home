@@ -2,7 +2,7 @@
   "name": "@shh/ai",
   "version": "0.1.0",
   "private": true,
-  "description": "AI Usage: chi phí, token, độ trễ, lỗi của LLM/STT mà AI Agent dùng; bảng giá model, ngân sách ngày.",
+  "description": "AI Usage (console): chi phí, token, độ trễ, lỗi của LLM/STT mà AI Agent dùng; bảng giá model, ngân sách ngày. Trợ lý AI giọng nói/chữ (cổng khách).",
   "exports": {
     ".": "./src/index.ts"
   },

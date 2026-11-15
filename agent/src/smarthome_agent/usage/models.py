@@ -7,10 +7,10 @@ KHÔNG có trường nào cho nội dung prompt/câu trả lời — extra="forb
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 Purpose = Literal["planner", "clarify", "summary", "stt", "eval", "other"]
 Status = Literal["success", "error", "timeout"]
@@ -56,6 +56,15 @@ class UsageRecord(BaseModel):
     request_id: str | None = Field(None, pattern=_CODE)
     round_index: int | None = Field(None, ge=0, le=100)
     occurred_at: datetime
+
+    @field_serializer("occurred_at", when_used="json")
+    def _occurred_at_ms(self, value: datetime) -> str:
+        # Backend (ISO_DATE_RE ở shared/validation/validate.ts) nhận tối đa 3 chữ số phần giây;
+        # pydantic mặc định in micro giây (".448588Z") → cả lô bị 400. Gửi UTC tới mili giây:
+        # "2026-11-15T00:52:53.448Z".
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
     @model_validator(mode="after")
     def _check_tokens(self) -> "UsageRecord":

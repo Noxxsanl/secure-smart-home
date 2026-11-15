@@ -21,7 +21,9 @@ ARG APP=admin
 # rewrites /api/* (next.config.ts) được ghi vào bản build. Trong compose, nginx route /api/ thẳng
 # tới backend; rewrites chỉ là đường dự phòng khi gọi thẳng cổng của container frontend.
 ARG BACKEND_URL=http://backend:5000
-ENV BACKEND_URL=${BACKEND_URL} NEXT_TELEMETRY_DISABLED=1
+# Như trên cho `/api/agent/*` → AI Agent (chỉ app user dùng, các app khác bỏ qua).
+ARG AGENT_URL=http://agent:8000
+ENV BACKEND_URL=${BACKEND_URL} AGENT_URL=${AGENT_URL} NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 # Lấy cả /app của deps (gồm node_modules lồng trong workspace nếu npm không hoist được).
 COPY --from=deps /app ./

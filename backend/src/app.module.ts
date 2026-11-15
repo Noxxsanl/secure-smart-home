@@ -13,11 +13,15 @@
 //   WebSocket (không qua router Express — đăng ký vào core/ws/upgrade-router.ts ở main.ts): /mobile/ws (realtime),
 //   /device/camera/live (uplink gateway, HMAC) và /portal/cameras/:deviceId/live (viewer web, cookie sh_user) (camera)
 //   /portal|mobile/homes/:homeId/schedules, /schedules/:id/cancel – hẹn giờ một lần (module schedules)
+//   /portal|mobile/agent/requests/:id[/confirm|/reject] – xem/xác nhận/từ chối đề xuất của Trợ lý AI (module agent)
 //   /service/**                 – dịch vụ nội bộ (AI Agent): Bearer SERVICE_API_TOKEN; nginx chặn từ bên ngoài
+//     /service/agent/homes/:homeId/{context,requests} – thêm requireActingUser: người dùng mà agent thay mặt (cookie sh_user
+//                                 chuyển tiếp hoặc X-User-Authorization: Bearer) — module agent
 // Router /auth LUÔN mount trước guard của cùng kênh, nếu không login sẽ bị chặn 401.
 import { Router } from "express";
 import { requireServiceToken } from "./core/auth/service-token";
 import healthRoutes from "./core/health/health.routes";
+import { agentModule } from "./modules/agent";
 import { aiUsageModule } from "./modules/ai-usage";
 import { auditModule } from "./modules/audit";
 import { automationModule } from "./modules/automation";
@@ -63,6 +67,7 @@ export const APP_MODULES: readonly AppModule[] = [
   statsModule,
   simulatorModule,
   aiUsageModule,
+  agentModule,
 ];
 
 function buildCustomerRouter(channel: CustomerChannel): Router {

@@ -12,6 +12,17 @@
 | **Cập nhật** | 2026-09-30 |
 | **Ảnh hưởng** | [PRD](../PRD_SMART_HOME.md) (E7, §2.2, §8, §11.2, §12 Q1, §13 M5), [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §18, [Database](../architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.12, [Mobile](../architecture/MOBILE_APP_ARCHITECTURE.md) §14, [Bảo mật](../SECURITY_ARCHITECTURE.md), bất biến số 8 trong `CLAUDE.md` |
 
+> **Trạng thái hiện thực (2026-11-14) — đọc trước.** Một phần đề xuất đã được làm thử ở bản "Trợ lý AI giọng nói/chữ" trên **web app user** (người dùng đã duyệt kế hoạch hiện thực; đề xuất tổng thể vẫn chờ giảng viên). Chi tiết hợp đồng: [API](../API_DESIGN.md) §5.1 "Trợ lý AI", [Database](../architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8 (`agent_requests`), [Bảo mật](../SECURITY_ARCHITECTURE.md) (mô hình đe doạ Trợ lý), [PRD](../PRD_SMART_HOME.md) E7 (đánh dấu FR-7.x).
+>
+> **Đã hiện thực:** hiểu câu tiếng Việt bằng giọng nói (STT OpenAI) hoặc chữ; LLM (OpenAI Responses API, 2 công cụ `ask_clarification` và `propose_plan`) đề xuất kế hoạch tối đa 10 bước; hỏi lại tối đa 2 lần; guard phía agent + **luật tất định phía backend** quyết định từng bước; thẻ xác nhận có `request_hash` (xác nhận đúng phiên bản thẻ đã hiển thị; các bước chờ không bao giờ bị sửa sau khi tạo), hết hạn 5 phút; lệnh đi qua `scheduled_actions` + `sendDeviceCommand` với `source = ai_agent`; bảng `agent_requests`, audit `AGENT_REQUEST_*`, thông báo `AGENT_SCHEDULED`; LLM chỉ nhận mã tạm, không nhận ID thật/PII; đo chi phí qua tab AI Usage.
+>
+> **3 điểm khác đề xuất:**
+> 1. **Dịch vụ Python `agent/`** (FastAPI) điều phối STT + LLM, không đặt trong `backend/src/modules/agent/` (module này của backend chỉ giữ luật, lưu trữ và xác nhận). Backend ↔ agent nói chuyện qua kênh `/api/service/agent/**` (Bearer `SERVICE_API_TOKEN` + cookie người dùng chuyển tiếp).
+> 2. **Client là web user**, không phải Mobile (Mobile để sau; API kênh Bearer đã có sẵn).
+> 3. **Luật "lệnh rõ" thay cho phân loại R0–R4** (cập nhật 2026-11-15 theo quyết định của người dùng): lệnh người dùng nói/gõ **rõ** — backend kiểm từ câu gốc bằng `evidence_span` trích nguyên văn: có động từ đúng hướng + từ loại thiết bị, đúng một thiết bị, không phủ định / điều kiện / câu hỏi, giờ hẹn khớp giờ trong câu ([API](../API_DESIGN.md) §5.1, điều kiện R1–R5 và C1–C5) — thì Trợ lý **làm ngay** hoặc **tự hẹn giờ** và báo kết quả (lịch huỷ được tới lúc chạy); lệnh chưa rõ hoặc AI tự suy ra thì hỏi lại hoặc thẻ xác nhận. Không còn ngưỡng ≥ 2 phút, không giới hạn số bước tự làm, không dùng ngưỡng độ tin cậy STT, không có nút hoàn tác (người dùng chốt). Trước 2026-11-15 luật là: chỉ lệnh hẹn giờ nói rõ còn ≥ 2 phút (tối đa 3 lịch/yêu cầu) mới tự đặt lịch, mọi lệnh chạy ngay đều phải xác nhận. Rủi ro còn lại (STT nghe sai mà vẫn thành lệnh rõ thì vẫn chạy): [Bảo mật](../SECURITY_ARCHITECTURE.md) §9.2. Các mục 7 và 8 bên dưới là **đề xuất gốc**, chưa đồng bộ với luật này.
+>
+> **Chưa làm:** Mobile; Policy Engine R0–R4 đầy đủ, hoàn tác, xác thực lại cho lệnh nhạy cảm (R3); công cụ chỉ-đọc nhiều bước (`get_*`); lưu kế hoạch thành Scene/Automation (FR-7.16); sở thích ghi nhớ (FR-7.17); luật dự phòng khi LLM lỗi (FR-7.18); STT cục bộ (`whisper_local`); chạy đầu-cuối với OpenAI và phần cứng thật.
+
 ---
 
 ## MỤC LỤC

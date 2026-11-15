@@ -118,3 +118,98 @@ export async function finishSchedule(id: number, outcome: ScheduleOutcome): Prom
   );
   return result.affectedRows > 0;
 }
+
+// ── Trợ lý AI (module agent) ────────────────────────────────────────────────
+
+/** Ngữ cảnh chung của các lịch một yêu cầu Trợ lý AI tạo ra (origin luôn là 'ai_agent'). */
+export interface AgentScheduleContext {
+  homeId: number;
+  agentRequestId: number;
+  channel: ScheduleChannel;
+  createdByUserId: number;
+}
+
+/**
+ * Một lịch của Trợ lý: bình thường chèn 'scheduled'. `failedCode` ≠ undefined → chèn thẳng 'failed' với error_code đó
+ * (bước người dùng đã xác nhận nhưng không thực hiện được — vẫn lưu để họ thấy kết quả từng bước; không tính vào trần).
+ * `deviceId` null khi thiết bị đã bị xoá (FK không cho trỏ tới id không còn).
+ */
+export interface NewAgentSchedule {
+  deviceId: number | null;
+  action: string;
+  runAt: Date;
+  failedCode?: string;
+  /**
+   * true = chèn thẳng 'running' (lệnh "chạy ngay" sau xác nhận): người gọi đã giành quyền ngay trong transaction nên worker 5 s
+   * không thể giành trước (nếu không worker sẽ chạy lịch này, thêm thông báo SCHEDULE_DONE và tranh kết quả với người gọi).
+   * Người gọi PHẢI gọi executeScheduleNow(id, { claimed: true }) sau commit; quên thì failInterruptedSchedules dọn sau 10 phút.
+   */
+  startRunning?: boolean;
+}
+
+/**
+ * Chèn các lịch của Trợ lý trong transaction của NGƯỜI GỌI (bất biến 9: cùng giao dịch với agent_requests). Khoá advisory
+ * theo nhà như insertScheduleIfUnderLimit nên hai request song song không cùng vượt trần `limit` lịch `scheduled`.
+ * Cho phép run_at = now (lệnh "chạy ngay" sau xác nhận). Trần chỉ áp cho lịch chèn 'scheduled' (chiếm chỗ chờ worker); lệnh
+ * "chạy ngay" (`startRunning`) chạy luôn nên không bị trần chặn. Trả id từng lịch theo đúng thứ tự `items`; null = nhà đã đủ trần.
+ */
+export async function insertAgentSchedules(
+  conn: Queryable,
+  ctx: AgentScheduleContext,
+  items: readonly NewAgentSchedule[],
+  limit: number
+): Promise<(number | null)[]> {
+  let remaining = 0;
+  if (items.some((item) => item.failedCode === undefined && item.startRunning !== true)) {
+    await runSql("SELECT pg_advisory_xact_lock(?, ?)", [ADVISORY_NAMESPACE, ctx.homeId], conn);
+    const count = await queryOne<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM scheduled_actions WHERE home_id = ? AND status = 'scheduled'",
+      [ctx.homeId],
+      conn
+    );
+    remaining = Math.max(0, limit - Number(count?.n ?? 0));
+  }
+  const ids: (number | null)[] = [];
+  for (const item of items) {
+    if (item.failedCode !== undefined) {
+      const failed = await runSql(
+        `INSERT INTO scheduled_actions (home_id, device_id, action, run_at, status, origin, channel, created_by_user_id,
+                                        agent_request_id, error_code, executed_at)
+         VALUES (?, ?, ?, ?, 'failed', 'ai_agent', ?, ?, ?, ?, NOW()) RETURNING id`,
+        [ctx.homeId, item.deviceId, item.action, item.runAt, ctx.channel, ctx.createdByUserId, ctx.agentRequestId, item.failedCode],
+        conn
+      );
+      ids.push(failed.insertId);
+      continue;
+    }
+    if (item.startRunning !== true) {
+      if (remaining <= 0) {
+        ids.push(null);
+        continue;
+      }
+      remaining -= 1;
+    }
+    // `status` chỉ là một trong hai literal cố định của code (không lấy từ input) nên nội suy vào SQL an toàn
+    const status = item.startRunning === true ? "running" : "scheduled";
+    const result = await runSql(
+      `INSERT INTO scheduled_actions (home_id, device_id, action, run_at, status, origin, channel, created_by_user_id, agent_request_id)
+       VALUES (?, ?, ?, ?, '${status}', 'ai_agent', ?, ?, ?) RETURNING id`,
+      [ctx.homeId, item.deviceId, item.action, item.runAt, ctx.channel, ctx.createdByUserId, ctx.agentRequestId],
+      conn
+    );
+    ids.push(result.insertId);
+  }
+  return ids;
+}
+
+/**
+ * Giành quyền chạy ĐÚNG MỘT lịch theo id: scheduled → running có điều kiện. Trả false khi lịch không còn 'scheduled'
+ * (runner/huỷ đã xử lý trước) — người gọi không được chạy lịch đó.
+ */
+export async function claimScheduleById(id: number): Promise<boolean> {
+  const result = await runSql(
+    "UPDATE scheduled_actions SET status = 'running', updated_at = NOW() WHERE id = ? AND status = 'scheduled'",
+    [id]
+  );
+  return result.affectedRows > 0;
+}

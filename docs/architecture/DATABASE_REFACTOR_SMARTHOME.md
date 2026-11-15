@@ -953,16 +953,38 @@ erDiagram
 | device_id | INT | NULL, FK → devices.id ON DELETE SET NULL | NULL khi thiết bị đã bị xoá |
 | action | VARCHAR(32) | NOT NULL | Chuỗi `DeviceCommandAction`: `turn_on`, `turn_off`, `set_temp_<NN>`, `set_pos_<N>` |
 | run_at | TIMESTAMPTZ | NOT NULL | Đã quy đổi theo `smart_homes.timezone` lúc tạo; tối đa 7 ngày sau |
-| status | VARCHAR + CHECK IN ('scheduled','running','done','skipped','failed','cancelled','missed') | NOT NULL DEFAULT 'scheduled' | `running` = runner đã giành lịch; `skipped` = thiết bị đã ở trạng thái đích; `missed` = quá giờ > 5 phút lúc backend sống lại |
-| origin | VARCHAR + CHECK IN ('user','ai_agent') | NOT NULL DEFAULT 'user' | `ai_agent` chừa cho trợ lý AI, chưa ai ghi |
+| status | VARCHAR + CHECK IN ('scheduled','running','done','skipped','failed','cancelled','missed') | NOT NULL DEFAULT 'scheduled' | `running` = runner đã giành lịch, hoặc lệnh "chạy ngay" của Trợ lý được chèn thẳng `running` (lệnh rõ lúc tạo yêu cầu, hoặc lệnh chưa rõ sau xác nhận; thực thi ngay, worker không giành, không tính vào trần 50 lịch chờ); `skipped` = thiết bị đã ở trạng thái đích; `missed` = quá giờ > 5 phút lúc backend sống lại |
+| origin | VARCHAR + CHECK IN ('user','ai_agent') | NOT NULL DEFAULT 'user' | `ai_agent` = lịch do Trợ lý AI đặt (đã hiện thực 2026-11, xem `agent_requests` bên dưới) |
 | channel | VARCHAR + CHECK IN ('web','mobile') | NOT NULL | Kênh lúc tạo |
 | created_by_user_id, cancelled_by_user_id | INT | NULL, FK → users.id ON DELETE SET NULL | |
 | error_code | VARCHAR(32) | NULL | Lý do `failed`/`skipped`/`cancelled` (`DEVICE_OFFLINE`, `ALREADY_IN_STATE`, `ACCESS_REVOKED`, `INTERRUPTED`, …) |
 | device_command_id | BIGINT | NULL, FK → device_commands.id ON DELETE SET NULL | Lệnh runner đã gửi |
+| agent_request_id | BIGINT | NULL, FK → agent_requests.id ON DELETE SET NULL (`fk_scheduled_actions_agent_request`) | Yêu cầu Trợ lý AI đã sinh ra lịch (đã hiện thực 2026-11; migration `add_agent_request_id_to_scheduled_actions`); NULL với lịch do người dùng tự tạo |
 | executed_at, cancelled_at | TIMESTAMPTZ | NULL | |
 | created_at, updated_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | `updated_at` còn dùng để nhận ra lịch `running` bị bỏ dở |
 
-**Index:** `(status, run_at)` (runner quét lịch tới hạn), `(home_id, run_at DESC)` (danh sách của nhà). **Relationship:** 1 smart_home → N `scheduled_actions`; runner giành lịch bằng `UPDATE … FOR UPDATE SKIP LOCKED`. Lệnh sinh ra ghi `device_commands.source = 'schedule'` (CHECK `ck_device_commands_source` đã thêm `schedule`, `ai_agent`).
+**Index:** `(status, run_at)` (runner quét lịch tới hạn), `(home_id, run_at DESC)` (danh sách của nhà), `(agent_request_id)` (`idx_scheduled_actions_agent_request`). **Relationship:** 1 smart_home → N `scheduled_actions`; runner giành lịch bằng `UPDATE … FOR UPDATE SKIP LOCKED`. Lệnh sinh ra ghi `device_commands.source = 'schedule'` (CHECK `ck_device_commands_source` đã thêm `schedule`, `ai_agent`; lịch `origin = 'ai_agent'` ghi `ai_agent`).
+
+#### `agent_requests`
+**Purpose:** Một lượt yêu cầu của Trợ lý AI (giọng nói/chữ trên web user) — giữ các **bước chờ người dùng xác nhận** (lệnh chưa rõ / AI tự suy ra, bất biến 8; lệnh rõ làm ngay hoặc tự hẹn giờ, không cần chờ — không đổi schema) và làm điểm gắn cho các `scheduled_actions` do Trợ lý sinh ra. **Đã hiện thực 2026-11** (`migrate.ts`: `create_agent_requests_table` + 2 index + cột `scheduled_actions.agent_request_id`; module `backend/src/modules/agent`; luật và API ở [API](../API_DESIGN.md) §5.1, "Trợ lý AI"). **Không** lưu audio, câu nói gốc hay transcript; `summary` là câu tóm tắt do LLM sinh (≤ 200 ký tự); không có job dọn dữ liệu.
+
+| Cột | Kiểu | Ràng buộc | Mô tả |
+|---|---|---|---|
+| id | BIGINT | PK, IDENTITY | |
+| home_id | INT | NOT NULL, FK → smart_homes.id ON DELETE CASCADE | |
+| user_id | INT | NULL, FK → users.id ON DELETE SET NULL | Người tạo; chỉ người này xem/xác nhận được |
+| channel | VARCHAR(8) + CHECK IN ('web','mobile') | NOT NULL | Lấy từ phiên xác thực, không từ body |
+| input_kind | VARCHAR(8) + CHECK IN ('voice','text') | NOT NULL | |
+| summary | VARCHAR(200) | NOT NULL | |
+| pending_steps | JSONB | NULL | Bước chờ xác nhận: `[{index, device_id, command, run_at, reason, explicit}]` |
+| confirmed_steps | JSONB | NULL | Bước người dùng đã chọn khi xác nhận |
+| request_hash | CHAR(64) | NULL | SHA-256 hex của `[{index, device_id, command, run_at}]` — xác nhận đúng phiên bản thẻ đã hiển thị (các bước chờ không bao giờ bị sửa sau khi tạo) |
+| status | VARCHAR(16) + CHECK IN ('pending','confirmed','rejected','expired','completed') | NOT NULL | `pending` → `confirmed` (UPDATE có điều kiện) → `completed`; hoặc `rejected`/`expired`. Chỉ có bước lệnh rõ (chạy ngay hoặc tự hẹn giờ), không bước chờ → tạo thẳng `completed` |
+| expires_at | TIMESTAMPTZ | NULL | now + 5 phút lúc tạo |
+| confirmed_at | TIMESTAMPTZ | NULL | |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL DEFAULT NOW() | |
+
+**Index:** `(home_id, created_at DESC)` (`idx_agent_requests_home_created`), `(user_id, created_at DESC)` (`idx_agent_requests_user_created`). **Relationship:** 1 smart_home → N `agent_requests`; 1 `agent_requests` → N `scheduled_actions` (qua `agent_request_id`).
 
 ### 7.9. Domain: OTA
 
@@ -1130,7 +1152,7 @@ erDiagram
 
 > **Đã hiện thực (bản rút gọn, `001_schema.sql` + `migrate.ts`; cập nhật 2026-11-14).** Bảng thật không có khoá `events` (`event_id` là UUID ngẫu nhiên, **không** FK) và bỏ các cột chưa có dữ liệu (`brightness`, `fan_speed`, `ambient_light`, `motion`, `door_status`, `camera_status`, `season`, `weather`, `latency`); thêm `minute_of_day` (SMALLINT, phút trong ngày giờ nhà — cho gợi ý thói quen). Mục tiêu: **mỗi lần trạng thái tải đèn/quạt/rèm/điều hoà đổi = đúng 1 dòng**, kể cả bấm tại chỗ trên màn hình Gateway/Node (cách ghi: [API](../API_DESIGN.md) §5.1, "Dữ liệu hành vi cho AI"). Thay đổi so với bản đầu:
 >
-> - `source` thêm `local` (bấm tại chỗ, không khớp lệnh nào), `schedule` (hẹn giờ một lần, §7.8), `ai_agent` (chừa cho trợ lý AI); `action` thêm `SET_POS` (rèm).
+> - `source` thêm `local` (bấm tại chỗ, không khớp lệnh nào), `schedule` (hẹn giờ một lần, §7.8), `ai_agent` (lệnh do Trợ lý AI đặt lịch, §7.8 `agent_requests`); `action` thêm `SET_POS` (rèm).
 > - Cột mới: `appliance` (`lamp|fan|curtain|ac`, CHECK), `level_before`/`level_after` (SMALLINT: vị trí rèm 0–100 hoặc nhiệt độ đặt của điều hoà; NULL với đèn/quạt), `temperature`/`humidity` (khí hậu phòng lúc đổi, NUMERIC(5,2)), `device_command_id` (BIGINT NULL, **unique một phần** `WHERE device_command_id IS NOT NULL` — lưới an toàn chống trùng giữa đường lệnh và đường telemetry; trọng tài chính là khoá dòng `devices`, xem API §5.1), `is_simulated` (BOOLEAN, copy từ thiết bị). `previous_state`/`new_state` là `ON`/`OFF` theo power (cả điều hoà; nhiệt độ ở `level_*`); dòng `SET_TEMP` cũ giữ nguyên dạng "24°C". Các dòng cũ được backfill `appliance` từ `devices`.
 > - View **`v_behavior_training`** (chỉ đọc, đặt cuối `001_schema.sql`): `user_behavior_logs` đổi tên `smart_home_id → home_id`, thêm `seconds_since_prev_change` (giây kể từ lần đổi trước của cùng thiết bị, `LAG … PARTITION BY device_id`). Là nguồn của `npm run export:behavior`; không có tên/email.
 > - Gợi ý thói quen (`recommendations`) chỉ đọc nguồn `mobile`, `manual`, `local`. Chưa partition (Phần 10.1 vẫn là đích).

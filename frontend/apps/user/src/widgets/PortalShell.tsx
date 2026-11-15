@@ -2,13 +2,14 @@
 
 import { NotificationBell, ShellFrame } from "@shh/ui";
 import { HomeSwitcher, ROLE_LABELS, useAuth } from "@shh/auth";
+import { AssistantLauncher } from "@shh/ai";
 import { usePendingSuggestionCount } from "@shh/automation";
 import { useHomeNotifications } from "@shh/notifications";
 import { NAV_SECTIONS, ROUTE_LABELS } from "@/config/nav";
 import { PORTAL } from "@/config/portal";
 
 // Khung cổng khách: chọn nhà (@shh/auth), chuông thông báo theo nhà (@shh/notifications),
-// huy hiệu gợi ý tự động hoá đang chờ (@shh/automation).
+// huy hiệu gợi ý tự động hoá đang chờ (@shh/automation), nút Trợ lý AI giọng nói/chữ (@shh/ai).
 export default function PortalShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const { notifications, unreadCount, markRead, markAllRead } = useHomeNotifications();
@@ -25,6 +26,7 @@ export default function PortalShell({ children }: { children: React.ReactNode })
       headerActions={
         <>
           <HomeSwitcher />
+          <AssistantLauncher />
           <NotificationBell
             notifications={notifications}
             unreadCount={unreadCount}

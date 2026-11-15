@@ -155,7 +155,7 @@ export default function AiUsagePage() {
                 <p className="flex items-center gap-1.5 text-xs text-warning">
                   <AlertTriangle className="h-3.5 w-3.5" />
                   {budgetPercent >= 100 ? "Đã chạm ngân sách ngày." : `Đã dùng ${Math.round(budgetPercent)}% ngân sách ngày.`}
-                  {" "}Agent tự chặn theo AGENT_DAILY_BUDGET_USD trong agent/.env — nên đặt cùng giá trị.
+                  {" "}Ngân sách chỉ dùng để cảnh báo, Agent chưa tự chặn.
                 </p>
               )}
             </>

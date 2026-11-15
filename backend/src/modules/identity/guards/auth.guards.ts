@@ -5,6 +5,7 @@
 //   requirePortalUser           cookie sh_user,  chỉ USER
 //   requireMobileUser           Authorization: Bearer <access JWT>, chỉ USER
 //   csrfGuard(portals)          chỉ kiểm header X-Portal (dùng cho route login/register/logout chưa có phiên)
+//   requireActingUser           kênh /api/service: người dùng mà agent thay mặt (cookie sh_user hoặc X-User-Authorization), chỉ USER
 //
 // Lỗi: 401 NO_TOKEN | INVALID_TOKEN | TOKEN_EXPIRED · 403 ACCOUNT_LOCKED · 403 USE_MOBILE_APP (USER trên
 // dashboard) · 403 USE_DASHBOARD (nhân viên trên portal/mobile) · 403 FORBIDDEN (sai role) ·
@@ -121,5 +122,26 @@ export const requireMobileUser: RequestHandler = async (req: Request, _res: Resp
 
   const { auth } = await authenticateAccessToken(match[1]);
   req.auth = auth;
+  next();
+};
+
+/**
+ * Kênh dịch vụ nội bộ `/api/service/**`, "agent thay mặt người dùng" (Trợ lý AI). Chạy SAU requireServiceToken (Bearer
+ * SERVICE_API_TOKEN — xác thực DỊCH VỤ); middleware này xác thực NGƯỜI DÙNG mà agent chuyển tiếp credential của họ:
+ *   - header `X-User-Authorization: Bearer <access JWT>` (mobile)  → authenticateAccessToken → req.auth.channel = "mobile"
+ *   - ngược lại cookie `sh_user` trong header `Cookie` (web)        → authenticatePortalCookie → req.auth.channel = "portal"
+ * Không có → 401 NO_TOKEN; sai/hết hạn → 401; khoá → 403 ACCOUNT_LOCKED; nhân viên → 403 USE_DASHBOARD (chỉ role USER).
+ * Không kiểm X-Portal: kênh này không mở cho trình duyệt (nginx chặn /api/service, agent gọi trong mạng nội bộ) và đã có
+ * token dịch vụ. Không bao giờ log giá trị cookie/token.
+ */
+export const requireActingUser: RequestHandler = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+  const header = req.get("x-user-authorization");
+  if (header !== undefined) {
+    const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
+    if (!match) throw new HttpError(401, "NO_TOKEN");
+    req.auth = (await authenticateAccessToken(match[1])).auth;
+  } else {
+    req.auth = (await authenticatePortalCookie(req)).auth;
+  }
   next();
 };

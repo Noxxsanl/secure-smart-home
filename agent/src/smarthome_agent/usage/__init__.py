@@ -5,7 +5,7 @@ Chi phí do backend tính theo bảng giá model (Admin quản lý) — agent ch
 
 from .extract import anthropic_usage, openai_usage
 from .models import Purpose, TokenUsage, UsageRecord
-from .reporter import LlmCall, UsageReporter, get_usage_reporter, track_llm_call
+from .reporter import LlmCall, UsageReporter, UsageSink, get_usage_reporter, track_llm_call
 
 __all__ = [
     "LlmCall",
@@ -13,6 +13,7 @@ __all__ = [
     "TokenUsage",
     "UsageRecord",
     "UsageReporter",
+    "UsageSink",
     "anthropic_usage",
     "get_usage_reporter",
     "openai_usage",

@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@shh/ai": "*",
     "@shh/auth": "*",
     "@shh/automation": "*",
     "@shh/devices": "*",

@@ -1,5 +1,5 @@
 // Đọc scheduled_actions kèm nhà (múi giờ), thiết bị, phòng, người tạo — JOIN bảng module khác nên nằm ở read-model (T2).
-import { queryOne, queryRows, sqlLimit, type SqlParam } from "../../../infrastructure/database/db";
+import { placeholders, queryOne, queryRows, sqlLimit, type SqlParam } from "../../../infrastructure/database/db";
 import type { ScheduleRow, ScheduleScope } from "../domain/schedule.types";
 
 // Tên người tạo: hồ sơ khách (customers.full_name) ưu tiên, rồi users.full_name — như cách module homes hiển thị
@@ -52,4 +52,18 @@ export async function listScheduleRows(
       LIMIT ?`,
     params
   );
+}
+
+/** Các lịch theo danh sách id (response của Trợ lý AI), sớm nhất trước. */
+export async function listScheduleRowsByIds(ids: readonly number[]): Promise<ScheduleRow[]> {
+  if (ids.length === 0) return [];
+  return queryRows<ScheduleRow>(
+    `${SCHEDULE_SELECT_SQL} WHERE a.id IN (${placeholders(ids.length)}) ORDER BY a.run_at ASC, a.id ASC`,
+    [...ids]
+  );
+}
+
+/** Mọi lịch do một yêu cầu của Trợ lý AI tạo ra (cột agent_request_id), sớm nhất trước. */
+export async function listScheduleRowsByAgentRequest(agentRequestId: number): Promise<ScheduleRow[]> {
+  return queryRows<ScheduleRow>(`${SCHEDULE_SELECT_SQL} WHERE a.agent_request_id = ? ORDER BY a.run_at ASC, a.id ASC`, [agentRequestId]);
 }

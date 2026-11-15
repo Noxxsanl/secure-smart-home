@@ -34,6 +34,10 @@ app.use(
 );
 
 // Limit JSON body size to prevent payload-based DoS
+// Riêng /api/service/agent (Trợ lý AI gửi tới 10 bước tiếng Việt kèm utterance/reason/evidence — dễ vượt 10kb) được 32kb.
+// Parser này PHẢI đứng trước parser chung: body-parser bỏ qua request đã được đọc nên route khác vẫn giữ giới hạn 10kb.
+// Kênh service chỉ nhận Bearer SERVICE_API_TOKEN (nginx chặn từ ngoài) nên mức nới này không mở rộng bề mặt tấn công công khai.
+app.use("/api/service/agent", express.json({ limit: "32kb" }));
 app.use(express.json({ limit: "10kb" }));
 
 app.use(requestLogger);

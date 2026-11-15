@@ -12,6 +12,7 @@ Terminal 1: PostgreSQL 16         (database, port 5433 nếu chạy bằng Docke
 Terminal 2: Mosquitto broker      (Gateway ↔ Backend, chỉ TLS port 8883)
 Terminal 3: Backend Express       (API,      port 5000)
 Terminal 4: Frontend Next.js      (3 app web: Admin 3001, Operator 3002, Khách hàng 3003)
+(tuỳ chọn) Agent Python           (Trợ lý AI, port 8000, xem Bước 6c)
 (tuỳ chọn) Mobile Flutter         (app khách hàng, xem Bước 7)
 ```
 
@@ -469,6 +470,52 @@ Giả lập sự cố từ console (đăng nhập Admin/Operator), trong chi ti�
 - **Mở cửa:** với cảm biến cửa mô phỏng, bật trạng thái mở (`POST …/simulator/devices/:id/door` `{ "open": true }`) — khách hàng nhận thông báo cửa mở.
 
 Chỉ áp dụng cho thiết bị mô phỏng (thiết bị thật → `409 NOT_SIMULATED`).
+
+---
+
+## Bước 6c — Trợ lý AI giọng nói/chữ (tuỳ chọn, cần OpenAI key)
+
+Nút mic ở web khách hàng (:3003) gửi câu tiếng Việt tới dịch vụ Python `agent/`, agent gọi backend qua `/api/service/agent/**`. Không có agent thì web báo "Trợ lý đang tạm bận", hẹn giờ thủ công vẫn chạy. Gọi OpenAI **tốn phí**.
+
+**Biến cần đặt** (không commit, không dán vào chat):
+
+| File | Biến | Giá trị |
+|---|---|---|
+| `backend/.env` | `SERVICE_API_TOKEN` | Chuỗi ngẫu nhiên ≥ 32 ký tự |
+| `agent/.env` | `OPENAI_API_KEY` | Key OpenAI |
+| `agent/.env` | `BACKEND_SERVICE_TOKEN` | **Cùng giá trị** với `SERVICE_API_TOKEN` của backend |
+| `agent/.env` | `STT_PROVIDER` | `openai` |
+| `agent/.env` | `STT_OPENAI_MODEL` | `gpt-4o-mini-transcribe` |
+| `agent/.env` | `BACKEND_URL` | `http://localhost:5000` |
+| `agent/.env` | `OPENAI_REASONING_EFFORT` | Mức suy luận của model planner (gpt-5-mini): `low` (mặc định, nhanh), `none`/`minimal`/`medium`/`high`; `default` = không gửi tham số, dùng mặc định của model (chậm hơn). Không đặt thì dùng `low` |
+
+**Hành vi (từ 2026-11-15):** câu nói/gõ **rõ** ("bật đèn phòng khách", "8h tối tắt quạt") thì Trợ lý **làm ngay** hoặc **tự hẹn giờ** rồi báo kết quả, không cần bấm xác nhận; câu chưa rõ (nhà có nhiều đèn mà chỉ nói "bật đèn", thiếu động từ, phủ định "đừng tắt đèn", câu hỏi "bật đèn được không", điều kiện "nếu trời tối thì bật đèn", giờ mơ hồ "8h bật đèn" không nói sáng hay tối) thì Trợ lý hỏi lại hoặc hiện thẻ "Cần xác nhận". Luật chi tiết: [API](../API_DESIGN.md) §5.1 "Trợ lý AI".
+
+**Đo thời gian phản hồi:** mỗi request, agent ghi **một** dòng log INFO có thời gian từng chặng (chỉ số đo, không có nội dung câu nói), dạng `Trợ lý <8 ký tự đầu request_id>: kênh=voice|text context=…ms stt=…ms planner=…ms backend=…ms tổng=…ms kết quả=…` (chặng không chạy tới ghi `-`). Dùng để so sánh các mức `OPENAI_REASONING_EFFORT`: đổi giá trị trong `agent/.env`, restart agent, thử cùng một câu và đọc dòng log.
+
+> Ai đã có `agent/.env` tạo từ mẫu cũ (`setup.sh` chỉ tạo khi chưa có) phải tự đổi `STT_PROVIDER` / `STT_OPENAI_MODEL` theo bảng trên; đối chiếu với `agent/.env.example`. Đổi `SERVICE_API_TOKEN` thì restart backend.
+
+**Chạy local (Windows)** — terminal riêng, venv tạo bằng `make agent-venv` (hoặc xem `agent/README.md`):
+
+```powershell
+cd e:\WorkSpace\secure-smart-home-iot\agent
+.venv\Scripts\python -m uvicorn smarthome_agent.main:app --app-dir src --port 8000
+
+# Terminal khác — 3 cờ phải đều true
+curl http://localhost:8000/health
+# {"status":"ok","llm_configured":true,"stt_ready":true,"backend_configured":true}
+```
+
+Mở web `http://localhost:3003` (dùng `localhost` để trình duyệt cho phép micro; Next rewrite `/api/agent/*` → `localhost:8000`). Đăng nhập tài khoản khách hàng, bấm nút mic ở header, nói hoặc gõ "8h tối bật đèn". Nút mic không chạy được trên `http://<IP-LAN>` vì trình duyệt chỉ cho micro ở HTTPS hoặc `localhost`.
+
+**Chạy bằng Docker:** `docker compose up -d --build` có service `agent`; vào web qua nginx `http://user.localhost` (nginx chuyển `/api/agent/` → `agent:8000`; agent lỗi chỉ làm tính năng này trả 502).
+
+**Đánh giá chất lượng câu lệnh** (cần key, tốn phí, không chạy trong CI):
+
+```powershell
+cd e:\WorkSpace\secure-smart-home-iot\agent
+.venv\Scripts\python eval/run_eval.py
+```
 
 ---
 

@@ -25,6 +25,11 @@ const workspacePackages = workspaceDeps(__dirname);
 // lại hoặc build lại. Trong Docker, nginx đã route `/api/` thẳng tới backend.
 const backendUrl = (process.env.BACKEND_URL ?? "http://localhost:5000").replace(/\/+$/, "");
 
+// AI Agent (FastAPI, dịch vụ `agent`) — Trợ lý giọng nói/chữ. Trình duyệt gọi `/api/agent/*` cùng origin
+// (cookie `sh_user` đi kèm); Next chuyển `/api/agent/x` → `${AGENT_URL}/v1/x`. Tính lúc `next dev` khởi động /
+// `next build` như BACKEND_URL. Trong Docker, nginx đã route `/api/agent/` thẳng tới agent.
+const agentUrl = (process.env.AGENT_URL ?? "http://localhost:8000").replace(/\/+$/, "");
+
 const nextConfig: NextConfig = {
   reactCompiler: true,
   output: "standalone",
@@ -32,7 +37,11 @@ const nextConfig: NextConfig = {
   turbopack: { root: workspaceRoot },
   outputFileTracingRoot: workspaceRoot,
   async rewrites() {
-    return [{ source: "/api/:path*", destination: `${backendUrl}/api/:path*` }];
+    // Thứ tự quan trọng: `/api/agent/*` phải đứng trước `/api/:path*` (khớp rộng hơn).
+    return [
+      { source: "/api/agent/:path*", destination: `${agentUrl}/v1/:path*` },
+      { source: "/api/:path*", destination: `${backendUrl}/api/:path*` },
+    ];
   },
 };
 

@@ -73,7 +73,7 @@ export default function SettingsDialog({ settings, onClose, onSaved }: SettingsD
         <label htmlFor="ai-budget" className={LABEL}>Ngân sách mỗi ngày (USD)</label>
         <input id="ai-budget" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="VD: 2" className={INPUT} />
         <p className="mt-0.5 text-[11px] text-gray-400 dark:text-slate-500">
-          Nên khớp AGENT_DAILY_BUDGET_USD trong agent/.env (agent tự chặn khi vượt). Bỏ trống = không theo dõi ngân sách.
+          Ngân sách chỉ dùng để cảnh báo trên trang này, Agent chưa tự chặn khi vượt. Bỏ trống = không theo dõi ngân sách.
         </p>
       </div>
       <div>

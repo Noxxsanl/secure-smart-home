@@ -11,8 +11,11 @@ export type ScheduleOrigin = "user" | "ai_agent";
 export type ScheduleChannel = "web" | "mobile";
 export type ScheduleScope = "upcoming" | "history";
 
-/** Thời điểm chạy: ĐÚNG MỘT trong hai dạng (xem resolveWhen). */
-export type ScheduleWhen = { at: string; date?: string } | { afterMinutes: number };
+/**
+ * Thời điểm chạy: ĐÚNG MỘT trong hai dạng (xem resolveWhen). `at` đi kèm tối đa MỘT trong `date` (ngày cụ thể) hoặc
+ * `dayOffset` (0..6 = hôm nay + N ngày theo giờ nhà — Trợ lý AI dùng cho "sáng mai 7h").
+ */
+export type ScheduleWhen = { at: string; date?: string; dayOffset?: number } | { afterMinutes: number };
 
 /** Input đã kiểm cú pháp (chưa kiểm quyền/thiết bị). */
 export interface ScheduleInput {

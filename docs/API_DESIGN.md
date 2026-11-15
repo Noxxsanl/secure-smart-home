@@ -11,7 +11,7 @@
 >
 > Tài liệu liên quan: [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) §9–10 (API và MQTT đích), [IoT Node Network](firmware/IOT_NODE_NETWORK.md) (phần cứng và giao thức từng chặng), [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) §15 (API provisioning), [Bảo mật](SECURITY_ARCHITECTURE.md), `backend/src/modules/README.md` (quy ước code).
 >
-> Cập nhật: 2026-10-26; hẹn giờ một lần và dữ liệu hành vi cho AI (mục 5.1): 2026-11-14.
+> Cập nhật: 2026-10-26; hẹn giờ một lần và dữ liệu hành vi cho AI (mục 5.1): 2026-11-14; Trợ lý AI giọng nói/chữ — kênh `/api/agent/*` và 2 endpoint service (mục 5.1): 2026-11-14; luật "lệnh rõ → làm ngay" của Trợ lý (`executed`, type `done`): 2026-11-15.
 
 ---
 
@@ -48,6 +48,7 @@ flowchart LR
         API["Backend Express<br/>/api/**"]
         WS["WebSocket<br/>/api/mobile/ws"]
         B2["Broker MQTT<br/>MQTT TLS :8883"]
+        AGENT["AI Agent (FastAPI)<br/>/api/agent/**"]
     end
 
     subgraph HOME["Trong nhà"]
@@ -60,6 +61,8 @@ flowchart LR
     PORTAL -->|"B. REST /api/portal (cookie)"| API
     MOB -->|"B. REST /api/mobile (Bearer)"| API
     MOB <-->|"C. WebSocket"| WS
+    PORTAL -->|"I. REST /api/agent (cookie)"| AGENT
+    AGENT -->|"J. REST /api/service (Bearer + cookie người dùng)"| API
     GW -->|"D. HTTP /api/device (HMAC)"| API
     GW <-->|"E. MQTT (HMAC)"| B2
     B2 <--> API
@@ -80,6 +83,8 @@ flowchart LR
 | F | Mobile → Gateway | BLE GATT hoặc HTTP trên SoftAP | ECDH + mã hoá phiên | 10.1 |
 | G | Camera ↔ Gateway | HTTP trên Local AP | WPA2 Local AP + HMAC camera | 10.2, 10.3 |
 | H | Node ↔ Gateway | ESP-NOW | LMK theo node + HMAC node | 11 |
+| I | Web khách → AI Agent | REST JSON (voice/chữ) qua nginx `/api/agent/` | Cookie `sh_user` + `X-Portal: user` (Bearer cho Mobile — để sau) | 5.1 "Trợ lý AI" |
+| J | AI Agent → Backend | REST JSON, trong mạng Docker | `Bearer SERVICE_API_TOKEN` + credential người dùng chuyển tiếp | 2.1, 5.1 "Trợ lý AI" |
 
 Mobile **không** nói chuyện MQTT (bất biến 7); node **không** gọi Server trực tiếp ([IoT Node Network](firmware/IOT_NODE_NETWORK.md) §1).
 
@@ -95,7 +100,8 @@ Mobile **không** nói chuyện MQTT (bất biến 7); node **không** gọi Ser
 | `/api/portal/**` | USER (web khách) | Cookie `sh_user` | Ngoài phạm vi PRD V2 (FR-1.4), xem `frontend/README.md` |
 | `/api/mobile/**` | USER (Mobile) | `Authorization: Bearer <access>` + refresh token | Cùng router với Portal: `createCustomerRouter(channel)` |
 | `/api/device/**` | Gateway | HMAC | Không có phiên người dùng |
-| `/api/service/**` | Dịch vụ nội bộ (AI Agent `agent/`) | `Authorization: Bearer <SERVICE_API_TOKEN>` | Chưa đặt token → 503 `SERVICE_CHANNEL_DISABLED`; nginx trả 404 cho `/api/service/` từ bên ngoài, agent gọi thẳng `backend:5000` trong mạng Docker |
+| `/api/service/**` | Dịch vụ nội bộ (AI Agent `agent/`) | `Authorization: Bearer <SERVICE_API_TOKEN>`; route `/api/service/agent/**` thêm credential người dùng (mục 5.1 "Trợ lý AI") | Chưa đặt token → 503 `SERVICE_CHANNEL_DISABLED`; nginx trả 404 cho `/api/service/` từ bên ngoài, agent gọi thẳng `backend:5000` trong mạng Docker |
+| `/api/agent/**` | USER (web khách) → AI Agent | Cookie `sh_user` + `X-Portal: user` | **Không** vào backend: nginx `user.localhost` chuyển `/api/agent/<x>` → `agent:8000/v1/<x>`; admin/operator trả 404; dev mở thẳng `:3003` thì rewrite của Next làm việc đó (`AGENT_URL`) |
 | `/api/health` | Giám sát | Không | |
 | `/api/auth`, `/api/devices`, `/api/users`, `/api/audit-log`, `/api/notifications` | Prototype | Cookie cũ | **Cũ** — mục 7.3 |
 
@@ -131,7 +137,7 @@ Role hệ thống quyết định **kênh**; role trong nhà (OWNER / CONTROLLER
 - Secret thiết bị/gateway **chỉ trả 1 lần** lúc tạo; không API nào khác trả secret (bất biến 1).
 - Không log password, token, secret, mật khẩu WiFi (bất biến 2).
 - Ghi nhiều bảng trong 1 transaction (bất biến 9).
-- Gợi ý AI không tự điều khiển thiết bị khi chưa được chấp nhận (bất biến 8).
+- AI không tự điều khiển thiết bị khi lệnh chưa rõ (bất biến 8): gợi ý thói quen và việc AI tự suy ra phải được xác nhận; lệnh người dùng nói/gõ rõ ràng (backend kiểm từ câu gốc) thì Trợ lý làm ngay hoặc tự hẹn giờ và báo kết quả — luật ở mục 5.1 "Trợ lý AI".
 
 ---
 
@@ -202,6 +208,9 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 | Hẹn giờ | GET | `/homes/:homeId/schedules?scope=upcoming\|history&limit=` | `view` (thành viên nhà) | Lịch hẹn giờ một lần của nhà (`scope` mặc định `upcoming`; `limit` 1–100, mặc định 50) → `{items: Schedule[]}`. GUEST chỉ thấy lịch do mình tạo. Chi tiết: "Hẹn giờ một lần" bên dưới |
 | | POST | `/homes/:homeId/schedules` | `control_device` (thiết bị) | Tạo lịch (`ScheduleInput`) → 201 `Schedule` |
 | | POST | `/schedules/:scheduleId/cancel` | người tạo hoặc OWNER | Huỷ lịch còn `scheduled` → 200 `Schedule` |
+| Trợ lý AI | GET | `/agent/requests/:requestId` | người tạo yêu cầu | Chi tiết yêu cầu của Trợ lý (kể cả bước chờ xác nhận). Chi tiết: "Trợ lý AI" bên dưới |
+| | POST | `/agent/requests/:requestId/confirm` | người tạo + `control_device` từng thiết bị | Xác nhận các bước chờ `{request_hash, step_indexes}` → 200 `{request_id, status, results: Schedule[]}` |
+| | POST | `/agent/requests/:requestId/reject` | người tạo | Từ chối → 200 `{request_id, status: "rejected"}` |
 | Tự động hoá | GET | `/homes/:homeId/automations` | `view_automation` | Danh sách luật |
 | | POST | `/homes/:homeId/automations` | `create_automation` | Tạo luật IF/THEN |
 | | PATCH | `/automations/:ruleId` | `create_automation` (+ chủ luật hoặc `manage_any_rule`) | Sửa, bật/tắt luật |
@@ -264,7 +273,7 @@ Module `modules/schedules` (cập nhật 2026-11-14), gắn qua móc `customer` 
 - Huỷ: lịch không có / không thuộc quyền / GUEST không phải người tạo → cùng 404 "Schedule not found"; không phải người tạo và không phải OWNER → 403; `status ≠ scheduled` (kể cả runner vừa giành lịch) → 409 `SCHEDULE_NOT_CANCELLABLE`. Huỷ được cả khi nhà tạm ngưng.
 - Audit: `SCHEDULE_CREATED`, `SCHEDULE_CANCELLED` (category `automation`).
 
-**`Schedule`** (snake_case): `id`, `home_id`, `timezone`, `device_id`, `device_name`, `room_name`, `appliance` (3 trường đầu của thiết bị là `null` khi thiết bị đã xoá; `room_name` `null` khi chưa gán phòng), `action` (`turn_on|turn_off|set_temp|set_pos`), `temperature`, `position` (`null` nếu không áp dụng), `action_label` (backend sinh, tiếng Việt, không chứa tên phòng: "Bật Đèn", "Mở Rèm 50%", "Đặt Điều hoà 26°C"), `run_at` (ISO UTC), `status`, `origin` (`user|ai_agent`), `channel` (`web|mobile`), `created_by_user_id`, `created_by_name`, `error_code`, `executed_at`, `cancelled_at`, `created_at`, `can_cancel` (`status = scheduled` và người gọi là người tạo hoặc OWNER).
+**`Schedule`** (snake_case): `id`, `home_id`, `timezone`, `device_id`, `device_name`, `room_name`, `appliance` (3 trường đầu của thiết bị là `null` khi thiết bị đã xoá; `room_name` `null` khi chưa gán phòng), `action` (`turn_on|turn_off|set_temp|set_pos`), `temperature`, `position` (`null` nếu không áp dụng), `action_label` (backend sinh, tiếng Việt, không chứa tên phòng; tên thiết bị bắt đầu bằng từ loại tải dạng "Xxx" thì viết thường chữ đầu: "Bật đèn", "Chỉnh rèm về 50%" (vị trí giữa chừng là đích, không phải hướng), "Mở rèm 100%", "Đóng rèm", "Đặt điều hoà 26°C"; tên khác giữ nguyên), `run_at` (ISO UTC), `status`, `origin` (`user|ai_agent`), `channel` (`web|mobile`), `created_by_user_id`, `created_by_name`, `error_code`, `executed_at`, `cancelled_at`, `created_at`, `can_cancel` (`status = scheduled` và người gọi là người tạo hoặc OWNER).
 
 - `status`: `scheduled` → `running` → `done|skipped|failed|missed`, hoặc `cancelled`. Tab "sắp chạy" = `scheduled`+`running` (xếp theo `run_at` tăng), tab "lịch sử" = các trạng thái còn lại (mới nhất trước).
 - `error_code`: `DEVICE_OFFLINE`, `TIMEOUT`, `COMMAND_FAILED`, `DEVICE_BLOCKED`, `HOME_SUSPENDED`, `NOT_CONTROLLABLE`, `NO_DEVICE`, `ACCESS_REVOKED`, `ALREADY_IN_STATE`, `INTERRUPTED`, `UNKNOWN`.
@@ -279,7 +288,102 @@ Module `modules/schedules` (cập nhật 2026-11-14), gắn qua móc `customer` 
 
 Thông báo cho **người tạo** (`related_device_id` = thiết bị): `SCHEDULE_DONE` (success), `SCHEDULE_SKIPPED` (info), `SCHEDULE_FAILED` (warning, kèm lý do tiếng Việt), `SCHEDULE_MISSED` (warning). Đi qua cơ chế thông báo thường: Mobile nhận tin WebSocket `notification` (mục 6); web không có WebSocket, chỉ poll `/notifications` mỗi 15 giây (kể cả khi tab ẩn, để popup trình duyệt vẫn chạy).
 
-`device_commands.source` (và `CommandSource` trong code) gồm `user`, `automation`, `operator`, **`schedule`**, **`ai_agent`**; `ai_agent` chừa cho trợ lý AI ([Đề xuất AI Agent](proposals/DE_XUAT_AI_AGENT.md)), chưa có nơi nào ghi.
+`device_commands.source` (và `CommandSource` trong code) gồm `user`, `automation`, `operator`, **`schedule`**, **`ai_agent`**; `ai_agent` do Trợ lý AI ghi khi lịch có `origin = ai_agent` chạy (đã hiện thực 2026-11, mục "Trợ lý AI" bên dưới; [Đề xuất AI Agent](proposals/DE_XUAT_AI_AGENT.md)).
+
+#### Trợ lý AI (giọng nói + chữ)
+
+**Đã hiện thực 2026-11-14** (code viết theo hợp đồng này; chưa chạy đầu-cuối với OpenAI thật). Chỉ web app `user`; API kênh Mobile (Bearer) có sẵn nhưng Mobile chưa làm. Người dùng nói/gõ tiếng Việt ("8h tối bật đèn, tắt quạt sau 30p nữa"); dịch vụ Python `agent/` (STT + LLM) chỉ **đề xuất kế hoạch**, còn **backend quyết định** từng bước theo luật tất định bên dưới: lệnh rõ → làm ngay hoặc tự hẹn giờ; lệnh chưa rõ → hỏi lại hoặc thẻ xác nhận. Cập nhật 2026-11-15 (người dùng chốt; luật dưới đây là hợp đồng, code backend/agent/web cập nhật cùng đợt) — trước đó chỉ tự đặt lịch khi nói rõ + còn ≥ 2 phút + ≤ 3 bước, lệnh chạy ngay luôn phải xác nhận. LLM không có công cụ thực thi, không nhận ID thật hay tên nhà/thành viên.
+
+```mermaid
+sequenceDiagram
+    participant W as Web user
+    participant N as nginx
+    participant A as agent (FastAPI)
+    participant B as Backend
+    W->>N: POST /api/agent/homes/:id/voice (cookie sh_user + X-Portal)
+    N->>A: /v1/homes/:id/voice
+    A->>B: GET /api/service/agent/homes/:id/context (Bearer service + Cookie sh_user)
+    A->>A: STT, LLM (propose_plan), guard
+    A->>B: POST /api/service/agent/homes/:id/requests
+    B-->>A: executed[] / scheduled[] / pending / rejected[]
+    A-->>W: AgentReply
+    W->>B: POST /api/portal/agent/requests/:id/confirm (nếu có bước chờ)
+```
+
+**A. Agent FastAPI — `/api/agent/*` (nginx) = `/v1/*` (agent):**
+
+| Method | Path | Vào | Ra |
+|---|---|---|---|
+| POST | `/api/agent/homes/:homeId/voice?conversation_id=` | Body = audio thô; `Content-Type` ∈ `audio/webm`, `ogg`, `mp4`, `mpeg`, `wav`, `x-wav`, `x-m4a` (bỏ `;codecs=…` khi so); header tuỳ chọn `X-Audio-Duration-Ms` | `AgentReply` (có `transcript`) |
+| POST | `/api/agent/homes/:homeId/messages` | JSON `{text: 1..500, conversation_id?}` | `AgentReply` |
+| GET | `/health` (chỉ trong mạng Docker) | — | `{status, llm_configured, stt_ready, backend_configured}`, không bao giờ trả key |
+
+- **Xác thực:** cookie `sh_user` (POST bắt buộc `X-Portal: user`, thiếu/sai → 403 `CSRF_CHECK_FAILED`) hoặc `Authorization: Bearer <jwt>` (Mobile, để sau). Không có → 401 `NO_TOKEN`. Agent chỉ chuyển tiếp **đúng** cookie `sh_user` sang backend; không log credential.
+- **Audio:** rỗng → 400 `EMPTY_AUDIO`; > 1 MB → 413 `AUDIO_TOO_LARGE`; type khác → 415 `UNSUPPORTED_AUDIO`. nginx chặn sớm thân > 2 MB. Tin nhắn chữ quá ~16 KB → 413.
+- **Giới hạn:** ở agent (bộ nhớ tiến trình) theo credential (khoá = SHA-256, không lưu credential) và theo người (`AGENT_RATE_LIMIT_PER_MIN`, 10), cộng `AGENT_DAILY_LIMIT_PER_HOME` (200) theo nhà/ngày → 429 `RATE_LIMITED`; thêm lớp ngoài ở nginx 30 req/phút/IP (burst 10, vượt → 429). Mỗi request có thời hạn tổng ~40 giây (`AGENT_REQUEST_TIMEOUT_S`). Hai biến cũ `AGENT_ALLOW_R1_AUTO` và `AGENT_DAILY_BUDGET_USD` đã bỏ.
+- **Thứ tự xử lý voice:** credential/CSRF → rate limit → kiểm audio → `context` (backend xác thực người dùng + nhà **trước** khi tốn tiền STT) → STT → LLM → guard → `requests` (nếu có bước) → `AgentReply`.
+- **Lỗi agent** (`{error, message}`, `message` tiếng Việt): 401 `SESSION_EXPIRED` (**chỉ** khi phiên người dùng hết hạn), 403 `ACCOUNT_LOCKED` / `FORBIDDEN`, 404 `HOME_NOT_FOUND`, 503 `AGENT_UNAVAILABLE` (backend 5xx/timeout, chưa có hoặc **sai** token dịch vụ), 503 `LLM_DISABLED` / `STT_DISABLED` (chưa có key), cùng các mã audio/413/429/403 ở trên. Khi agent tắt (nginx trả 502), hẹn giờ thủ công vẫn chạy.
+
+**`AgentReply`:**
+
+```json
+{ "conversation_id": "32 hex",
+  "type": "answer | done | scheduled | confirm | mixed | clarify | refuse",
+  "reply": "câu tiếng Việt", "transcript": "… | null",
+  "clarification": { "question": "…", "options": ["8:00 sáng", "20:00 tối"] },
+  "executed": [ /* Schedule — bước đã chạy ngay, kèm kết quả (status done/skipped/failed…) */ ],
+  "scheduled": [ /* Schedule — lịch tương lai */ ],
+  "pending": { "request_id": 15, "request_hash": "64 hex", "expires_at": "ISO",
+               "steps": [ { "index": 0, "device_id": 41, "device_name": "Đèn", "room_name": "Phòng khách",
+                            "action_label": "Bật đèn", "run_at": null, "reason": "…" } ] },
+  "rejected": [ { "index": 2, "code": "NOT_CONTROLLABLE", "message": "…" } ] }
+```
+
+`type`: chỉ có bước đã chạy ngay → `done`; chỉ có lịch → `scheduled`; chỉ có bước chờ → `confirm`; có từ 2 loại trở lên → `mixed`; hỏi lại → `clarify` (tối đa 2 lần/hội thoại); trả lời câu hỏi trạng thái → `answer`; từ chối (VIEWER, việc quản trị, ngoài khả năng) → `refuse` (chỉ khi không có `executed`, `scheduled` lẫn `pending`). `reply` của done/scheduled/confirm/mixed do code soạn từ kết quả backend, không do LLM (VD "Đã bật đèn phòng khách.", "Đã hẹn: 20:00 tắt quạt. Bạn huỷ được trước giờ chạy."); `executed`/`scheduled` = `[]` và `clarification`/`pending` = `null` khi không có. Ghi âm nghe không ra (STT từ chối bản ghi hoặc transcript rỗng) → `clarify` "Mình chưa nghe rõ…", không trả 503. Hội thoại giữ trong RAM agent (≤ ~10 lượt, TTL 10 phút, gắn người + nhà; `conversation_id` lạ → mở hội thoại mới), không ghi đĩa.
+
+**B. Kênh service — chỉ agent gọi** (Bearer `SERVICE_API_TOKEN` **và** credential người dùng: cookie `sh_user` trong header `Cookie`, hoặc `X-User-Authorization: Bearer <access JWT>`; middleware `requireActingUser` ưu tiên `X-User-Authorization` rồi mới tới cookie `sh_user`, chỉ role USER, không có → 401; kênh ghi nhận `web`/`mobile` lấy từ phiên, **không** từ body; body kênh `/api/service/agent` tối đa 32 KB):
+
+| Method | Path | Mô tả |
+|---|---|---|
+| GET | `/api/service/agent/homes/:homeId/context` | Ngữ cảnh cho LLM (thành viên nhà, không phải → 404): `home` {`id`, `timezone`, `local_now` (ISO có offset), `iso_weekday`, `status`}, `actor` {`user_id`, `home_role`}, `rooms[]` {`id`, `name`, `climate`}, `devices[]` relay `appliance` ∈ {lamp, fan, curtain, ac} người dùng xem được {`id`, `name`, `room_id`, `appliance`, `power`, `level` (`curtain_pos`/`ac_setpoint`/`null`), `online`, `can_control`, `actions[]`}. **Không** có tên nhà, tên/email thành viên |
+| POST | `/api/service/agent/homes/:homeId/requests` | Nộp kế hoạch → 201 `{request_id, status, executed[], scheduled[], pending, rejected[]}` (`executed` luôn có, `[]` nếu không có bước chạy ngay) |
+
+`POST …/requests` — body `{input_kind: "voice"|"text", utterance: 1..500, summary: 1..200, steps: 1..10 × {device_id, action, temperature, position, when, reason ≤ 255, evidence_span ≤ 200}}`; `action`/`temperature`/`position` như `ScheduleInput`; `when` đúng một dạng: `{at: "HH:MM", day_offset: 0..6|null}` · `{after_minutes: 1..10080}` · `{now: true}`. Sai cấu trúc → 400 `INVALID_INPUT`; không phải thành viên → 404. `utterance` chỉ dùng để kiểm `evidence_span`, **không** được lưu hay ghi log.
+
+**Luật quyết định từng bước** (tất định ở backend, `index` = vị trí trong mảng; không tin agent):
+
+1. Thiết bị: `requireDeviceAccess(control_device)` (404 → `NOT_FOUND`, 403 → `FORBIDDEN`); thiết bị không thuộc `:homeId` → `NOT_FOUND`; nhà tạm ngưng → `HOME_SUSPENDED`; không phải relay lamp/fan/curtain/ac hoặc thao tác không hợp loại → `NOT_CONTROLLABLE`. Lỗi chỉ làm bước đó vào `rejected`, không làm hỏng cả yêu cầu.
+2. Thời điểm: `now` → chạy ngay (`run_at = null`); `at`/`after_minutes` quy đổi bằng `resolveWhen` theo `smart_homes.timezone` (`day_offset` = ngày địa phương hôm nay + offset; `null` = lần tới gần nhất như `ScheduleInput`); ngoài 30 giây – 7 ngày → `rejected` `INVALID_WHEN`.
+3. **Lệnh rõ (`explicit`) — đã hiện thực 2026-11-15** (hàm thuần `isExplicitStep`, `backend/src/modules/agent/domain/explicit-step.ts`; người dùng chốt bỏ ngưỡng độ tin cậy STT và giới hạn số bước). Chỉ khi đủ **cả R1–R5 và C1–C5**, tính trên câu gốc (tách đoạn tại `, ; . ! ?` và xuống dòng) và `evidence_span` đã chuẩn hoá (bên dưới), so cụm từ luôn theo ranh giới từ. Từ khoá có dấu so bản có dấu, người gõ không dấu so bản không dấu (bảo thủ: thà hỏi xác nhận còn hơn chạy nhầm). Hàm `isExplicitStep` lấy `when` của bước (`now` / `at` giờ:phút / `after` N phút) để so với giờ trong câu:
+   - **R1 câu điều kiện** (cả câu): có "nếu / khi / hễ / mỗi khi / lúc nào / khi nào / trong trường hợp / giả sử / giả như / miễn là" → không rõ;
+   - **R2 câu hỏi / kể lại** (đoạn chứa động từ của bước): đoạn kết bằng `?` (kể cả `？`); hoặc kết bằng "không / chưa / nhỉ / sao / chăng / hả / hở / chứ / rồi" (bỏ trợ từ cuối "nhé, ạ, đi, vậy…"; "tôi bật đèn rồi" → không rõ); hoặc có "có nên / có phải / làm sao / tại sao / thế nào / là gì / bao giờ / mấy giờ / bao nhiêu / được không / cách / bằng cách nào / hướng dẫn"; hoặc mẫu "có … không"; hoặc đoạn bắt đầu bằng "ai" → không rõ;
+   - **R3 phủ định / quá khứ / ý định**: trong 3 token ngay trước động từ, **không vượt dấu câu**, có "đừng / không / chưa / khỏi / chẳng / chớ / tránh / huỷ / đâu / khoan / bỏ / đã / vừa / dừng / ngừng / ngưng / đứng / thôi / sẽ / định / quên", gõ tắt "ko / hok / hong / hem", hoặc "k" đứng ngay trước động từ → không rõ ("đừng tắt đèn", "đèn đã bật chưa", "tôi sẽ bật đèn"; nhưng "Tôi không thích tối, bật đèn" vẫn rõ). "dạ" ≠ "đã". Với `set_temp` không có động từ thì xét 3 token trước số và trước từ loại tải; "đang / hiện (tại)" trước số là câu kể trạng thái ("điều hoà đang 25 độ" → không rõ);
+   - **R4 bước chạy ngay mà câu có giờ hoặc dấu hiệu hoãn cho động từ đó** ("bật đèn lúc 8h tối", "bật đèn sau 30 phút nữa", "bật đèn tối nay", "ngày mai", "lát nữa", "tuần", "thứ", "khuya", "giây"…) → không rõ, trừ khi có "ngay / luôn / bây giờ / liền / lập tức" hợp lệ ("bật đèn ngay, 30p nữa tắt đèn" thì bước bật vẫn rõ). "ngày" có dấu không phải "ngay"; "ngay lúc / sau / trước / khi / vào / trong / từ" hoặc "ngay" + số không phải "làm ngay" ("bật đèn ngay lúc 8h tối" → không rõ). **R4′ dấu hiệu lặp** ("mỗi", "hằng", "hàng ngày/tuần/tối/sáng") → cả bước chạy ngay lẫn bước hẹn giờ đều chờ xác nhận, vì hệ thống chỉ hẹn giờ **một lần**. Phạm vi của động từ là đoạn quanh nó, tới động từ kế bên, gồm trạng ngữ đứng đầu câu **kể cả khi tách bằng dấu phẩy** ("Lúc 8 giờ tối, bật đèn giúp tôi", "Ở phòng ngủ, bật đèn": đoạn liền trước không có động từ được gộp vào phạm vi thời gian và vùng đối tượng của động từ đầu đoạn sau); "7.30" / "7,30" là một mốc giờ chứ không phải ranh giới đoạn;
+   - **R5 bước hẹn giờ phải có biểu thức giờ và giá trị khớp:** `at`: quy đổi theo buổi sáng/trưa/chiều/tối/đêm ("10 giờ đêm" = 22:00; "22h30"; "rưỡi"; phút nói không kèm "phút" như "tám giờ ba mươi" = 20:30); giờ 1–12 không nói buổi là mơ hồ ("8h bật đèn" → không rõ), "12 giờ tối" / "1 giờ trưa" cũng coi là mơ hồ; "kém / hơn" ("8 giờ kém 15") và phút > 59 → mơ hồ; phút phải khớp (không nói phút thì phút = 00). `after`: số phút khớp đúng ("nửa tiếng" = 30, "1 tiếng rưỡi" = 90, "1 tiếng 30 phút" = 90, "30phút", "ba chục phút"; số đọc bằng chữ 0–59 như "hai mươi", "bốn lăm"); đơn vị giờ chỉ là thời lượng khi là "tiếng" hoặc có "sau / trong" ngay trước hoặc "nữa" ngay sau — "tắt quạt lúc 2 giờ" không dùng được cho bước "sau 120 phút". Không kiểm ngày (sai ngày bị `resolveWhen` loại `INVALID_WHEN`);
+   - **C1** đoạn trích dài ≥ 3 ký tự và là cụm từ nguyên vẹn của câu gốc;
+   - **C2** đoạn trích chứa từ chỉ **đúng loại tải** của bước (đèn → `den`, quạt → `quat`, rèm → `rem`, điều hoà → `dieu hoa` / `may lanh`) — cố ý không nhận từ trong tên thiết bị, vì tên hay trùng từ giữa các thiết bị;
+   - **C3** hướng lệnh / giá trị khớp động từ: bật/mở → `turn_on`, tắt → `turn_off`, đóng → rèm `turn_off`/`set_pos 0`, "mở" rèm → `turn_on`/`set_pos 100` (hoặc `set_pos 50` nếu có "một nửa" / "nửa chừng" / số 50 không đi với đơn vị giờ-phút); rèm nói **vị trí đích bằng con số** ("rèm về 50%", "rèm cửa năm mươi phần trăm", "rèm 100%", "đóng rèm một nửa") thì `set_pos N` rõ mà KHÔNG cần động từ (như "điều hoà 25 độ") — động từ nếu có không được ngược đích ("đóng rèm 100%" không rõ cho `set_pos 100`); `set_temp N` cần có đúng số N không phải giờ (chữ số hoặc đọc chữ khớp **trọn** — "hai mươi" không khớp trong "hai mươi lăm"; "25 phút", "18 giờ" không phải nhiệt độ; "mở rèm 50 phút" không phải một nửa) và không đi kèm "tắt". Động từ xét là động từ gần nhất đứng trước từ loại tải (không có thì gần nhất đứng sau); "tất cả" không tính là "tắt". Nhờ vậy "tắt đèn và bật quạt" chỉ rõ cho đúng bước đèn-tắt và quạt-bật, không rõ cho quạt-tắt;
+   - **C5** đúng **một** thiết bị: nếu người dùng xem được > 1 thiết bị cùng loại tải trong nhà thì "vùng đối tượng" của động từ phải có lượng từ ("tất cả / toàn bộ / cả nhà"; "hết" chỉ tính khi đứng ngay trước từ thiết bị — "tắt hết đèn" — hoặc ngay sau ở cuối đoạn — "tắt đèn hết đi"; "bật đèn hết sức" thì không) hoặc nói phòng/tên mà điểm cao nhất thuộc duy nhất thiết bị của bước ("bật đèn" khi có 2 đèn → không rõ; "bật đèn phòng ngủ 2" ≠ "phòng ngủ"). Vùng đối tượng chạy từ đầu đoạn (nếu là động từ đầu tiên) tới động từ kế tiếp nên không lấy phòng của mệnh đề khác ("bật đèn phòng ngủ và tắt quạt phòng khách": đèn → phòng ngủ, quạt → phòng khách).
+
+   **Giới hạn còn lại:** backend tin câu gốc do agent gửi; nếu STT nghe sai mà câu sai vẫn thành lệnh rõ (VD "bật đèn") thì vẫn chạy — chấp nhận, giảm thiểu bằng quyền như bấm tay, audit, `user_behavior_logs`, lịch huỷ được. Luật nghiêng về hỏi xác nhận khi không chắc; các trường hợp biết trước sẽ chờ xác nhận hoặc bị bỏ qua nằm ở [Bảo mật](SECURITY_ARCHITECTURE.md) §9.2.
+4. **Lệnh rõ → làm ngay hoặc tự hẹn giờ**, không còn ngưỡng ≥ 2 phút và không giới hạn số bước mỗi yêu cầu (vẫn trong 30 giây – 7 ngày của `resolveWhen`): `explicit` + `when = now` → **chạy ngay** (bước `executed`); `explicit` + có `run_at` → tạo `scheduled_actions` (`origin = ai_agent`, `agent_request_id`, `created_by_user_id` = người dùng, `channel` theo phiên), huỷ được tới lúc chạy. Lịch tự hẹn giờ vẫn tính trần 50 lịch đang chờ/nhà → `rejected` `SCHEDULE_LIMIT`; bước chạy ngay không tính trần này (như đường xác nhận).
+5. **Chờ xác nhận** cho mọi bước hợp lệ còn lại (không `explicit`: AI tự suy ra, thiếu động từ, mơ hồ thiết bị, sai hướng, phủ định…): lưu ở `agent_requests.pending_steps` (các bước chờ không bao giờ bị sửa sau khi tạo); `request_hash` = SHA-256 hex của JSON chuẩn hoá `[{index, device_id, command, run_at}]` theo `index` tăng — dùng để xác nhận đúng phiên bản thẻ đã hiển thị; `expires_at` = now + 5 phút.
+6. Có ≥ 1 bước chạy ngay, tự hẹn giờ hoặc chờ → 1 dòng `agent_requests` (`pending` nếu còn bước chờ, ngược lại `completed`); không bước nào hợp lệ → không tạo dòng, trả `{request_id: null, status: "rejected"}`. Ghi `agent_requests` + `scheduled_actions` (cả lịch hẹn giờ lẫn bước chạy ngay) trong **1 transaction** (trần 50 lịch dùng advisory lock như `POST /homes/:id/schedules`). Bước chạy ngay được chèn thẳng ở trạng thái `running`, **sau commit** thực thi ngay bằng hàm chung với `scheduleRunner` (song song giữa các thiết bị khác nhau, tuần tự theo thứ tự bước trên cùng thiết bị; `notify: false`), worker không giành; kết quả (`done`/`skipped`/`failed`…) trả trong `executed[]` theo thứ tự bước. Yêu cầu chờ các bước chạy ngay **tối đa 6 giây** (agent gọi backend với timeout 10 giây) rồi trả trạng thái hiện tại — có thể còn `running`, lệnh vẫn chạy tiếp ở nền. Bước giống hệt (cùng thiết bị, lệnh, `when`) chỉ giữ bước đầu, bước sau bị bỏ, không báo lỗi.
+7. Sau commit: có bước tự hẹn giờ → thông báo `AGENT_SCHEDULED` (severity `info`, "Trợ lý đã hẹn giờ", nội dung dạng "Đã hẹn: 19:40 Tắt quạt · 20:00 Bật đèn", giờ theo múi giờ nhà, thêm " ngày mai"/" dd/MM" nếu không phải hôm nay); bước chạy ngay **không** tạo thông báo (response đã có kết quả). Audit `AGENT_REQUEST_CREATED` (category `automation`; chỉ id, số bước theo loại gồm `executed`, mã `rejected`; không có câu nói/tóm tắt/đoạn trích); IP/UA trong audit là của container agent, không phải của người dùng. Mỗi lần bật/tắt vẫn ghi `user_behavior_logs` như bấm tay.
+
+**Giới hạn còn lại của luật "lệnh rõ":** backend chỉ so đoạn trích với câu gốc do agent gửi; agent bị chiếm vẫn gửi được câu gốc tuỳ ý. Nằm ngoài mô hình đe doạ vì kẻ đó vẫn cần cookie người dùng hợp lệ + token dịch vụ ([Bảo mật](SECURITY_ARCHITECTURE.md) §9.2).
+
+**Xác nhận / từ chối (kênh khách, mục "Đã có" ở trên):**
+
+- `GET /agent/requests/:requestId` → `{id, status, summary, input_kind, created_at, expires_at, pending, schedules: Schedule[]}`; chỉ **người tạo** (khác/không có → 404 "Request not found"); `pending` quá hạn hiển thị `expired`.
+- `POST …/confirm` body `{request_hash: "64 hex", step_indexes: [0]}` (1..10, không trùng, thuộc bước chờ; sai → 400 `INVALID_INPUT`). Không còn `pending` → 409 `REQUEST_NOT_PENDING`; quá hạn → `expired` + 409 `REQUEST_EXPIRED`; hash khác → 409 `REQUEST_CHANGED`. Transaction 1: `UPDATE … WHERE status = 'pending'` → `confirmed` (0 dòng → 409), kiểm lại quyền từng bước (mất quyền / thiết bị đã xoá / nhà tạm ngưng → dòng lịch `failed` với `error_code` `ACCESS_REVOKED` / `NO_DEVICE` / `HOME_SUSPENDED` / `UNKNOWN`, không ném cả yêu cầu), tạo `scheduled_actions` (`run_at` = `step.run_at` nếu còn > now + 5 giây, ngược lại now). Sau commit: lịch tới hạn chạy **ngay** bằng hàm thực thi chung với `scheduleRunner` (`notify: false`, không giữ transaction lúc chờ ack), lịch tương lai để worker chạy; cuối cùng `status → completed`. 200 `{request_id, status: "completed", results: Schedule[]}`. Audit `AGENT_REQUEST_CONFIRMED` / `AGENT_REQUEST_REJECTED` (chỉ id + số bước).
+- Huỷ lịch Trợ lý đã đặt: `POST /schedules/:id/cancel` như lịch thường (tới trước khi chạy).
+
+**Chuẩn hoá chữ cho `evidence_span`** (agent `guard/text.py` và backend phải giống hệt): `lower()` → `đ` → `d` → Unicode NFD → bỏ ký tự combining (U+0300–U+036F) → mọi ký tự ngoài `[a-z0-9]` thành dấu cách → gộp dấu cách → trim. Ví dụ "Tắt Quạt, sau 30p nữa!" → `tat quat sau 30p nua`.
+
+**Dữ liệu lưu:** `agent_requests` ([Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8) + `scheduled_actions.agent_request_id`. **Không** lưu audio, câu nói gốc hay transcript; không có job dọn. Số liệu LLM/STT (`purpose` `planner`/`stt`) gửi qua `POST /api/service/ai-usage` (mục 7.1).
+
+**Chưa làm:** Mobile, STT chạy cục bộ (`whisper_local`), luật dự phòng (PRD FR-7.18), phát giọng trả lời (TTS).
 
 #### Dữ liệu hành vi cho AI
 
@@ -540,6 +644,7 @@ Backend hiện gửi `turn_on`/`turn_off` (cộng `set_temp_*`, `learn_*` cho đ
 | Telemetry | Node ESP-NOW `TELEMETRY` → MQTT `gateway/+/data` (hoặc `POST /api/device/data`) → WS `telemetry` | Backend đã có; ESP-NOW dự kiến |
 | Bật/tắt thiết bị | `POST /devices/:id/commands` → MQTT `.../command` → ESP-NOW `CMD` → `CMD_ACK` → MQTT `.../command/ack` → HTTP 200 + WS `device_state` | Backend đã có; firmware dự kiến |
 | Hẹn giờ một lần | `POST /homes/:id/schedules` → (runner 5 giây, khi tới `run_at`) `sendDeviceCommand` như bật/tắt thiết bị (kèm WS `device_state` cho Mobile) → thông báo `SCHEDULE_*` (Mobile qua WS `notification`; web poll `/notifications` 15 giây); huỷ: `POST /schedules/:id/cancel` | Backend + web user đã hiện thực (2026-11-14); chưa thử trên phần cứng |
+| Trợ lý AI (giọng nói/chữ) | Web `POST /api/agent/homes/:id/voice\|messages` → nginx → agent `GET /api/service/agent/homes/:id/context` → STT + LLM + guard → `POST /api/service/agent/homes/:id/requests` → luật backend: lệnh rõ chạy ngay (`executed`) hoặc tự hẹn giờ (`scheduled_actions`, thông báo `AGENT_SCHEDULED`), còn lại chờ → web `POST /api/portal/agent/requests/:id/confirm\|reject`; tới giờ `scheduleRunner` → `sendDeviceCommand` (`source = ai_agent`) | Backend + agent + web đã hiện thực (2026-11-14, theo hợp đồng); chưa chạy đầu-cuối với OpenAI thật |
 | Thao tác trên màn hình Gateway | ESP-NOW `CMD`/`CMD_ACK` → MQTT `.../status` (`source: gateway_local`) → WS `device_state` | Dự kiến |
 | Chuyển động → ảnh | ESP-NOW `EVENT` → `POST /local/camera/snapshot` → `POST /api/device/camera/snapshot` → MQTT `camera/event` → thông báo `CAMERA_MOTION` + WS `camera_snapshot` | Backend đã có (module `camera`); firmware Gateway đã gửi |
 | Xem trực tiếp trên Gateway | `GET /stream` (Camera) → hiển thị LCD | Đã chạy trên board (2026-11-08, VGA q=12 ≈ 3,3 fps); pipeline 2 task + `esp_new_jpeg` (2026-11-13) đã build, chưa đo lại trên board |

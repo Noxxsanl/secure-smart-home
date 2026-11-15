@@ -1,12 +1,13 @@
 "use client";
 
 import { api } from "@shh/api-client";
-import { PORTAL_API, useApi } from "@shh/api-client/portal";
+import { PORTAL_API, schedulesPrefix, useApi } from "@shh/api-client/portal";
 import type { Schedule, ScheduleInput, ScheduleList, ScheduleScope } from "@shh/api-client/portal";
 
 // Hẹn giờ một lần (backend: module schedules). Cả hai tab dùng chung một khoá/limit cố định để trang Hẹn giờ và
-// mục "Hẹn giờ" ở chi tiết thiết bị chia sẻ cache; tiền tố `schedulesPrefix` làm mới cả hai khi tạo/huỷ.
-export const schedulesPrefix = (homeId: number) => `${PORTAL_API}/homes/${homeId}/schedules`;
+// mục "Hẹn giờ" ở chi tiết thiết bị chia sẻ cache; tiền tố `schedulesPrefix` (@shh/api-client, vì @shh/ai cũng làm
+// mới) làm mới cả hai khi tạo/huỷ.
+export { schedulesPrefix };
 export const schedulesKey = (homeId: number, scope: ScheduleScope) =>
   `${schedulesPrefix(homeId)}?scope=${scope}&limit=${scope === "upcoming" ? 100 : 50}`;
 const schedulePrefix = `${PORTAL_API}/schedules`;

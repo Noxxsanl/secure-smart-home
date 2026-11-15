@@ -38,6 +38,7 @@ const TABLE_OWNERS = {
   control: ["device_commands", "user_behavior_logs"],
   automation: ["automation_rules", "automation_history"],
   schedules: ["scheduled_actions"],
+  agent: ["agent_requests"],
   recommendations: ["recommendation_history", "user_feedback"],
   notifications: ["notifications"],
   ota: ["firmware", "ota_jobs", "ota_history"],

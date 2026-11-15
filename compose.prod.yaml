@@ -125,15 +125,16 @@ services:
     container_name: iot-frontend-user
     environment:
       - BACKEND_URL=http://backend:5000
+      - AGENT_URL=http://agent:8000
     depends_on:
       - backend
     networks:
       - iot-network
     restart: always
 
-  # AI Agent — không publish cổng, chưa đi qua nginx: đường vào (nginx /agent/ hay backend gọi nội bộ)
-  # chốt khi có thiết kế. production bắt buộc OPENAI_API_KEY trong agent/.env, thiếu thì agent lỗi khởi động
-  # và khởi động lại liên tục (các service khác không bị ảnh hưởng).
+  # AI Agent (Trợ lý giọng nói/chữ) — không publish cổng; đường vào duy nhất là nginx `user.localhost/api/agent/`
+  # → agent:8000/v1/. production bắt buộc OPENAI_API_KEY trong agent/.env, thiếu thì agent lỗi khởi động
+  # và khởi động lại liên tục — chỉ /api/agent/ trả 502, nginx và các service khác vẫn chạy.
   agent:
     build:
       context: ./agent
@@ -164,6 +165,7 @@ services:
       - frontend-admin
       - frontend-operator
       - frontend-user
+      # Không phụ thuộc `agent`: agent lỗi chỉ làm /api/agent/ trả 502, phần còn lại vẫn chạy.
     networks:
       - iot-network
     restart: always

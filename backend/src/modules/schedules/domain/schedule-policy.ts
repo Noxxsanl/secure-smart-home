@@ -57,13 +57,29 @@ export function splitAction(command: string): SplitAction {
 
 const DELETED_DEVICE_NAME = "thiết bị đã xoá";
 
-/** Nhãn ngắn của thao tác (KHÔNG chứa tên phòng): "Bật Đèn", "Mở Rèm 50%", "Đặt Điều hoà 26°C"… */
+// Tên thiết bị bắt đầu bằng từ loại tải (đèn, quạt, rèm, điều hoà/hòa, máy lạnh) + dấu cách hoặc hết chuỗi. Tự viết ở đây vì
+// schedules không được import module agent (cùng danh sách với domain/explicit-step.ts của agent).
+const APPLIANCE_NAME_PREFIX = /^(đèn|quạt|rèm|điều hoà|điều hòa|máy lạnh)(?=\s|$)/iu;
+
+/**
+ * Nhãn ngắn của thao tác (KHÔNG chứa tên phòng): "Bật đèn", "Chỉnh rèm về 50%", "Đặt điều hoà 26°C"… Tên bắt đầu bằng từ loại tải
+ * thì viết thường chữ đầu ("Bật Đèn phòng khách" → "Bật đèn phòng khách") để câu đọc tự nhiên; tên khác ("Hiên trước") hoặc
+ * viết hoa toàn bộ ("ĐÈN TRẦN") giữ nguyên vì có thể là tên riêng/cố ý nhấn mạnh.
+ */
 export function actionLabel(command: string, appliance: Appliance | null, deviceName: string | null): string {
-  const name = deviceName ?? DELETED_DEVICE_NAME;
+  const raw = (deviceName ?? DELETED_DEVICE_NAME).normalize("NFC");
+  // Chỉ hạ chữ đầu khi từ đầu có dạng "Xxx" (chữ đầu hoa, phần còn lại thường); "ĐÈN TRẦN" (viết hoa toàn bộ) giữ nguyên
+  const firstWord = raw.split(/\s/, 1)[0];
+  const capitalized = firstWord.slice(1) === firstWord.slice(1).toLocaleLowerCase("vi-VN");
+  const name = APPLIANCE_NAME_PREFIX.test(raw) && capitalized ? lowerFirst(raw) : raw;
   const split = splitAction(command);
   const isCurtain = appliance === "curtain";
   if (split.action === "set_temp") return `Đặt ${name} ${split.temperature}°C`;
-  if (split.action === "set_pos") return split.position === 0 ? `Đóng ${name}` : `Mở ${name} ${split.position}%`;
+  // Vị trí giữa chừng là ĐÍCH, không phải hướng: rèm đang mở hết mà "về 50%" là kéo vào → "Mở rèm 50%" đọc sai; dùng nhãn trung tính
+  if (split.action === "set_pos") {
+    if (split.position === 0) return `Đóng ${name}`;
+    return split.position === 100 ? `Mở ${name} 100%` : `Chỉnh ${name} về ${split.position}%`;
+  }
   if (split.action === "turn_off") return isCurtain ? `Đóng ${name}` : `Tắt ${name}`;
   return isCurtain ? `Mở ${name}` : `Bật ${name}`;
 }

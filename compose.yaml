@@ -67,6 +67,8 @@ services:
       - frontend-admin
       - frontend-operator
       - frontend-user
+      # Không phụ thuộc `agent`: nginx phân giải tên agent khi có request (location /api/agent/), agent lỗi chỉ làm
+      # /api/agent/ trả 502, phần còn lại vẫn chạy.
     networks:
       - iot-network
     restart: unless-stopped
@@ -178,6 +180,8 @@ services:
       - /app/apps/user/.next
     environment:
       - BACKEND_URL=http://backend:5000
+      # Next dev chuyển /api/agent/* sang agent (rewrite đặt trước /api/*) khi mở thẳng :3003; qua nginx thì nginx xử lý.
+      - AGENT_URL=http://agent:8000
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true
     depends_on:
@@ -186,8 +190,9 @@ services:
       - iot-network
     restart: unless-stopped
 
-  # AI Agent (agent/, Python FastAPI) — mới có khung. Không phụ thuộc service nào lúc khởi động
-  # (chỉ gọi backend khi xử lý câu lệnh) nên chạy riêng được: `docker compose up --build agent`.
+  # AI Agent (agent/, Python FastAPI) — Trợ lý giọng nói/chữ của app user (STT + LLM điều phối, backend quyết định
+  # quyền/đặt lịch). Lúc khởi động không chờ service nào (chỉ gọi backend khi xử lý câu lệnh) nên chạy riêng được:
+  # `docker compose up --build agent` (khi đó chỉ /health và lỗi AGENT_UNAVAILABLE).
   # Source bind-mount + --app-dir để import từ /app/src (ưu tiên hơn bản cài trong image) và tự reload.
   agent:
     build:

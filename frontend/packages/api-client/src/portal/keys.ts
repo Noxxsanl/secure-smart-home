@@ -20,3 +20,6 @@ export const deviceSnapshotsKey = (deviceId: number, limit: number) =>
 /** URL ảnh JPEG của snapshot — dùng thẳng trong `<img src>`: GET không cần X-Portal, cookie phiên tự gửi. */
 export const snapshotImageUrl = (snapshotId: number) => `${PORTAL_API}/snapshots/${snapshotId}/image`;
 export const notificationsPrefix = `${PORTAL_API}/notifications`;
+
+/** Tiền tố mọi truy vấn hẹn giờ của một nhà (`?scope=upcoming|history`) — hẹn/huỷ lịch (@shh/automation, @shh/ai) làm mới bằng khoá này. */
+export const schedulesPrefix = (homeId: number) => `${PORTAL_API}/homes/${homeId}/schedules`;
