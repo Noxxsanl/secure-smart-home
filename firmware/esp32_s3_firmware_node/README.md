@@ -150,7 +150,7 @@ main ──► application ──► services ──► common/security_manager,
 | 7 | Lệnh có `ts` phải trong ±30 s so với giờ node. `CONFIG_NODE_CMD_REQUIRE_TS` bắt buộc mọi lệnh có `ts` (Gateway đã gửi `ts`, xem [Hợp đồng](#hợp-đồng-lệnh-và-telemetry)) | `node_link` |
 | 8 | `command_id` chỉ `[A-Za-z0-9_-]` ≤ 64, `action` chỉ `[a-z0-9_]` ≤ 32, tên trường đo và tên mã IR có kiểm ký tự; `device_id` từ NVS cũng kiểm trước khi ghép vào JSON | `node_link`, `node_telemetry`, `node_ir_store` |
 | 9 | Relay tắt hết khi khởi động (đặt mức trước khi bật output) rồi mới khôi phục trạng thái đã lưu (cách nhau 300 ms); chặn đóng/cắt nhanh hơn 500 ms; cảnh báo nếu dùng chân strapping | `drv_relay`, `node_switches` |
-| 10 | Rèm: cuộn dây động cơ không cấp điện lúc khởi động và khi dừng; có điện lại thì **không tự chạy**; lệnh chạy luôn bị chặn trong [0, hành trình] (chỉ nút nhích lúc hiệu chuẩn mới vượt, mỗi lần ≤ 1024 bước nên lỡ mất sự kiện thả tay vẫn tự dừng); đang hiệu chuẩn thì từ chối lệnh từ xa | `drv_stepper`, `node_curtain` |
+| 10 | Rèm: cuộn dây động cơ không cấp điện lúc khởi động và khi dừng; có điện lại thì **không tự chạy**; lệnh chạy luôn bị chặn trong [0, hành trình] (chỉ nút Đóng / Mở giữ-để-chạy ở màn Hiệu chuẩn mới vượt, mỗi lần ≤ 1024 bước nên lỡ mất sự kiện thả tay vẫn tự dừng); đang hiệu chuẩn thì từ chối lệnh từ xa | `drv_stepper`, `node_curtain` |
 | 11 | Lệnh xếp hàng quá 2,5 s (Gateway đã báo hết giờ) bị bỏ, không đóng relay / chạy rèm / phát IR muộn | `node_switches`, `node_curtain`, `node_ac` |
 | 12 | OTA 2 slot + rollback; stack canary; driver WiFi không ghi cấu hình xuống NVS | `sdkconfig.defaults`, `partitions_node.csv` |
 
@@ -213,11 +213,25 @@ Sau khi nạp, màn hình (ngang 480×320):
 ```
 
 - **Tiêu đề**: "Living Room", ngày giờ (`--/--/----  --:--` khi chưa nối Gateway, vì Node lấy giờ từ Gateway), chấm **xanh** = đã nối Gateway, **vàng** = đang tìm, **đỏ** = chưa ghép nối.
-- **Công tắc**: Đèn, Quạt, Điều hòa = bật/tắt; Rèm = mở lại mức vừa dùng (mặc định 100 %) / đóng hẳn. Bấm 50 % / 100 % để chọn độ mở (nút đang có hiệu lực tô xanh dương). Ô không có chữ trạng thái — công tắc và nền xanh đã cho biết; chỉ Điều hòa hiện "Đặt 26°C" khi đang bật và Rèm hiện "Đang chạy" khi động cơ chạy. Công tắc luôn quay về trạng thái thật: thao tác bị từ chối (VD bấm quá nhanh) thì công tắc trả lại và dòng thông báo nói lý do. Chạm phần còn lại của ô Đèn / Quạt cũng bật/tắt; của ô **Rèm** mở bảng Rèm (DỪNG + hiệu chuẩn); của ô **Điều hòa** mở bảng Điều hòa.
+- **Công tắc**: Đèn, Quạt, Điều hòa = bật/tắt; Rèm = mở lại mức vừa dùng (mặc định 100 %) / đóng hẳn. Bấm 50 % / 100 % để chọn độ mở (nút đang có hiệu lực tô xanh dương). Ô không có chữ trạng thái — công tắc và nền xanh đã cho biết; chỉ Điều hòa hiện "Đặt 26°C" khi đang bật (khi rèm chạy, công tắc và nút mức đã theo mức đích). Công tắc luôn quay về trạng thái thật: thao tác bị từ chối (VD bấm quá nhanh) thì công tắc trả lại và dòng thông báo nói lý do. Chạm phần còn lại của ô Đèn / Quạt cũng bật/tắt; của ô **Rèm** mở bảng Rèm (thanh kéo, DỪNG, Hiệu chuẩn); của ô **Điều hòa** mở bảng Điều hòa.
 - **Dòng dưới cùng**: biểu tượng sóng cùng màu chấm kết nối (Node không vào WiFi nhà nên không có IP) + thông báo: "Sẵn sàng", việc vừa xảy ra trong 5 giây ("Lệnh từ xa: bật đèn", "Đèn: bấm quá nhanh…", "Điều hòa: chưa học mã 26°C"), lỗi cảm biến màu đỏ cho tới khi hết lỗi.
-- Ô của thiết bị tắt trong menuconfig: công tắc mờ, dòng phụ "Chưa lắp".
+- Ô của thiết bị tắt trong menuconfig: công tắc mờ, dòng phụ "Chưa lắp" (rèm chưa lắp thì ẩn thêm 2 nút mức).
 
 **Bảng Điều hòa** (chạm ô Điều hòa): công tắc **Nguồn**; nhiệt độ đặt cỡ lớn với nút **−** / **+** và **thanh kéo 16–30°C** (ngừng chỉnh 0,6 giây mới phát mã); nhiệt độ + độ ẩm phòng; nút **Học mã** mở lưới 16 ô (TẮT, 16..30°C, ô đã học có dấu ✓ nền xanh) — chạm ô để học, khi chờ remote có **thanh đếm ngược 10 giây** và ô nháy viền; giữ lâu ô đã học để phát thử. Mức nhiệt chưa học mã: số chuyển vàng, không gửi lệnh, dòng dưới hướng dẫn học. Chi tiết: [Học mã IR điều hòa](../../docs/guides/HOC_MA_IR_DIEU_HOA.md).
+
+**Bảng Rèm** (chạm phần còn lại của ô Rèm cửa; chỉ có khi rèm được bật trong menuconfig). Màn điều khiển: tiêu đề "Rèm cửa", nút **Hiệu chuẩn** (tô xanh dương khi chưa hiệu chuẩn) và **Quay lại**; số % mở cỡ lớn kèm trạng thái (Đang mở... / Đang đóng... / Đóng hẳn / Mở hẳn / Mở một phần / Chưa rõ vị trí) và nút **DỪNG**; **thanh kéo 0–100 %** (nhãn "0% Đóng", "50%", "Mở 100%"). Đang kéo thì số lớn hiện mức đang kéo, trạng thái "Thả tay để chạy" và rèm **chưa chạy**; **thả tay** mới gửi đúng 1 lệnh chạy tới mức đó (thả đúng mức hiện tại thì không gửi). Không kéo thì núm theo mức đích khi rèm đang chạy, theo vị trí khi đứng yên — lệnh từ web, Gateway hay công tắc ở trang chính cũng làm núm di chuyển. Dòng dưới: "Kéo thanh rồi thả tay, rèm sẽ chạy tới mức đó." hoặc, khi chưa hiệu chuẩn (màu vàng), "Chưa hiệu chuẩn, mức % có thể lệch: bấm Hiệu chuẩn." Bấm **Hiệu chuẩn** sang màn "Hiệu chuẩn rèm" (các bước ở mục [Hiệu chuẩn rèm](#hiệu-chuẩn-rèm-lần-đầu-lắp-hoặc-khi--bị-lệch)).
+
+```
+ Màn điều khiển                              Màn "Hiệu chuẩn rèm"
+┌──────────────────────────────────┐      ┌──────────────────────────────────┐
+│ Rèm cửa  [Hiệu chuẩn]  [Quay lại]│      │ Hiệu chuẩn rèm        [Quay lại] │
+│     65 %            [ DỪNG ]     │      │ (1) Đóng hẳn  —  (2) Mở hẳn      │
+│     Đang mở...                   │      │ dòng hướng dẫn                   │
+│ ───────────●──────────────────── │      │ [ Đóng ]  [ Mở ]   giữ để chạy   │
+│ 0% Đóng       50%      Mở 100%   │      │ Vị trí 5120 / 20480 bước         │
+│ Kéo thanh rồi thả tay, ...       │      │ [ Lưu mốc đóng hẳn ]             │
+└──────────────────────────────────┘      └──────────────────────────────────┘
+```
 
 Trạng thái đẩy vào bằng `node_ui_set_device` (−1 chưa biết, 0 tắt, 1 bật), `node_ui_set_curtain`, `node_ui_set_ac_setpoint`, `node_ui_set_notice`, cùng quy ước khoá `lamp/fan/curtain/ac/ac_temp` mà trang Living Room của Gateway đọc.
 
@@ -286,16 +300,18 @@ menuconfig:
 ### Hoạt động
 
 - **Đèn, quạt** (`node_switches`): gạt công tắc / chạm ô; lệnh từ web/app đi Server → Gateway → Node, hoặc bấm trên màn hình Gateway (Gateway gửi thẳng xuống Node, không qua Server). Mỗi lần đổi: ô trên màn hình, lưu NVS, gửi telemetry ngay (Gateway + web cập nhật trong ~1 s, kể cả khi bấm trên Node). Khởi động: relay tắt hết rồi đóng lại theo trạng thái đã lưu, cách nhau 300 ms (log `lamp restored ON`). Đổi nhanh hơn 500 ms bị từ chối (log `switching too fast`, web báo lỗi).
-- **Rèm** (`node_curtain`): vị trí đếm theo nửa bước, 0 = ĐÓNG hẳn, hành trình = MỞ hẳn; lưu NVS 2 giây/lần khi đang chạy và ngay khi dừng; có điện lại thì **không tự chạy**. Trên ô: công tắc (bật = mở lại mức vừa dùng, tắt = đóng hẳn) + 2 nút **50% / 100%**; chạm phần còn lại của ô mở bảng Rèm: % mở + trạng thái, nút **DỪNG** và các nút hiệu chuẩn. Lệnh từ xa ack ngay khi bắt đầu chạy (rèm chạy lâu hơn 3 s Gateway chờ); telemetry báo **mức đích** ngay lúc bắt đầu chạy (Gateway, web đổi màu ngay) và vị trí thật khi dừng. Động cơ ngắt điện khi đứng yên (hộp số giữ trục).
+- **Rèm** (`node_curtain`): vị trí đếm theo nửa bước, 0 = ĐÓNG hẳn, hành trình = MỞ hẳn; lưu NVS 2 giây/lần khi đang chạy và ngay khi dừng; có điện lại thì **không tự chạy**. Trên ô: công tắc (bật = mở lại mức vừa dùng, tắt = đóng hẳn) + 2 nút **50% / 100%**; chạm phần còn lại của ô mở bảng Rèm: % mở + trạng thái, **thanh kéo 0–100 %** (kéo thì chưa chạy, thả tay mới gửi 1 lệnh chạy tới mức đó), nút **DỪNG** và nút **Hiệu chuẩn**. Lệnh từ xa ack ngay khi bắt đầu chạy (rèm chạy lâu hơn 3 s Gateway chờ); telemetry báo **mức đích** ngay lúc bắt đầu chạy (Gateway, web đổi màu ngay) và vị trí thật khi dừng. Động cơ ngắt điện khi đứng yên (hộp số giữ trục).
 
 ### Hiệu chuẩn rèm (lần đầu lắp, hoặc khi % bị lệch)
 
-1. Chạm ô **Rèm cửa** (ngoài công tắc và 3 nút mức) để mở bảng Rèm.
-2. Giữ **Nhích ĐÓNG** tới khi rèm đóng hẳn (thả tay là dừng) → bấm **Đặt là ĐÓNG hẳn**.
-3. Giữ **Nhích MỞ** tới khi rèm mở hẳn → bấm **Đặt là MỞ hẳn**. Màn hình báo hành trình (số bước, số vòng); giá trị lưu NVS và thay hành trình mặc định.
-4. **Quay lại** → thử công tắc và các nút 50% / 100%.
+1. Chạm ô **Rèm cửa** (ngoài công tắc và 2 nút mức) để mở bảng Rèm, bấm **Hiệu chuẩn** (nút tô xanh dương khi rèm chưa hiệu chuẩn). Mỗi lần mở màn Hiệu chuẩn đều bắt đầu lại từ bước 1; thanh trên cùng hiện "(1) Đóng hẳn — (2) Mở hẳn" (bước đang làm xanh dương, bước xong có ✓ xanh lá).
+2. Bước 1: **giữ** nút **Đóng** tới khi rèm đóng hẳn (giữ là chạy, thả là dừng; đang hiệu chuẩn thì bỏ qua giới hạn hành trình vì rèm không có công tắc hành trình) → bấm **Lưu mốc đóng hẳn**.
+3. Bước 2: **giữ** nút **Mở** tới khi rèm mở hẳn → bấm **Lưu mốc mở hẳn**. Dòng "Vị trí N / M bước" cho biết vị trí đang đếm; thành công thì màn hình báo "Đã lưu hành trình N bước (khoảng X vòng)", giá trị lưu NVS và thay hành trình mặc định.
+4. Bấm **Xong** về màn điều khiển → thử thanh kéo, công tắc và các nút 50% / 100%.
 
-Bấm MỞ mà rèm đóng lại: bật *Đảo chiều quay* trong menuconfig rồi hiệu chuẩn lại. Không có công tắc hành trình nên trượt bước (rèm nặng, kẹt) làm % lệch dần — chỉ lệch mốc đóng thì làm lại bước 2 là đủ.
+Lưu không được (rèm còn đang chạy; hành trình ngắn hơn 512 nửa bước) thì màn ở lại bước đó và dòng hướng dẫn báo lý do. Riêng mốc mở hẳn đã đặt nhưng không ghi được NVS: màn vẫn sang **Xong** (hành trình dùng được tới khi mất điện), dòng vàng báo mất điện sẽ phải hiệu chuẩn lại. **Quay lại** bất kỳ lúc nào để về màn điều khiển.
+
+Bấm MỞ mà rèm đóng lại: bật *Đảo chiều quay* trong menuconfig rồi hiệu chuẩn lại. Không có công tắc hành trình nên trượt bước (rèm nặng, kẹt) làm % lệch dần — chỉ lệch mốc đóng thì làm bước 1 (có **Lưu mốc đóng hẳn**) rồi bấm **Quay lại** (hành trình đã lưu giữ nguyên).
 
 | Hiện tượng | Kiểm |
 |---|---|
@@ -483,7 +499,7 @@ Còn mở:
 3. Cấp điện / nhấn reset: relay không "tách".
 4. Gạt công tắc **Đèn**: relay đóng, ô chuyển nền xanh, log `node_cmd: [2] lamp -> ON (relay switched)   [screen]`, trang Living Room của Gateway đổi theo trong ~1 s. Tương tự **Quạt**.
 5. Bật đèn → rút điện → cắm lại: đèn sáng lại, log `lamp restored ON`.
-6. Rèm: hiệu chuẩn (mục trên) → công tắc, 50% / 100%, DỪNG trên bảng Rèm; LED tím khi chạy. Rút điện khi đang chạy → cắm lại → % gần đúng chỗ dừng.
+6. Rèm: hiệu chuẩn 2 bước (mục trên) → công tắc, 50% / 100%; trên bảng Rèm kéo thanh rồi thả tay (rèm chỉ chạy khi thả, núm theo mức đích), DỪNG giữa chừng; LED tím khi chạy. Rút điện khi đang chạy → cắm lại → % gần đúng chỗ dừng.
 7. Từ web (backend đã chạy migration `set_node_appliances_real_2026_11`): bật/tắt Đèn, Quạt, rèm Đóng / 50% / 100% → Node chạy, web báo thành công, LED chớp trắng, log hiện đủ 4 dòng `node_cmd` (mục [Theo dõi lệnh trên terminal](#theo-dõi-lệnh-trên-terminal)). Bấm trên Node → web tự cập nhật.
 
 ## Theo dõi lệnh trên terminal
@@ -517,7 +533,7 @@ Dòng màu vàng (W) của `node_cmd` cho biết vì sao lệnh không chạy:
 | `[2] target=… NOT accepted` | `target` lạ, tải tắt trong menuconfig, hoặc hàng đợi đầy |
 | `[2] lamp -> ON REFUSED: switching too fast` | Bấm lại trong vòng 0,5 giây |
 | `[2] … DROPPED: waited too long in queue` | Lệnh xếp hàng quá 2,5 giây (VD sau lúc học mã IR) — Gateway đã báo hết giờ nên Node bỏ |
-| `[2] curtain … REJECTED: curtain is being calibrated on the screen` | Đang giữ nút nhích ở màn Hiệu chuẩn |
+| `[2] curtain … REJECTED: curtain is being calibrated on the screen` | Đang giữ nút Đóng / Mở ở màn Hiệu chuẩn |
 | `[2] ac … FAILED: IR code not learned yet or IR send error` | Chưa học mã cho mức nhiệt đó |
 | `node_link: duplicate CMD …` | Gateway gửi lại cùng `command_id`: Node không làm lại, chỉ gửi lại ack cũ |
 

@@ -239,15 +239,19 @@ static bool wait_stopped(void)
     return !board_curtain_moving();
 }
 
+/* Báo màn Hiệu chuẩn: kết quả "Lưu mốc" (ui chỉ chuyển bước khi ok). */
+static const char *const MSG_STILL_RUNNING = "Rèm còn đang chạy: thả tay, đợi rèm đứng yên rồi bấm Lưu mốc lại.";
+
 static void mark_closed(void)
 {
     if (!wait_stopped()) {
-        node_ui_set_curtain_message(NODE_UI_MSG_WARN, "Rèm đang chạy: thả nút hoặc bấm DỪNG, đợi rèm đứng yên rồi bấm lại.");
+        node_ui_set_curtain_mark_result(NODE_UI_CURTAIN_MARK_CLOSED, false, NODE_UI_MSG_WARN, MSG_STILL_RUNNING);
         return;
     }
     int32_t old = board_curtain_position();
     if (board_curtain_set_position(0) != ESP_OK) {
-        node_ui_set_curtain_message(NODE_UI_MSG_BAD, "Không đặt được mốc: động cơ chưa dừng hẳn, thử lại sau 1 giây.");
+        node_ui_set_curtain_mark_result(NODE_UI_CURTAIN_MARK_CLOSED, false, NODE_UI_MSG_BAD,
+                                        "Không đặt được mốc: động cơ chưa dừng hẳn, thử lại sau 1 giây.");
         return;
     }
     s_target = 0;
@@ -255,24 +259,22 @@ static void mark_closed(void)
     publish();
     atomic_store(&s_changed, true);
     ESP_LOGI(TAG, "CLOSED mark set (counter was %ld)", (long)old);
-    node_ui_set_curtain_message(NODE_UI_MSG_OK, "Đã đặt mốc ĐÓNG hẳn. Giờ giữ Nhích MỞ tới khi rèm mở hẳn rồi bấm Đặt là "
-                                                "MỞ hẳn.");
+    node_ui_set_curtain_mark_result(NODE_UI_CURTAIN_MARK_CLOSED, true, NODE_UI_MSG_OK, NULL);   /* ui sang bước 2 */
 }
 
 static void mark_open(void)
 {
     char msg[200];
     if (!wait_stopped()) {
-        node_ui_set_curtain_message(NODE_UI_MSG_WARN, "Rèm đang chạy: thả nút hoặc bấm DỪNG, đợi rèm đứng yên rồi bấm lại.");
+        node_ui_set_curtain_mark_result(NODE_UI_CURTAIN_MARK_OPEN, false, NODE_UI_MSG_WARN, MSG_STILL_RUNNING);
         return;
     }
     int32_t pos = board_curtain_position();
     if (pos < MIN_TRAVEL) {
         snprintf(msg, sizeof(msg),
-                 "Rèm mới cách mốc ĐÓNG %ld bước (cần ít nhất %d). Đặt mốc ĐÓNG hẳn trước, rồi giữ Nhích MỞ tới khi rèm "
-                 "mở hẳn.",
+                 "Rèm mới cách mốc đóng %ld bước (cần ít nhất %d): giữ nút Mở thêm, hoặc Quay lại làm lại từ bước 1.",
                  (long)pos, MIN_TRAVEL);
-        node_ui_set_curtain_message(NODE_UI_MSG_BAD, msg);
+        node_ui_set_curtain_mark_result(NODE_UI_CURTAIN_MARK_OPEN, false, NODE_UI_MSG_BAD, msg);
         return;
     }
     esp_err_t err = node_state_set_i32(KEY_TRAVEL, pos);
@@ -282,13 +284,13 @@ static void mark_open(void)
     atomic_store(&s_changed, true);
     ESP_LOGI(TAG, "OPEN mark set: travel %ld half-steps", (long)pos);
     if (err != ESP_OK) {
-        node_ui_set_curtain_message(NODE_UI_MSG_WARN, "Đã đặt mốc MỞ hẳn nhưng không lưu được vào bộ nhớ (NVS): mất điện "
-                                                      "sẽ phải hiệu chuẩn lại.");
+        node_ui_set_curtain_mark_result(NODE_UI_CURTAIN_MARK_OPEN, true, NODE_UI_MSG_WARN,
+                                        "Đã đặt mốc mở hẳn nhưng không lưu được vào bộ nhớ: mất điện sẽ phải hiệu chuẩn lại.");
         return;
     }
-    snprintf(msg, sizeof(msg), "Đã lưu hành trình %ld bước (khoảng %.1f vòng). Rèm đang MỞ hẳn (100%%).", (long)pos,
+    snprintf(msg, sizeof(msg), "Đã lưu hành trình %ld bước (khoảng %.1f vòng). Rèm đang mở hẳn (100%%).", (long)pos,
              (double)pos / HALF_STEPS_PER_REV);
-    node_ui_set_curtain_message(NODE_UI_MSG_OK, msg);
+    node_ui_set_curtain_mark_result(NODE_UI_CURTAIN_MARK_OPEN, true, NODE_UI_MSG_OK, msg);
 }
 
 static void handle_ui(const cur_req_t *req)

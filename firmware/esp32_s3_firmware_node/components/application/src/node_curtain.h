@@ -2,8 +2,9 @@
  * node_curtain — rèm cửa bằng động cơ bước 28BYJ-48 5 V qua ULN2003 (riêng của application).
  *
  * Không có công tắc hành trình: vị trí = số nửa bước đếm được (0 = ĐÓNG hẳn, hành trình = MỞ hẳn), lưu NVS (đang chạy
- * ~2 s/lần, dừng thì lưu ngay) nên mất điện vẫn nhớ. Hành trình hiệu chuẩn trên màn hình (bảng Rèm cửa → Hiệu chuẩn:
- * nhích tới mép, "Đặt là ĐÓNG hẳn" / "Đặt là MỞ hẳn"); chưa hiệu chuẩn thì dùng giá trị mặc định trong menuconfig.
+ * ~2 s/lần, dừng thì lưu ngay) nên mất điện vẫn nhớ. Hành trình hiệu chuẩn trên màn hình (bảng Rèm cửa → Hiệu chuẩn,
+ * 2 bước: giữ Đóng tới mép rồi "Lưu mốc đóng hẳn"; giữ Mở tới mép rồi "Lưu mốc mở hẳn"; kết quả báo lại bằng
+ * node_ui_set_curtain_mark_result); chưa hiệu chuẩn thì dùng giá trị mặc định trong menuconfig.
  * Có điện lại: rèm KHÔNG tự chạy, chỉ nạp lại vị trí.
  *
  * Lệnh Gateway (params.target = "curtain"): turn_on = mở hẳn, turn_off = đóng hẳn, toggle, stop, set_pos_<0..100>.

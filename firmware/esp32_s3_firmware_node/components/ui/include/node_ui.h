@@ -10,8 +10,8 @@
  * Dữ liệu đẩy vào qua node_ui_set_* như gw_ui của Gateway; ui không biết relay/IR/động cơ — chỉ báo ý định qua callback,
  * application làm rồi đẩy trạng thái thật về (công tắc luôn quay về trạng thái đã xác nhận).
  *   - Đèn / Quạt: gạt công tắc hoặc chạm ô = bật/tắt (node_ui_set_switch_callbacks).
- *   - Rèm: công tắc = mở lại mức vừa dùng / đóng hẳn, 3 nút mức; chạm ô mở bảng Rèm (DỪNG + hiệu chuẩn)
- *     (node_ui_set_curtain_callbacks).
+ *   - Rèm: công tắc = mở lại mức vừa dùng / đóng hẳn, 2 nút mức 50% / 100%; chạm ô mở bảng Rèm (thanh kéo 0-100 %,
+ *     DỪNG, Hiệu chuẩn 2 bước) (node_ui_set_curtain_callbacks).
  *   - Điều hòa: công tắc = bật/tắt; chạm ô mở bảng Điều hòa (nhiệt độ, học mã IR) (node_ui_set_ac_callbacks).
  * Ngày giờ lấy từ đồng hồ hệ thống (application đặt TZ; giờ do Gateway cấp) — chưa có giờ thì hiện "--/--/----".
  *
@@ -91,19 +91,21 @@ void node_ui_set_switch_callbacks(const node_ui_switch_callbacks_t *cbs);
 
 /*
  * Rèm cửa. Trên ô: công tắc (bật = mở lại mức vừa dùng, tắt = đóng hẳn) và 2 nút mức 50% / 100%. Chạm phần còn
- * lại của ô mở bảng Rèm: nút DỪNG và hiệu chuẩn (rèm không có công tắc hành trình) — giữ "Nhích ĐÓNG" / "Nhích MỞ" để
- * chạy từng chút bỏ qua giới hạn, "Đặt là ĐÓNG hẳn" / "Đặt là MỞ hẳn" để ghi mốc.
+ * lại của ô mở bảng Rèm. Màn điều khiển: số % lớn + trạng thái, nút DỪNG, thanh kéo 0-100 % (rèm chỉ chạy khi thả
+ * tay) và nút Hiệu chuẩn (rèm không có công tắc hành trình). Màn Hiệu chuẩn (2 bước): giữ nút Đóng tới khi rèm khép
+ * kín rồi "Lưu mốc đóng hẳn"; giữ nút Mở tới khi rèm mở hết cỡ rồi "Lưu mốc mở hẳn". Application báo kết quả
+ * "Lưu mốc" bằng node_ui_set_curtain_mark_result; màn chỉ sang bước kế khi kết quả là thành công.
  */
 typedef enum {
     NODE_UI_CURTAIN_OPEN = 0,      /* gạt công tắc sang bật: mở lại mức vừa dùng (application nhớ, mặc định 100 %) */
     NODE_UI_CURTAIN_CLOSE,         /* gạt công tắc sang tắt: đóng hẳn */
     NODE_UI_CURTAIN_STOP,
-    NODE_UI_CURTAIN_SET_PERCENT,   /* value = 50 / 100 (nút mức) */
-    NODE_UI_CURTAIN_JOG_OPEN,      /* đang giữ "Nhích MỞ": gửi khi chạm rồi lặp ~100 ms/lần khi giữ lâu */
-    NODE_UI_CURTAIN_JOG_CLOSE,     /* đang giữ "Nhích ĐÓNG" */
-    NODE_UI_CURTAIN_JOG_RELEASE,   /* thả nút nhích */
-    NODE_UI_CURTAIN_MARK_CLOSED,   /* vị trí hiện tại = ĐÓNG hẳn */
-    NODE_UI_CURTAIN_MARK_OPEN,     /* vị trí hiện tại = MỞ hẳn (ghi hành trình) */
+    NODE_UI_CURTAIN_SET_PERCENT,   /* value 0..100 (nút mức 50 / 100 trên ô; thanh kéo trên bảng Rèm: gửi khi thả tay) */
+    NODE_UI_CURTAIN_JOG_OPEN,      /* đang giữ nút Mở ở màn Hiệu chuẩn: gửi khi chạm rồi lặp ~100 ms/lần khi giữ lâu */
+    NODE_UI_CURTAIN_JOG_CLOSE,     /* đang giữ nút Đóng ở màn Hiệu chuẩn */
+    NODE_UI_CURTAIN_JOG_RELEASE,   /* thả nút Đóng / Mở */
+    NODE_UI_CURTAIN_MARK_CLOSED,   /* "Lưu mốc đóng hẳn": vị trí hiện tại = ĐÓNG hẳn */
+    NODE_UI_CURTAIN_MARK_OPEN,     /* "Lưu mốc mở hẳn": vị trí hiện tại = MỞ hẳn (ghi hành trình) */
 } node_ui_curtain_op_t;
 
 typedef struct {
@@ -121,8 +123,19 @@ void node_ui_set_curtain_callbacks(const node_ui_curtain_callbacks_t *cbs);
  */
 void node_ui_set_curtain(int percent, int target_percent, bool moving, int32_t position, int32_t travel, bool calibrated);
 
-/** Dòng thông báo dưới bảng Rèm (hướng dẫn / kết quả hiệu chuẩn). Gọi được từ task bất kỳ. */
+/**
+ * Dòng gợi ý ở đáy màn điều khiển của bảng Rèm (ghi đè tới lần đặt lại kế tiếp: mở bảng, quay về từ màn Hiệu chuẩn,
+ * hoặc `calibrated` đổi); nếu màn Hiệu chuẩn đang hiện thì ghi vào dòng hướng dẫn của màn đó. Gọi được từ task bất kỳ.
+ */
 void node_ui_set_curtain_message(node_ui_msg_t level, const char *text);
+
+/**
+ * Kết quả "Lưu mốc" ở màn Hiệu chuẩn — application gọi sau khi xử lý NODE_UI_CURTAIN_MARK_CLOSED / _MARK_OPEN.
+ * ok = true: đã đặt mốc `mark`; nếu màn đang ở đúng bước của mốc đó thì chuyển bước (ĐÓNG xong → bước MỞ; MỞ xong →
+ * hoàn tất). Kết quả của mốc không khớp bước đang hiện (VD bấm Lưu 2 lần) không làm chuyển bước.
+ * text (NULL = hướng dẫn mặc định của bước hiện tại) hiện ở dòng hướng dẫn, màu theo level. Gọi được từ task bất kỳ.
+ */
+void node_ui_set_curtain_mark_result(node_ui_curtain_op_t mark, bool ok, node_ui_msg_t level, const char *text);
 
 /** Nhiệt độ đặt của điều hòa (°C), hiện ở ô Điều hòa khi đang bật và trên bảng Điều hòa; NAN = không hiện. */
 void node_ui_set_ac_setpoint(float setpoint_c);

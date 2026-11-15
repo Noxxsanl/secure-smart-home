@@ -79,7 +79,7 @@ static lv_obj_t *s_link_icon;
 static lv_obj_t *s_notice_label;
 static lv_obj_t *s_dev_tile[NODE_UI_DEV_COUNT];
 static lv_obj_t *s_dev_switch[NODE_UI_DEV_COUNT];
-static lv_obj_t *s_dev_sub[NODE_UI_DEV_COUNT];   /* rèm: nhãn trạng thái cạnh tên */
+static lv_obj_t *s_dev_sub[NODE_UI_DEV_COUNT];   /* dòng phụ: "Chưa lắp" / "Đặt 26°C" */
 static lv_obj_t *s_cur_chip[CURTAIN_LEVEL_COUNT];
 #if CONFIG_NODE_UI_TOUCH_TEST
 static lv_obj_t *s_dot;
@@ -125,14 +125,39 @@ static uint32_t s_ac_learn_start;
 static uint32_t s_ac_learn_ms;
 static node_ui_ac_callbacks_t s_ac_cbs;
 
-/* ---- bảng Rèm cửa ---- */
-enum { CUR_BTN_BACK, CUR_BTN_STOP, CUR_BTN_MARK_CLOSED, CUR_BTN_MARK_OPEN };
+/* ---- bảng Rèm cửa: màn điều khiển (thanh kéo) + màn Hiệu chuẩn 2 bước ---- */
+enum { CUR_BTN_BACK, CUR_BTN_STOP, CUR_BTN_CALIB, CUR_BTN_MAIN };
+
+#define CUR_STATUS_X (PAD + 120)   /* nhãn trạng thái, bên phải số % lớn */
+#define CUR_SLIDER_Y 98            /* toạ độ y trong view (= y trên bảng - PANEL_TITLE_H) */
+#define CUR_LABELS_Y 128
+#define CUR_HINT_Y (PANEL_MSG_Y + 4 - PANEL_TITLE_H)
+#define CUR_DOT 28
+#define CUR_JOG_Y 98
+#define CUR_JOG_H 60
+#define CUR_INFO_Y 164
+#define CUR_MAIN_Y 194
+#define CUR_MAIN_H 50
+enum { CUR_STEP_CLOSE, CUR_STEP_OPEN, CUR_STEP_DONE };   /* bước hiện tại của màn Hiệu chuẩn */
 
 static lv_obj_t *s_cur_panel;
+static lv_obj_t *s_cur_title;
+static lv_obj_t *s_cur_calib_btn;
+static lv_obj_t *s_cur_ctrl;          /* màn điều khiển */
+static lv_obj_t *s_cur_cal;           /* màn Hiệu chuẩn */
 static lv_obj_t *s_cur_pct;
 static lv_obj_t *s_cur_status;
+static lv_obj_t *s_cur_slider;
+static lv_obj_t *s_cur_hint;          /* dòng gợi ý ở đáy màn điều khiển */
+static lv_obj_t *s_cur_step_dot[2];
+static lv_obj_t *s_cur_step_dot_lbl[2];
+static lv_obj_t *s_cur_step_lbl[2];
+static lv_obj_t *s_cur_step_line;
+static lv_obj_t *s_cur_cal_msg;       /* dòng hướng dẫn / kết quả của màn Hiệu chuẩn */
+static lv_obj_t *s_cur_jog_btn[2];    /* [0] = Đóng, [1] = Mở */
 static lv_obj_t *s_cur_info;
-static lv_obj_t *s_cur_msg;
+static lv_obj_t *s_cur_main_btn;
+static lv_obj_t *s_cur_main_lbl;
 static node_ui_curtain_callbacks_t s_cur_cbs;
 static int s_cur_percent = -1;   /* -1 = chưa biết */
 static int s_cur_target;
@@ -140,6 +165,9 @@ static bool s_cur_moving;
 static int32_t s_cur_position;
 static int32_t s_cur_travel;
 static bool s_cur_calibrated;
+static bool s_cur_dragging;      /* đang chạm giữ thanh kéo: render không đụng thanh, số lớn, trạng thái */
+static int s_cur_sent = -1;      /* mức vừa gửi khi thả tay, chờ application xác nhận; -1 = không có */
+static int s_cur_step = CUR_STEP_CLOSE;
 
 /* ---- tiện ích dựng đối tượng -------------------------------------------------------------------------- */
 
@@ -389,25 +417,27 @@ static void render_curtain(void)
         const bool active = known && abs(level - CURTAIN_LEVELS[i]) <= 1;
         lv_obj_set_style_bg_color(s_cur_chip[i], active ? COLOR_ACCENT : COLOR_CHIP, 0);
         if (usable) {
-            lv_obj_clear_state(s_cur_chip[i], LV_STATE_DISABLED);
+            lv_obj_clear_flag(s_cur_chip[i], LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_obj_add_state(s_cur_chip[i], LV_STATE_DISABLED);
+            lv_obj_add_flag(s_cur_chip[i], LV_OBJ_FLAG_HIDDEN);   /* chưa lắp: nhường chỗ cho dòng "Chưa lắp" */
         }
     }
-    /* Công tắc + nền xanh + nút mức tô xanh dương đã cho biết vị trí: chỉ báo khi chưa lắp hoặc đang chạy. */
-    if (!usable) {
-        strlcpy(text, "Chưa lắp", sizeof(text));
-    } else if (s_cur_moving) {
-        strlcpy(text, "Đang chạy", sizeof(text));
-    } else {
-        text[0] = '\0';
-    }
-    lv_label_set_text(s_dev_sub[NODE_UI_DEV_CURTAIN], text);
-    lv_obj_set_style_text_color(s_dev_sub[NODE_UI_DEV_CURTAIN], s_cur_moving ? COLOR_WARN : on ? COLOR_OK : COLOR_MUTED, 0);
+    /* Công tắc + nền xanh + nút mức tô xanh dương đã cho biết vị trí (kể cả lúc đang chạy: theo mức đích). */
+    lv_label_set_text(s_dev_sub[NODE_UI_DEV_CURTAIN], usable ? "" : "Chưa lắp");
+    lv_obj_set_style_text_color(s_dev_sub[NODE_UI_DEV_CURTAIN], COLOR_MUTED, 0);
     lv_obj_set_style_bg_color(s_dev_tile[NODE_UI_DEV_CURTAIN], on ? COLOR_TILE_ON : COLOR_TILE, 0);
 
     if (s_cur_panel == NULL) {
         return;
+    }
+    /* Màn Hiệu chuẩn: nút vào màn nổi bật khi chưa hiệu chuẩn; dòng vị trí theo bước. */
+    lv_obj_set_style_bg_color(s_cur_calib_btn, s_cur_calibrated ? COLOR_CHIP : COLOR_ACCENT, 0);
+    snprintf(text, sizeof(text), "Vị trí %ld / %ld bước%s", (long)s_cur_position, (long)s_cur_travel,
+             s_cur_calibrated ? "" : " (chưa hiệu chuẩn)");
+    lv_label_set_text(s_cur_info, text);
+
+    if (s_cur_dragging) {
+        return;   /* đang kéo: số lớn, trạng thái và thanh theo ngón tay, cập nhật từ xa chờ tới khi thả */
     }
     if (s_cur_percent < 0) {
         strlcpy(text, "--%", sizeof(text));
@@ -415,6 +445,10 @@ static void render_curtain(void)
         snprintf(text, sizeof(text), "%d%%", s_cur_percent);
     }
     lv_label_set_text(s_cur_pct, text);
+    lv_obj_set_style_text_color(s_cur_pct, COLOR_TEXT, 0);
+    /* Núm thanh: mức vừa thả tay (chờ xác nhận) > đích khi đang chạy / vị trí khi đứng yên. */
+    const int knob = s_cur_sent >= 0 ? s_cur_sent : level;
+    lv_slider_set_value(s_cur_slider, knob < 0 ? 0 : knob, LV_ANIM_OFF);
     const char *status;
     lv_color_t color;
     if (s_cur_moving) {
@@ -435,9 +469,6 @@ static void render_curtain(void)
     }
     lv_label_set_text(s_cur_status, status);
     lv_obj_set_style_text_color(s_cur_status, color, 0);
-    snprintf(text, sizeof(text), "Vị trí %ld / %ld bước%s", (long)s_cur_position, (long)s_cur_travel,
-             s_cur_calibrated ? "" : " (chưa hiệu chuẩn)");
-    lv_label_set_text(s_cur_info, text);
 }
 
 static void render_all_devices(void)
@@ -716,13 +747,72 @@ static void cur_emit(node_ui_curtain_op_t op, int value)
     }
 }
 
-static void cur_default_msg(void)
+/* Dòng gợi ý ở đáy màn điều khiển: theo trạng thái hiệu chuẩn. */
+static void cur_hint_default(void)
 {
     if (s_cur_calibrated) {
-        set_msg(s_cur_msg, NODE_UI_MSG_INFO, "Rèm lệch mức: nhích tới mép rồi bấm Đặt là ĐÓNG hẳn / Đặt là MỞ hẳn.");
+        set_msg(s_cur_hint, NODE_UI_MSG_INFO, "Kéo thanh rồi thả tay, rèm sẽ chạy tới mức đó.");
     } else {
-        set_msg(s_cur_msg, NODE_UI_MSG_WARN,
-                "Chưa hiệu chuẩn: giữ Nhích ĐÓNG tới mép, bấm Đặt là ĐÓNG hẳn; rồi Nhích MỞ, bấm Đặt là MỞ hẳn.");
+        set_msg(s_cur_hint, NODE_UI_MSG_WARN, "Chưa hiệu chuẩn, mức % có thể lệch: bấm Hiệu chuẩn.");
+    }
+}
+
+/* Dòng hướng dẫn mặc định của bước hiện tại ở màn Hiệu chuẩn. */
+static void cur_guide_default(void)
+{
+    static const char *const guide[] = {
+        "Giữ nút Đóng tới khi rèm khép kín, thả tay rồi bấm Lưu mốc.",
+        "Giữ nút Mở tới khi rèm mở hết cỡ, thả tay rồi bấm Lưu mốc. Chỉ chỉnh mốc đóng thì bấm Quay lại.",
+        "Đã hiệu chuẩn xong.",
+    };
+    lv_label_set_text(s_cur_cal_msg, guide[s_cur_step]);
+    lv_obj_set_style_text_color(s_cur_cal_msg, COLOR_TEXT, 0);
+}
+
+/* Vẽ thanh bước, nút chính, 2 nút nhích và hướng dẫn theo s_cur_step. */
+static void cur_show_step(void)
+{
+    static const char *const numbers[2] = {"1", "2"};
+    for (int i = 0; i < 2; i++) {
+        const bool done = s_cur_step > i;
+        const bool active = s_cur_step == i;
+        lv_obj_set_style_bg_color(s_cur_step_dot[i], done ? COLOR_OK : active ? COLOR_ACCENT : COLOR_CHIP, 0);
+        lv_label_set_text(s_cur_step_dot_lbl[i], done ? LV_SYMBOL_OK : numbers[i]);
+        lv_obj_set_style_text_color(s_cur_step_dot_lbl[i], done ? COLOR_BG : COLOR_TEXT, 0);
+        lv_obj_set_style_text_color(s_cur_step_lbl[i], done ? COLOR_OK : active ? COLOR_TEXT : COLOR_MUTED, 0);
+    }
+    lv_obj_set_style_bg_color(s_cur_step_line, s_cur_step > CUR_STEP_CLOSE ? COLOR_OK : COLOR_CHIP, 0);
+    for (int i = 0; i < 2; i++) {
+        if (s_cur_step == CUR_STEP_DONE) {
+            lv_obj_add_flag(s_cur_jog_btn[i], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_clear_flag(s_cur_jog_btn[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    lv_label_set_text(s_cur_main_lbl, s_cur_step == CUR_STEP_CLOSE  ? "Lưu mốc đóng hẳn"
+                                      : s_cur_step == CUR_STEP_OPEN ? "Lưu mốc mở hẳn"
+                                                                    : "Xong");
+    cur_guide_default();
+}
+
+/* Đổi giữa màn điều khiển và màn Hiệu chuẩn (vào Hiệu chuẩn luôn bắt đầu lại từ bước 1). */
+static void cur_show_calib(bool calib)
+{
+    s_cur_dragging = false;
+    if (calib) {
+        lv_obj_add_flag(s_cur_ctrl, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_cur_calib_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_cur_cal, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_cur_title, "Hiệu chuẩn rèm");
+        s_cur_step = CUR_STEP_CLOSE;
+        cur_show_step();
+    } else {
+        lv_obj_add_flag(s_cur_cal, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_cur_ctrl, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_cur_calib_btn, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_cur_title, "Rèm cửa");
+        cur_hint_default();
+        render_curtain();
     }
 }
 
@@ -730,16 +820,63 @@ static void cur_button_cb(lv_event_t *e)
 {
     switch ((int)(intptr_t)lv_event_get_user_data(e)) {
     case CUR_BTN_BACK:
-        lv_obj_add_flag(s_cur_panel, LV_OBJ_FLAG_HIDDEN);
+        if (!lv_obj_has_flag(s_cur_cal, LV_OBJ_FLAG_HIDDEN)) {
+            cur_show_calib(false);   /* màn Hiệu chuẩn → màn điều khiển */
+        } else {
+            lv_obj_add_flag(s_cur_panel, LV_OBJ_FLAG_HIDDEN);
+        }
         break;
     case CUR_BTN_STOP:
         cur_emit(NODE_UI_CURTAIN_STOP, 0);
         break;
-    case CUR_BTN_MARK_CLOSED:
-        cur_emit(NODE_UI_CURTAIN_MARK_CLOSED, 0);
+    case CUR_BTN_CALIB:
+        cur_show_calib(true);
         break;
-    case CUR_BTN_MARK_OPEN:
-        cur_emit(NODE_UI_CURTAIN_MARK_OPEN, 0);
+    case CUR_BTN_MAIN:
+        /* Chuyển bước chỉ khi application báo "Lưu mốc" thành công (node_ui_set_curtain_mark_result). */
+        if (s_cur_step == CUR_STEP_CLOSE) {
+            cur_emit(NODE_UI_CURTAIN_MARK_CLOSED, 0);
+        } else if (s_cur_step == CUR_STEP_OPEN) {
+            cur_emit(NODE_UI_CURTAIN_MARK_OPEN, 0);
+        } else {
+            cur_show_calib(false);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+/* Thanh kéo mức mở: rèm CHỈ chạy khi thả tay; đang kéo chỉ đổi số lớn + nhãn trạng thái. */
+static void cur_slider_cb(lv_event_t *e)
+{
+    switch (lv_event_get_code(e)) {
+    case LV_EVENT_PRESSED:
+        s_cur_dragging = true;
+        break;
+    case LV_EVENT_VALUE_CHANGED:
+        if (s_cur_dragging) {
+            lv_label_set_text_fmt(s_cur_pct, "%d%%", (int)lv_slider_get_value(s_cur_slider));
+            lv_obj_set_style_text_color(s_cur_pct, COLOR_ACCENT, 0);
+            lv_label_set_text(s_cur_status, "Thả tay để chạy");
+            lv_obj_set_style_text_color(s_cur_status, COLOR_MUTED, 0);
+        }
+        break;
+    case LV_EVENT_RELEASED: {
+        s_cur_dragging = false;
+        const int v = (int)lv_slider_get_value(s_cur_slider);
+        if (!(s_cur_percent >= 0 && v == curtain_shown_level())) {
+            s_cur_sent = v;   /* giữ núm ở mức vừa chọn tới khi application xác nhận */
+            cur_emit(NODE_UI_CURTAIN_SET_PERCENT, v);
+        } else {
+            s_cur_sent = -1;
+        }
+        render_curtain();
+        break;
+    }
+    case LV_EVENT_PRESS_LOST:
+        s_cur_dragging = false;   /* huỷ: không gửi, về trạng thái thật */
+        render_curtain();
         break;
     default:
         break;
@@ -782,39 +919,104 @@ static void curtain_tile_cb(lv_event_t *e)
     if (s_cur_cbs.on_op == NULL) {
         return;   /* rèm tắt trong menuconfig: không có gì để điều khiển */
     }
-    cur_default_msg();
-    render_curtain();
+    cur_show_calib(false);   /* mỗi lần mở bảng là màn điều khiển + gợi ý mặc định */
     lv_obj_clear_flag(s_cur_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* Nút nhích lớn: "Đóng" / "Mở" + dòng nhỏ "giữ để chạy"; đổi xanh khi đang giữ. */
+static lv_obj_t *make_jog_button(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t w, lv_coord_t h,
+                                 const char *text, bool open)
+{
+    lv_obj_t *big;
+    lv_obj_t *b = make_button(parent, x, y, w, h, text, &node_font_vi_24, COLOR_CHIP, &big);
+    lv_obj_set_style_pad_all(b, 0, 0);
+    lv_obj_set_style_bg_color(b, COLOR_ACCENT, LV_STATE_PRESSED);
+    lv_obj_align(big, LV_ALIGN_TOP_MID, 0, 2);
+    lv_obj_t *sub = make_label(b, &node_font_vi_16, 0, 0, "giữ để chạy", COLOR_MUTED);
+    lv_obj_align(sub, LV_ALIGN_BOTTOM_MID, 0, -3);
+    lv_obj_add_event_cb(b, cur_jog_cb, LV_EVENT_ALL, (void *)(intptr_t)(open ? 1 : 0));
+    return b;
+}
+
+/*
+ * Bảng Rèm: tiêu đề + [Hiệu chuẩn] [Quay lại] ở trên; dưới là 2 màn (cùng vùng y >= PANEL_TITLE_H):
+ *   điều khiển: 45%  Đang mở... [DỪNG] / thanh kéo 0..100 + 3 nhãn / dòng gợi ý
+ *   Hiệu chuẩn: thanh 2 bước / hướng dẫn / [Đóng] [Mở] (giữ) / vị trí theo bước / nút chính ("Lưu mốc ..." / "Xong")
+ */
 static void build_curtain_panel(lv_obj_t *scr, lv_coord_t width, lv_coord_t height)
 {
+    const lv_coord_t inner_w = width - 2 * PAD;
+    const lv_coord_t view_h = height - PANEL_TITLE_H;
+
     s_cur_panel = make_panel(scr, width, height);
-    make_label(s_cur_panel, &node_font_vi_24, PAD, 12, "Rèm cửa", COLOR_TEXT);
+    s_cur_title = make_label(s_cur_panel, &node_font_vi_24, PAD, 12, "Rèm cửa", COLOR_TEXT);
     lv_obj_t *b = make_button(s_cur_panel, width - PAD - 110, 6, 110, 40, "Quay lại", &node_font_vi_16, COLOR_CHIP, NULL);
     lv_obj_add_event_cb(b, cur_button_cb, LV_EVENT_CLICKED, (void *)(intptr_t)CUR_BTN_BACK);
+    s_cur_calib_btn = make_button(s_cur_panel, width - PAD - 110 - 8 - 120, 6, 120, 40, "Hiệu chuẩn", &node_font_vi_16,
+                                  COLOR_ACCENT, NULL);
+    lv_obj_add_event_cb(s_cur_calib_btn, cur_button_cb, LV_EVENT_CLICKED, (void *)(intptr_t)CUR_BTN_CALIB);
 
-    /* 45%  Đang mở...                [DỪNG] */
-    s_cur_pct = make_label(s_cur_panel, FONT_BIG, PAD, PANEL_TITLE_H + 2, "--%", COLOR_TEXT);
-    s_cur_status = make_label(s_cur_panel, &node_font_vi_24, PAD + 130, PANEL_TITLE_H + 14, "", COLOR_MUTED);
-    b = make_button(s_cur_panel, width - PAD - 120, PANEL_TITLE_H + 2, 120, 50, "DỪNG", &node_font_vi_24, COLOR_BAD, NULL);
+    /* Màn điều khiển */
+    s_cur_ctrl = make_view(s_cur_panel, width, view_h);
+    const lv_coord_t stop_x = width - PAD - 120;
+    s_cur_pct = make_label(s_cur_ctrl, FONT_BIG, PAD, 2, "--%", COLOR_TEXT);
+    s_cur_status = make_label(s_cur_ctrl, &node_font_vi_24, CUR_STATUS_X, 14, "", COLOR_MUTED);
+    lv_obj_set_width(s_cur_status, stop_x - 8 - CUR_STATUS_X);   /* không bao giờ chồng lên nút DỪNG */
+    lv_label_set_long_mode(s_cur_status, LV_LABEL_LONG_DOT);
+    b = make_button(s_cur_ctrl, stop_x, 2, 120, 50, "DỪNG", &node_font_vi_24, COLOR_BAD, NULL);
     lv_obj_add_event_cb(b, cur_button_cb, LV_EVENT_CLICKED, (void *)(intptr_t)CUR_BTN_STOP);
 
-    /* Hiệu chuẩn: [Nhích ĐÓNG] [Nhích MỞ] (giữ) / [Đặt là ĐÓNG hẳn] [Đặt là MỞ hẳn] / vị trí theo bước */
-    lv_coord_t hw = (width - 2 * PAD - 12) / 2;
-    b = make_button(s_cur_panel, PAD, 114, hw, 48, "Nhích ĐÓNG", &node_font_vi_24, COLOR_CHIP, NULL);
-    lv_obj_add_event_cb(b, cur_jog_cb, LV_EVENT_ALL, (void *)(intptr_t)0);
-    b = make_button(s_cur_panel, PAD + hw + 12, 114, hw, 48, "Nhích MỞ", &node_font_vi_24, COLOR_CHIP, NULL);
-    lv_obj_add_event_cb(b, cur_jog_cb, LV_EVENT_ALL, (void *)(intptr_t)1);
-    b = make_button(s_cur_panel, PAD, 170, hw, 40, "Đặt là ĐÓNG hẳn", &node_font_vi_16, COLOR_ACCENT, NULL);
-    lv_obj_add_event_cb(b, cur_button_cb, LV_EVENT_CLICKED, (void *)(intptr_t)CUR_BTN_MARK_CLOSED);
-    b = make_button(s_cur_panel, PAD + hw + 12, 170, hw, 40, "Đặt là MỞ hẳn", &node_font_vi_16, COLOR_ACCENT, NULL);
-    lv_obj_add_event_cb(b, cur_button_cb, LV_EVENT_CLICKED, (void *)(intptr_t)CUR_BTN_MARK_OPEN);
-    s_cur_info = make_label(s_cur_panel, &node_font_vi_16, PAD, 218, "", COLOR_MUTED);
+    s_cur_slider = lv_slider_create(s_cur_ctrl);
+    lv_obj_set_pos(s_cur_slider, PAD + 12, CUR_SLIDER_Y);
+    lv_obj_set_size(s_cur_slider, width - 2 * (PAD + 12), 16);
+    lv_slider_set_range(s_cur_slider, 0, 100);
+    lv_obj_set_style_bg_color(s_cur_slider, COLOR_TILE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_cur_slider, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_cur_slider, COLOR_ACCENT, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_cur_slider, COLOR_TEXT, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s_cur_slider, 10, LV_PART_KNOB);   /* núm to cho ngón tay */
+    lv_obj_set_ext_click_area(s_cur_slider, 16);
+    lv_obj_add_event_cb(s_cur_slider, cur_slider_cb, LV_EVENT_ALL, NULL);
 
-    s_cur_msg = make_label(s_cur_panel, &node_font_vi_16, PAD, PANEL_MSG_Y + 4, "", COLOR_MUTED);
-    lv_obj_set_width(s_cur_msg, width - 2 * PAD);
-    lv_label_set_long_mode(s_cur_msg, LV_LABEL_LONG_WRAP);   /* tối đa 3 dòng tới đáy màn hình */
+    make_label(s_cur_ctrl, &node_font_vi_16, PAD, CUR_LABELS_Y, "0% Đóng", COLOR_MUTED);
+    lv_obj_t *l = make_label(s_cur_ctrl, &node_font_vi_16, width / 2 - 40, CUR_LABELS_Y, "50%", COLOR_MUTED);
+    lv_obj_set_width(l, 80);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+    l = make_label(s_cur_ctrl, &node_font_vi_16, width - PAD - 120, CUR_LABELS_Y, "Mở 100%", COLOR_MUTED);
+    lv_obj_set_width(l, 120);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_RIGHT, 0);
+
+    s_cur_hint = make_label(s_cur_ctrl, &node_font_vi_16, PAD, CUR_HINT_Y, "", COLOR_MUTED);
+    lv_obj_set_width(s_cur_hint, inner_w);
+    lv_label_set_long_mode(s_cur_hint, LV_LABEL_LONG_WRAP);   /* tối đa 3 dòng tới đáy màn hình */
+
+    /* Màn Hiệu chuẩn: (1) Đóng hẳn ---- (2) Mở hẳn */
+    s_cur_cal = make_view(s_cur_panel, width, view_h);
+    lv_obj_add_flag(s_cur_cal, LV_OBJ_FLAG_HIDDEN);
+    static const char *const step_names[2] = {"Đóng hẳn", "Mở hẳn"};
+    const lv_coord_t dot_x[2] = {PAD, width / 2 + 10};
+    s_cur_step_line = make_tile(s_cur_cal, 140, 2 + CUR_DOT / 2 - 1, dot_x[1] - 8 - 140, 2);
+    for (int i = 0; i < 2; i++) {
+        s_cur_step_dot[i] = make_tile(s_cur_cal, dot_x[i], 2, CUR_DOT, CUR_DOT);
+        lv_obj_set_style_radius(s_cur_step_dot[i], LV_RADIUS_CIRCLE, 0);
+        s_cur_step_dot_lbl[i] = make_label(s_cur_step_dot[i], &node_font_vi_16, 0, 0, "", COLOR_TEXT);
+        lv_obj_center(s_cur_step_dot_lbl[i]);
+        s_cur_step_lbl[i] = make_label(s_cur_cal, &node_font_vi_16, dot_x[i] + CUR_DOT + 8, 6, step_names[i], COLOR_MUTED);
+    }
+    s_cur_cal_msg = make_label(s_cur_cal, &node_font_vi_16, PAD, 38, "", COLOR_TEXT);
+    lv_obj_set_width(s_cur_cal_msg, inner_w);
+    lv_label_set_long_mode(s_cur_cal_msg, LV_LABEL_LONG_WRAP);
+
+    const lv_coord_t hw = (inner_w - 12) / 2;
+    s_cur_jog_btn[0] = make_jog_button(s_cur_cal, PAD, CUR_JOG_Y, hw, CUR_JOG_H, "Đóng", false);
+    s_cur_jog_btn[1] = make_jog_button(s_cur_cal, PAD + hw + 12, CUR_JOG_Y, hw, CUR_JOG_H, "Mở", true);
+    s_cur_info = make_label(s_cur_cal, &node_font_vi_16, PAD, CUR_INFO_Y, "", COLOR_MUTED);
+    s_cur_main_btn = make_button(s_cur_cal, PAD, CUR_MAIN_Y, inner_w, CUR_MAIN_H, "", &node_font_vi_24, COLOR_ACCENT,
+                                 &s_cur_main_lbl);
+    lv_obj_add_event_cb(s_cur_main_btn, cur_button_cb, LV_EVENT_CLICKED, (void *)(intptr_t)CUR_BTN_MAIN);
+
+    cur_hint_default();
+    cur_show_step();
 }
 
 /* ---- màn hình chính ----------------------------------------------------------------------------------- */
@@ -863,14 +1065,9 @@ static void build_devices(lv_obj_t *scr, lv_coord_t width)
         lv_obj_set_style_bg_color(s_dev_tile[i], COLOR_TILE_PRESSED, LV_STATE_PRESSED);
         make_label(s_dev_tile[i], &node_font_vi_16, TILE_PAD, 10, names[i], COLOR_TEXT);
         s_dev_switch[i] = make_switch(s_dev_tile[i], tile_w - TILE_PAD - SW_W, 8, SW_W, SW_H);
-        if (i == NODE_UI_DEV_CURTAIN) {
-            /* Rèm: "Đang chạy" nằm cạnh tên (dòng 2 dành cho 2 nút mức). */
-            s_dev_sub[i] = make_label(s_dev_tile[i], &node_font_vi_16, 78, 10, "", COLOR_MUTED);
-            lv_obj_set_width(s_dev_sub[i], tile_w - TILE_PAD - SW_W - 2 - 78);
-        } else {
-            s_dev_sub[i] = make_label(s_dev_tile[i], &node_font_vi_16, TILE_PAD, 42, "", COLOR_MUTED);
-            lv_obj_set_width(s_dev_sub[i], tile_w - 2 * TILE_PAD);
-        }
+        /* Dòng 2: "Chưa lắp" / "Đặt 26°C". Ô Rèm chỉ dùng khi chưa lắp (lúc đó 2 nút mức ẩn nhường chỗ). */
+        s_dev_sub[i] = make_label(s_dev_tile[i], &node_font_vi_16, TILE_PAD, 42, "", COLOR_MUTED);
+        lv_obj_set_width(s_dev_sub[i], tile_w - 2 * TILE_PAD);
         lv_label_set_long_mode(s_dev_sub[i], LV_LABEL_LONG_DOT);
     }
 
@@ -1054,17 +1251,46 @@ void node_ui_set_curtain(int percent, int target_percent, bool moving, int32_t p
     s_cur_moving = moving;
     s_cur_position = position;
     s_cur_travel = travel;
+    const bool calibrated_changed = calibrated != s_cur_calibrated;
     s_cur_calibrated = calibrated;
+    s_cur_sent = -1;   /* mọi cập nhật từ application là trạng thái đã xác nhận: núm theo trạng thái thật */
+    if (calibrated_changed) {
+        cur_hint_default();
+    }
     render_curtain();
     drv_display_unlock();
 }
 
 void node_ui_set_curtain_message(node_ui_msg_t level, const char *text)
 {
-    if (s_cur_msg == NULL || text == NULL || !drv_display_lock(-1)) {
+    if (s_cur_hint == NULL || text == NULL || !drv_display_lock(-1)) {
         return;
     }
-    set_msg(s_cur_msg, level, text);
+    set_msg(lv_obj_has_flag(s_cur_cal, LV_OBJ_FLAG_HIDDEN) ? s_cur_hint : s_cur_cal_msg, level, text);
+    drv_display_unlock();
+}
+
+void node_ui_set_curtain_mark_result(node_ui_curtain_op_t mark, bool ok, node_ui_msg_t level, const char *text)
+{
+    if (s_cur_panel == NULL || !drv_display_lock(-1)) {
+        return;
+    }
+    bool advanced = false;
+    if (ok && mark == NODE_UI_CURTAIN_MARK_CLOSED && s_cur_step == CUR_STEP_CLOSE) {
+        s_cur_step = CUR_STEP_OPEN;
+        advanced = true;
+    } else if (ok && mark == NODE_UI_CURTAIN_MARK_OPEN && s_cur_step == CUR_STEP_OPEN) {
+        s_cur_step = CUR_STEP_DONE;
+        advanced = true;
+    }
+    if (advanced) {
+        cur_show_step();   /* thanh bước, nút, hướng dẫn mặc định của bước mới */
+    }
+    if (text != NULL) {
+        set_msg(s_cur_cal_msg, level, text);
+    } else if (!ok) {
+        cur_guide_default();
+    }
     drv_display_unlock();
 }
 
