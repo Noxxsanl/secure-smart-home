@@ -528,14 +528,21 @@ flutter pub get
 # Gọi backend thật — thay <LAN-IP> bằng IP máy chạy backend
 flutter run --dart-define=API_BASE_URL=http://<LAN-IP>:5000
 
-# Hoặc chạy hoàn toàn bằng dữ liệu giả, không cần backend
+# Có Trợ lý AI (Bước 6c): đi qua nginx cổng 80 của Docker — origin không kèm cổng :5000
+flutter run --dart-define=API_BASE_URL=http://<LAN-IP>
+
+# Hoặc chạy hoàn toàn bằng dữ liệu giả, không cần backend (Trợ lý trả lời bằng dữ liệu giả;
+# tài khoản user01@smarthome.local có đúng nhà demo như trên web: "Nhà của Nguyễn Hoàng Đạt" với Phòng khách + Camera)
 flutter run --dart-define=USE_MOCK=true
 ```
 
 - Android emulator: mặc định `API_BASE_URL=http://10.0.2.2:5000` (alias tới localhost của máy host), không cần truyền.
 - Thiết bị thật: điện thoại và máy chạy backend cùng mạng LAN; dùng IP LAN của máy, không dùng `localhost`.
-- Đăng nhập bằng tài khoản khách hàng ở bảng seed (ví dụ `user01@smarthome.local` / `user123`). Realtime qua WebSocket `/api/mobile/ws`.
-- Kiểm tra: `flutter analyze && flutter test`.
+- Đăng nhập bằng **email hoặc mã người dùng** (dạng `ten#1234`) của tài khoản khách hàng ở bảng seed (ví dụ `user01@smarthome.local` / `user123`). Màn "Quên mật khẩu?" giống web (chưa tự đặt lại được). Realtime qua WebSocket `/api/mobile/ws`.
+- **Trợ lý AI** (nút mic giữa thanh điều hướng): Mobile gọi agent tại `AGENT_BASE_URL`, mặc định `<API_BASE_URL>/api/agent`. nginx cổng 80 (`docker compose up`) chỉ chuyển `/api/agent/` sang agent khi request có `Authorization: Bearer …`; gọi thẳng backend `:5000` thì Trợ lý báo "chưa sẵn sàng trên máy chủ này". Muốn dùng Trợ lý khi chạy backend `:5000` + agent trên máy (Bước 6c): máy ảo Android thêm `--dart-define=AGENT_BASE_URL=http://10.0.2.2:8000/v1` (gọi thẳng agent dev). Cần `OPENAI_API_KEY` ở `agent/.env`, nếu không agent báo chưa bật.
+- **Micro:** lần đầu giữ nút mic app xin quyền ghi âm (Android `RECORD_AUDIO`, iOS `NSMicrophoneUsageDescription`). Âm thanh ghi tối đa 30 giây, giữ trong RAM, gửi agent rồi bỏ, không lưu file. Cách dùng: giữ nút mic để nói, thả tay để gửi, kéo ngón tay ra xa rồi thả để huỷ; chạm nhanh chỉ mở Trợ lý. Lần đầu hộp thoại quyền làm tay nhả ra thì giữ lại lần nữa.
+- **Camera xem trực tiếp:** chi tiết thiết bị camera có khung "Xem trực tiếp" (WebSocket `/api/mobile/cameras/:id/live`); cần camera thật đã gán Gateway (camera mô phỏng báo không hỗ trợ). Trang chủ có mục **Camera** (ảnh mới nhất + nút "Xem trực tiếp" mở thẳng và tự phát). Ở chế độ dữ liệu giả (`USE_MOCK=true`) camera là camera giả: có vài ảnh chụp mẫu và "Xem trực tiếp" phát hình mô phỏng (~5 hình/giây), không phải hình từ camera thật.
+- Kiểm tra: `flutter analyze && dart run tool/check_architecture.dart && flutter test` (236 test).
 
 ---
 

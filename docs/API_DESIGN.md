@@ -11,7 +11,7 @@
 >
 > Tài liệu liên quan: [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) §9–10 (API và MQTT đích), [IoT Node Network](firmware/IOT_NODE_NETWORK.md) (phần cứng và giao thức từng chặng), [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) §15 (API provisioning), [Bảo mật](SECURITY_ARCHITECTURE.md), `backend/src/modules/README.md` (quy ước code).
 >
-> Cập nhật: 2026-10-26; hẹn giờ một lần và dữ liệu hành vi cho AI (mục 5.1): 2026-11-14; Trợ lý AI giọng nói/chữ — kênh `/api/agent/*` và 2 endpoint service (mục 5.1): 2026-11-14; luật "lệnh rõ → làm ngay" của Trợ lý (`executed`, type `done`): 2026-11-15.
+> Cập nhật: 2026-10-26; hẹn giờ một lần và dữ liệu hành vi cho AI (mục 5.1): 2026-11-14; Trợ lý AI giọng nói/chữ — kênh `/api/agent/*` và 2 endpoint service (mục 5.1): 2026-11-14; luật "lệnh rõ → làm ngay" của Trợ lý (`executed`, type `done`): 2026-11-15; WebSocket xem camera trên Mobile (`/api/mobile/cameras/:deviceId/live`) và đường Mobile tới Trợ lý qua nginx cổng 80 (Bearer): 2026-11-15.
 
 ---
 
@@ -83,7 +83,7 @@ flowchart LR
 | F | Mobile → Gateway | BLE GATT hoặc HTTP trên SoftAP | ECDH + mã hoá phiên | 10.1 |
 | G | Camera ↔ Gateway | HTTP trên Local AP | WPA2 Local AP + HMAC camera | 10.2, 10.3 |
 | H | Node ↔ Gateway | ESP-NOW | LMK theo node + HMAC node | 11 |
-| I | Web khách → AI Agent | REST JSON (voice/chữ) qua nginx `/api/agent/` | Cookie `sh_user` + `X-Portal: user` (Bearer cho Mobile — để sau) | 5.1 "Trợ lý AI" |
+| I | Web khách / Mobile → AI Agent | REST JSON (voice/chữ) qua nginx `/api/agent/` | Web: cookie `sh_user` + `X-Portal: user`; Mobile: `Authorization: Bearer <access>` qua nginx cổng 80 | 5.1 "Trợ lý AI" |
 | J | AI Agent → Backend | REST JSON, trong mạng Docker | `Bearer SERVICE_API_TOKEN` + credential người dùng chuyển tiếp | 2.1, 5.1 "Trợ lý AI" |
 
 Mobile **không** nói chuyện MQTT (bất biến 7); node **không** gọi Server trực tiếp ([IoT Node Network](firmware/IOT_NODE_NETWORK.md) §1).
@@ -101,7 +101,7 @@ Mobile **không** nói chuyện MQTT (bất biến 7); node **không** gọi Ser
 | `/api/mobile/**` | USER (Mobile) | `Authorization: Bearer <access>` + refresh token | Cùng router với Portal: `createCustomerRouter(channel)` |
 | `/api/device/**` | Gateway | HMAC | Không có phiên người dùng |
 | `/api/service/**` | Dịch vụ nội bộ (AI Agent `agent/`) | `Authorization: Bearer <SERVICE_API_TOKEN>`; route `/api/service/agent/**` thêm credential người dùng (mục 5.1 "Trợ lý AI") | Chưa đặt token → 503 `SERVICE_CHANNEL_DISABLED`; nginx trả 404 cho `/api/service/` từ bên ngoài, agent gọi thẳng `backend:5000` trong mạng Docker |
-| `/api/agent/**` | USER (web khách) → AI Agent | Cookie `sh_user` + `X-Portal: user` | **Không** vào backend: nginx `user.localhost` chuyển `/api/agent/<x>` → `agent:8000/v1/<x>`; admin/operator trả 404; dev mở thẳng `:3003` thì rewrite của Next làm việc đó (`AGENT_URL`) |
+| `/api/agent/**` | USER (web khách) → AI Agent | Cookie `sh_user` + `X-Portal: user` | **Không** vào backend: nginx `user.localhost` chuyển `/api/agent/<x>` → `agent:8000/v1/<x>`; admin/operator trả 404; dev mở thẳng `:3003` thì rewrite của Next làm việc đó (`AGENT_URL`). **Mobile** (Bearer): server mặc định cổng 80 (`http://<IP>`, `infra/nginx/nginx.conf`) cũng chuyển `/api/agent/<x>` → `agent:8000/v1/<x>` nhưng **chỉ khi có `Authorization: Bearer …`** (không có → 404, nên console quản trị bằng cookie không có Trợ lý), bỏ header `Cookie` khi chuyển tiếp, giới hạn 30 req/phút/IP, thân ≤ 2 MB. Gọi thẳng backend `:5000` thì `/api/agent` không tồn tại (404) |
 | `/api/health` | Giám sát | Không | |
 | `/api/auth`, `/api/devices`, `/api/users`, `/api/audit-log`, `/api/notifications` | Prototype | Cookie cũ | **Cũ** — mục 7.3 |
 
@@ -231,9 +231,9 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 | Hồ sơ | GET · PATCH | `/me/profile` | — | Xem / sửa hồ sơ |
 | | POST | `/me/password` | — | Đổi mật khẩu |
 
-#### WebSocket xem trực tiếp camera — chỉ kênh Portal
+#### WebSocket xem trực tiếp camera — kênh Portal và Mobile
 
-`GET /api/portal/cameras/:deviceId/live` (WebSocket, `modules/camera/features/live-relay/live-viewer.controller.ts`). **Đã có** cho web khách hàng; **không** có trên `/api/mobile` (xem 5.2) và **không** có cho Admin/Operator (quyền riêng tư, [IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.5). Phía Gateway đẩy khung lên: mục 8, "WebSocket `/api/device/camera/live`".
+`GET /api/portal/cameras/:deviceId/live` (WebSocket, `modules/camera/features/live-relay/live-viewer.controller.ts`). **Đã có** cho web khách hàng; kênh Mobile `GET /api/mobile/cameras/:deviceId/live` **đã có từ 2026-11-15** (đoạn "Kênh Mobile" bên dưới); **không** có cho Admin/Operator (quyền riêng tư, [IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.5). Phía Gateway đẩy khung lên: mục 8, "WebSocket `/api/device/camera/live`".
 
 - **Trước upgrade** (lỗi → HTTP thô rồi đóng socket): quá 60 upgrade/phút/IP → `429`; thiếu/sai `Origin` → `403 ORIGIN_NOT_ALLOWED` (host của `Origin` phải trùng `Host`/`X-Forwarded-Host`, hoặc nằm trong `FRONTEND_URL`, danh sách phân tách dấu phẩy); cookie `sh_user` thiếu/sai/hết hạn hoặc không phải role USER → `401`.
 - **Sau upgrade** — trình duyệt không đọc được HTTP status nên backend đóng bằng mã ứng dụng:
@@ -253,6 +253,13 @@ Cột **Quyền** là permission trong nhà (`modules/homes/domain/permissions.t
 - **Phiên do Backend làm chủ** (chỉ trong RAM, không ghi đĩa/DB): người xem đầu tiên mở → tạo `session_id` (UUID v4) + gửi MQTT `live_start` (mục 9.1); người xem cuối rời → chờ 10 giây rồi `live_stop` và đóng luồng lên. Chưa có luồng sau 10 giây → gửi lại `live_start` 1 lần.
 - **Audit:** `CAMERA_LIVE_VIEW_START` khi qua kiểm quyền, `CAMERA_LIVE_VIEW_END` kèm `{duration_s, reason}`.
 - Web: `frontend/packages/modules/devices/src/features/camera-live/`; dev nối thẳng backend bằng `NEXT_PUBLIC_LIVE_WS_ORIGIN` ([Lên Server](guides/LEN_SERVER.md) §6, "Xem trực tiếp camera trên web").
+
+**Kênh Mobile — `GET /api/mobile/cameras/:deviceId/live`** (**đã có 2026-11-15**; `live-mobile-viewer.controller.ts`, logic xem dùng chung với web ở `live-viewer.run.ts`; chưa thử với backend/phần cứng thật). Cùng nội dung với viewer web (cùng bảng close code, cùng khung nhị phân JPEG và `{"type":"state"}`, cùng phiên/audit); khác ở cách xác thực vì app không có cookie:
+- **Trước upgrade:** chỉ giới hạn 60 upgrade/phút/IP (`429`, bucket riêng với viewer web). **Không** kiểm `Origin` (app không có; Bearer không tự được trình duyệt gửi nên không có CSWSH) và **không** đọc cookie.
+- **Khung `auth`:** ngay sau upgrade client gửi khung văn bản đầu tiên `{"type":"auth","token":"<access JWT>"}` (token ≤ 2048 ký tự) trong 10 giây. JSON hỏng, sai `type`, khung nhị phân, token sai/hết hạn/thu hồi/tài khoản khoá, hoặc quá 10 giây → đóng `4401`. Token **không** nằm trong URL (URL hay bị proxy ghi log) và không bị log. `maxPayload` của socket là 4096 byte.
+- **Sau xác thực:** như viewer web — `4429` (mở quá 10 lần/phút/user hoặc đã đủ 2 luồng), `4404` (camera không tồn tại / không thuộc nhà / không phải camera / id ngoài 1..2147483647), `4403` (GUEST), `4501` (camera mô phỏng), `4408`, `4409`; kiểm lại `token_version`/khoá tài khoản/quyền mỗi 30 giây; access token hết hạn (15 phút) → `4401`.
+- **Audit:** như viewer web nhưng `details.channel = "mobile"`.
+- **App** (`mobile/lib/modules/devices/data/camera_live_ws_source.dart`): `4401` → `ApiClient.refreshSession()` rồi nối lại 1 lần; các mã `44xx`/`4501` khác → hiện câu tiếng Việt tương ứng và dừng; lỗi khác (`1006`, mất mạng) → nối lại sau 1/2/4 giây rồi dừng.
 
 #### Hẹn giờ một lần
 
@@ -292,7 +299,7 @@ Thông báo cho **người tạo** (`related_device_id` = thiết bị): `SCHEDU
 
 #### Trợ lý AI (giọng nói + chữ)
 
-**Đã hiện thực 2026-11-14** (code viết theo hợp đồng này; chưa chạy đầu-cuối với OpenAI thật). Chỉ web app `user`; API kênh Mobile (Bearer) có sẵn nhưng Mobile chưa làm. Người dùng nói/gõ tiếng Việt ("8h tối bật đèn, tắt quạt sau 30p nữa"); dịch vụ Python `agent/` (STT + LLM) chỉ **đề xuất kế hoạch**, còn **backend quyết định** từng bước theo luật tất định bên dưới: lệnh rõ → làm ngay hoặc tự hẹn giờ; lệnh chưa rõ → hỏi lại hoặc thẻ xác nhận. Cập nhật 2026-11-15 (người dùng chốt; luật dưới đây là hợp đồng, code backend/agent/web cập nhật cùng đợt) — trước đó chỉ tự đặt lịch khi nói rõ + còn ≥ 2 phút + ≤ 3 bước, lệnh chạy ngay luôn phải xác nhận. LLM không có công cụ thực thi, không nhận ID thật hay tên nhà/thành viên.
+**Đã hiện thực 2026-11-14** (code viết theo hợp đồng này; chưa chạy đầu-cuối với OpenAI thật). Có ở web app `user` và (từ 2026-11-15) app Mobile (module `ai`: nút mic nổi, gọi agent bằng Bearer qua nginx cổng 80, xác nhận/từ chối qua `/api/mobile/agent/requests/:id/confirm|reject`; chưa thử đầu-cuối). Người dùng nói/gõ tiếng Việt ("8h tối bật đèn, tắt quạt sau 30p nữa"); dịch vụ Python `agent/` (STT + LLM) chỉ **đề xuất kế hoạch**, còn **backend quyết định** từng bước theo luật tất định bên dưới: lệnh rõ → làm ngay hoặc tự hẹn giờ; lệnh chưa rõ → hỏi lại hoặc thẻ xác nhận. Cập nhật 2026-11-15 (người dùng chốt; luật dưới đây là hợp đồng, code backend/agent/web cập nhật cùng đợt) — trước đó chỉ tự đặt lịch khi nói rõ + còn ≥ 2 phút + ≤ 3 bước, lệnh chạy ngay luôn phải xác nhận. LLM không có công cụ thực thi, không nhận ID thật hay tên nhà/thành viên.
 
 ```mermaid
 sequenceDiagram
@@ -318,7 +325,7 @@ sequenceDiagram
 | POST | `/api/agent/homes/:homeId/messages` | JSON `{text: 1..500, conversation_id?}` | `AgentReply` |
 | GET | `/health` (chỉ trong mạng Docker) | — | `{status, llm_configured, stt_ready, backend_configured}`, không bao giờ trả key |
 
-- **Xác thực:** cookie `sh_user` (POST bắt buộc `X-Portal: user`, thiếu/sai → 403 `CSRF_CHECK_FAILED`) hoặc `Authorization: Bearer <jwt>` (Mobile, để sau). Không có → 401 `NO_TOKEN`. Agent chỉ chuyển tiếp **đúng** cookie `sh_user` sang backend; không log credential.
+- **Xác thực:** cookie `sh_user` (POST bắt buộc `X-Portal: user`, thiếu/sai → 403 `CSRF_CHECK_FAILED`) hoặc `Authorization: Bearer <jwt>` (Mobile, qua nginx cổng 80 — mục "Bản đồ API", kênh `/api/agent/**`; token hết hạn → 401 `SESSION_EXPIRED`, app refresh rồi gửi lại 1 lần). Không có → 401 `NO_TOKEN`. Agent chỉ chuyển tiếp **đúng** cookie `sh_user` sang backend; không log credential.
 - **Audio:** rỗng → 400 `EMPTY_AUDIO`; > 1 MB → 413 `AUDIO_TOO_LARGE`; type khác → 415 `UNSUPPORTED_AUDIO`. nginx chặn sớm thân > 2 MB. Tin nhắn chữ quá ~16 KB → 413.
 - **Giới hạn:** ở agent (bộ nhớ tiến trình) theo credential (khoá = SHA-256, không lưu credential) và theo người (`AGENT_RATE_LIMIT_PER_MIN`, 10), cộng `AGENT_DAILY_LIMIT_PER_HOME` (200) theo nhà/ngày → 429 `RATE_LIMITED`; thêm lớp ngoài ở nginx 30 req/phút/IP (burst 10, vượt → 429). Mỗi request có thời hạn tổng ~40 giây (`AGENT_REQUEST_TIMEOUT_S`). Hai biến cũ `AGENT_ALLOW_R1_AUTO` và `AGENT_DAILY_BUDGET_USD` đã bỏ.
 - **Thứ tự xử lý voice:** credential/CSRF → rate limit → kiểm audio → `context` (backend xác thực người dùng + nhà **trước** khi tốn tiền STT) → STT → LLM → guard → `requests` (nếu có bước) → `AgentReply`.
@@ -383,7 +390,7 @@ sequenceDiagram
 
 **Dữ liệu lưu:** `agent_requests` ([Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8) + `scheduled_actions.agent_request_id`. **Không** lưu audio, câu nói gốc hay transcript; không có job dọn. Số liệu LLM/STT (`purpose` `planner`/`stt`) gửi qua `POST /api/service/ai-usage` (mục 7.1).
 
-**Chưa làm:** Mobile, STT chạy cục bộ (`whisper_local`), luật dự phòng (PRD FR-7.18), phát giọng trả lời (TTS).
+**Chưa làm:** STT chạy cục bộ (`whisper_local`), luật dự phòng (PRD FR-7.18), phát giọng trả lời (TTS).
 
 #### Dữ liệu hành vi cho AI
 
@@ -411,7 +418,6 @@ Mục tiêu: **mỗi lần trạng thái tải (đèn, quạt, rèm, điều ho�
 | Nhóm | Method | Path | Quyền | Mô tả | Nguồn thiết kế |
 |---|---|---|---|---|---|
 | Camera | POST | `/devices/:deviceId/commands` với `action: "snapshot"` | `control_device` | Yêu cầu chụp ngay (mở rộng `DeviceAction`) | §6.3 của tài liệu đó |
-| | WS | `/api/mobile/cameras/:deviceId/live` | JWT Bearer, role ≠ GUEST | Xem trực tiếp trên Mobile — **vẫn dự kiến**; kênh Portal đã có (mục 5.1), Mobile cần cách xác thực WebSocket bằng Bearer (không đặt token trong URL) | §5.5 của tài liệu đó (tuỳ chọn) |
 | Provisioning | POST | `/provision/start` | OWNER | Bắt đầu phiên đưa Gateway lên mạng | [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) §15.2 |
 | | GET | `/provision/status` | OWNER | Trạng thái phiên | như trên |
 | | POST | `/pair-node` · GET `/pair-node/status` | OWNER | Bật chế độ ghép nối node, xem kết quả | như trên |
@@ -643,13 +649,13 @@ Backend hiện gửi `turn_on`/`turn_off` (cộng `set_temp_*`, `learn_*` cho đ
 | Gắn phần cứng thật cho khách | Dashboard `POST /smart-homes/register-gateway` (nhà đã có chủ ngay) → WS `home_changed`; gateway ghi `cloud/home_id` vào NVS | Đã có (console: trang Đăng ký Gateway) |
 | Telemetry | Node ESP-NOW `TELEMETRY` → MQTT `gateway/+/data` (hoặc `POST /api/device/data`) → WS `telemetry` | Backend đã có; ESP-NOW dự kiến |
 | Bật/tắt thiết bị | `POST /devices/:id/commands` → MQTT `.../command` → ESP-NOW `CMD` → `CMD_ACK` → MQTT `.../command/ack` → HTTP 200 + WS `device_state` | Backend đã có; firmware dự kiến |
-| Hẹn giờ một lần | `POST /homes/:id/schedules` → (runner 5 giây, khi tới `run_at`) `sendDeviceCommand` như bật/tắt thiết bị (kèm WS `device_state` cho Mobile) → thông báo `SCHEDULE_*` (Mobile qua WS `notification`; web poll `/notifications` 15 giây); huỷ: `POST /schedules/:id/cancel` | Backend + web user đã hiện thực (2026-11-14); chưa thử trên phần cứng |
-| Trợ lý AI (giọng nói/chữ) | Web `POST /api/agent/homes/:id/voice\|messages` → nginx → agent `GET /api/service/agent/homes/:id/context` → STT + LLM + guard → `POST /api/service/agent/homes/:id/requests` → luật backend: lệnh rõ chạy ngay (`executed`) hoặc tự hẹn giờ (`scheduled_actions`, thông báo `AGENT_SCHEDULED`), còn lại chờ → web `POST /api/portal/agent/requests/:id/confirm\|reject`; tới giờ `scheduleRunner` → `sendDeviceCommand` (`source = ai_agent`) | Backend + agent + web đã hiện thực (2026-11-14, theo hợp đồng); chưa chạy đầu-cuối với OpenAI thật |
+| Hẹn giờ một lần | `POST /homes/:id/schedules` → (runner 5 giây, khi tới `run_at`) `sendDeviceCommand` như bật/tắt thiết bị (kèm WS `device_state` cho Mobile) → thông báo `SCHEDULE_*` (Mobile qua WS `notification`; web poll `/notifications` 15 giây); huỷ: `POST /schedules/:id/cancel` | Backend + web user đã hiện thực (2026-11-14), Mobile có màn Hẹn giờ (2026-11-15); chưa thử trên phần cứng |
+| Trợ lý AI (giọng nói/chữ) | Web `POST /api/agent/homes/:id/voice\|messages` → nginx → agent `GET /api/service/agent/homes/:id/context` → STT + LLM + guard → `POST /api/service/agent/homes/:id/requests` → luật backend: lệnh rõ chạy ngay (`executed`) hoặc tự hẹn giờ (`scheduled_actions`, thông báo `AGENT_SCHEDULED`), còn lại chờ → web `POST /api/portal/agent/requests/:id/confirm\|reject`; tới giờ `scheduleRunner` → `sendDeviceCommand` (`source = ai_agent`) | Backend + agent + web đã hiện thực (2026-11-14, theo hợp đồng), Mobile có Trợ lý (2026-11-15; gọi agent bằng Bearer qua nginx cổng 80, xác nhận qua `/api/mobile/agent/requests/:id/confirm\|reject`); chưa chạy đầu-cuối với OpenAI thật |
 | Thao tác trên màn hình Gateway | ESP-NOW `CMD`/`CMD_ACK` → MQTT `.../status` (`source: gateway_local`) → WS `device_state` | Dự kiến |
 | Chuyển động → ảnh | ESP-NOW `EVENT` → `POST /local/camera/snapshot` → `POST /api/device/camera/snapshot` → MQTT `camera/event` → thông báo `CAMERA_MOTION` + WS `camera_snapshot` | Backend đã có (module `camera`); firmware Gateway đã gửi |
 | Xem trực tiếp trên Gateway | `GET /stream` (Camera) → hiển thị LCD | Đã chạy trên board (2026-11-08, VGA q=12 ≈ 3,3 fps); pipeline 2 task + `esp_new_jpeg` (2026-11-13) đã build, chưa đo lại trên board |
 | Xem trực tiếp trên Web (user) | WS `/api/portal/cameras/:deviceId/live` → MQTT `command {live_start}` → `GET /stream` (Camera) → WS `/api/device/camera/live` (Gateway) → khung JPEG tới canvas của web; người xem cuối rời + 10 giây → MQTT `live_stop` | Backend + web đã có (module `camera`, `@shh/devices`); firmware Gateway + Camera đã viết, chưa thử đầu-cuối |
-| Xem trực tiếp trên Mobile | WS `/api/mobile/cameras/:id/live` → MQTT `command {live_start}` → `GET /stream` → WS `/api/device/camera/live` → Mobile | **Dự kiến**, tuỳ chọn — Mobile chưa làm; endpoint `/api/mobile/…/live` chưa có |
+| Xem trực tiếp trên Mobile | WS `/api/mobile/cameras/:id/live` → MQTT `command {live_start}` → `GET /stream` → WS `/api/device/camera/live` → Mobile | Backend (`live-mobile-viewer.controller.ts`, khung `auth` đầu tiên mang access token) + Mobile (`camera_live_ws_source.dart`) đã hiện thực 2026-11-15; chưa thử với backend/phần cứng thật |
 | Đưa Gateway lên mạng | `POST /api/mobile/provision/start` → BLE/SoftAP `/local/gateway/*` → MQTT `provision/wifi_status` | Dự kiến |
 | OTA | Dashboard `POST /firmware` → `POST /ota/deployments` → MQTT `ota/command` → `ota/progress`, `ota/result` | Backend đã có phần phát lệnh; firmware dự kiến |
 

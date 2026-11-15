@@ -1,4 +1,4 @@
-# agent/ — Trợ lý AI (giọng nói + chữ) cho web app user
+# agent/ — Trợ lý AI (giọng nói + chữ) cho web app user và app Mobile
 
 Dịch vụ Python (FastAPI) nhận câu nói tiếng Việt của khách hàng (ghi âm hoặc gõ chữ), dùng STT + LLM (OpenAI)
 để hiểu ý, rồi để **backend** quyết định và thực thi (lệnh rõ → làm ngay hoặc tự hẹn giờ; lệnh chưa rõ → chờ xác nhận). Đề xuất gốc:
@@ -15,7 +15,7 @@ Dịch vụ Python (FastAPI) nhận câu nói tiếng Việt của khách hàng 
 ## Luồng một lượt
 
 ```
-Trình duyệt ──/api/agent/*──► (Next rewrite / nginx) ──► agent:8000/v1/*
+Trình duyệt / app Mobile ──/api/agent/*──► (Next rewrite / nginx) ──► agent:8000/v1/*
   voice: audio thô (≤ 1 MB)      │ 1. credential (cookie sh_user + X-Portal: user, hoặc Bearer) → 401 / 403
   messages: {text ≤ 500, body ≤ 16 KB} │ 2. rate limit theo credential (10/phút) → 429
                                  │ 3. kiểm audio/body (415 / 400 / 413) và cấu hình (503 LLM_DISABLED / STT_DISABLED)
@@ -30,6 +30,10 @@ Trình duyệt ──/api/agent/*──► (Next rewrite / nginx) ──► agen
                                                  reply, executed[], scheduled[], pending, … }
 ```
 
+- Đường vào qua nginx: web khách qua `user.localhost/api/agent/` (cookie `sh_user`); app Mobile (từ 2026-11-15) qua
+  server mặc định cổng 80 `http://<IP>/api/agent/`, nginx **chỉ chuyển khi có `Authorization: Bearer …`** (không có →
+  404), bỏ header `Cookie`, giới hạn 30 req/phút/IP, thân ≤ 2 MB. Trên máy ảo Android dev có thể gọi thẳng
+  `http://10.0.2.2:8000/v1`. admin/operator vẫn không có Trợ lý.
 - Credential của người dùng được chuyển **nguyên trạng** cho backend: cookie → header `Cookie: sh_user=<giá trị>`
   (chỉ cookie `sh_user`, không cookie nào khác); Bearer → `X-User-Authorization`. Mọi lời gọi kèm
   `Authorization: Bearer <BACKEND_SERVICE_TOKEN>` (= `SERVICE_API_TOKEN` của backend). Credential giữ bằng `SecretStr`,
