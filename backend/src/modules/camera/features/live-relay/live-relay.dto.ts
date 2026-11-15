@@ -9,6 +9,28 @@ export const UPLINK_PATH = "/api/device/camera/live";
 /** Viewer web → backend (cookie sh_user, kênh /api/portal); nhóm bắt 1 = devices.id của camera. */
 export const VIEWER_PATH = /^\/api\/portal\/cameras\/(\d{1,10})\/live$/;
 
+/** Viewer Mobile → backend (Bearer gửi qua khung `auth` đầu tiên, kênh /api/mobile); nhóm bắt 1 = devices.id của camera. */
+export const MOBILE_VIEWER_PATH = /^\/api\/mobile\/cameras\/(\d{1,10})\/live$/;
+
+/** Token trong khung auth: chuỗi 1..2048 ký tự (cùng giới hạn với WebSocket hub mobile). */
+export const MAX_AUTH_TOKEN_LENGTH = 2048;
+
+/**
+ * Đọc khung auth đầu tiên của viewer Mobile; trả token hoặc null nếu không phải JSON / sai type / token không phải
+ * chuỗi 1..2048 ký tự. Không bao giờ log nội dung khung.
+ */
+export function parseAuthFrame(raw: string): string | null {
+  try {
+    const frame: unknown = JSON.parse(raw);
+    if (typeof frame !== "object" || frame === null) return null;
+    const { type, token } = frame as { type?: unknown; token?: unknown };
+    if (type === "auth" && typeof token === "string" && token.length > 0 && token.length <= MAX_AUTH_TOKEN_LENGTH) return token;
+  } catch {
+    // không phải JSON → null
+  }
+  return null;
+}
+
 /** devices.id là INT4: id lớn hơn (hoặc 0) không thể tồn tại → coi như không tìm thấy, khỏi để pg báo lỗi. */
 const MAX_DEVICE_ID = 2_147_483_647;
 

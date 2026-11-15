@@ -48,6 +48,10 @@ export const LIVE_LIMITS = {
   uplinkMaxPayloadBytes: 256 * 1024,
   /** Viewer không cần gửi gì → payload tối đa nhỏ. */
   viewerMaxPayloadBytes: 1024,
+  /** Viewer Mobile: khung đầu là {"type":"auth","token"} (token ≤ 2048 ký tự) nên cần trần lớn hơn viewer web; sau auth bỏ qua mọi tin. */
+  mobileViewerMaxPayloadBytes: 4096,
+  /** Viewer Mobile phải gửi khung auth trong ngần này kể từ lúc upgrade, nếu không → 4401. */
+  mobileAuthTimeoutMs: 10_000,
   maxFramesPerSecond: 25,
   /** Viewer mới nhận ngay khung cuối nếu còn tươi hơn ngần này. */
   lastFrameMaxAgeMs: 2000,
@@ -183,7 +187,7 @@ let lastIpPruneAt = 0;
  * Ghi nhận 1 yêu cầu upgrade từ `ip` cho kênh `kind`; false nếu đã đủ `limit` trong 60 s gần nhất (lần này không được tính).
  * Tự dọn các IP đã nguội mỗi 60 s ngay trong hàm này (không phụ thuộc ticker, vốn chỉ chạy khi có phiên).
  */
-export function registerUpgradeAttempt(kind: "uplink" | "viewer", ip: string, limit: number, now: number): boolean {
+export function registerUpgradeAttempt(kind: "uplink" | "viewer" | "mobile_viewer", ip: string, limit: number, now: number): boolean {
   if (now - lastIpPruneAt >= 60_000) {
     lastIpPruneAt = now;
     pruneOpenAttempts(now);

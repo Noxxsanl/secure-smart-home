@@ -144,6 +144,8 @@ export interface JoinViewerInput {
   auth: AuthContext;
   tokenVersion: number;
   expiresAt: Date;
+  /** Kênh của viewer, chỉ để ghi audit (`details.channel`). */
+  channel: "portal" | "mobile";
   ip: string | null;
   userAgent: string | null;
   camera: { id: number; uid: string; name: string; homeId: number; gatewayDbId: number; gatewayUid: string };
@@ -237,7 +239,7 @@ export function joinViewer(input: JoinViewerInput): JoinViewerResult {
     actorUserId: viewer.userId,
     ip: viewer.ip,
     userAgent: viewer.userAgent,
-    details: { channel: "portal" },
+    details: { channel: input.channel },
   });
   return { ok: true, viewer };
 }
