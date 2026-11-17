@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cJSON.h"
@@ -34,6 +35,7 @@ static const char *TAG = "gw_espnow";
 #define ACTION_MAX 32
 #define EVENT_MAX 32
 #define TS_MAX_VALID 4102444800.0   /* 2100-01-01 */
+#define CTR_MAX_VALID 9007199254740991.0   /* 2^53 − 1: cJSON (double) và backend (JS) biểu diễn chính xác */
 
 typedef struct {
     uint8_t src[6];
@@ -47,7 +49,7 @@ typedef struct {
     uint16_t seq_hist[SEQ_HISTORY];
     size_t seq_count;
     size_t seq_next;
-    int64_t last_telemetry_ts;
+    int64_t last_ctr;             /* sn_ctr lớn nhất đã chuyển lên Server (RAM; backend mới là nơi chặn phát lại chính) */
 } peer_state_t;
 
 static gw_espnow_callbacks_t s_cbs;
@@ -84,18 +86,6 @@ static bool seq_seen(peer_state_t *p, uint16_t seq)
         p->seq_count++;
     }
     return false;
-}
-
-static const char *verify_reason(sm_verify_result_t r)
-{
-    switch (r) {
-    case SM_VERIFY_EXPIRED:
-        return "timestamp outside ±300 s";
-    case SM_VERIFY_MISMATCH:
-        return "HMAC mismatch";
-    default:
-        return "malformed signature";
-    }
 }
 
 /* ---- gửi ---------------------------------------------------------------------------------------------- */
@@ -185,47 +175,96 @@ static void on_sent(const uint8_t *mac, esp_now_send_status_t status)
     xSemaphoreGive(s_sent_sem);
 }
 
-static void handle_telemetry(size_t idx, const espnow_frame_view_t *f, const cJSON *body)
+static bool is_hex64(const char *s)
+{
+    if (strnlen(s, SM_HMAC_HEX_LEN + 1) != SM_HMAC_HEX_LEN) {
+        return false;
+    }
+    for (size_t i = 0; i < SM_HMAC_HEX_LEN; i++) {
+        char c = s[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Vị trí object data nguyên văn: sau `"data":` ĐẦU TIÊN (các trường trước là số và hex nên không chứa chuỗi này),
+ * kết thúc ngay trước `}` cuối của body. Đoạn đó phải tự là một JSON object (nếu "data" không phải khoá cuối thì phần
+ * thừa `,"x":..` làm hỏng object → bị bỏ). */
+static bool locate_data(const char *body, size_t len, uint16_t *off, uint16_t *dlen)
+{
+    static const char KEY[] = "\"data\":";
+    const size_t klen = sizeof(KEY) - 1;
+    if (len < klen + 3 || body[len - 1] != '}') {
+        return false;
+    }
+    for (size_t i = 0; i + klen < len; i++) {
+        if (memcmp(body + i, KEY, klen) != 0) {
+            continue;
+        }
+        size_t start = i + klen;
+        size_t end = len - 1;   /* không tính `}` đóng body */
+        if (end <= start + 1 || body[start] != '{' || body[end - 1] != '}') {
+            return false;
+        }
+        /* Object phải dùng HẾT đoạn: cJSON dừng ở `}` đầu tiên khớp nên phần thừa (`{..},"x":{..}`) bị phát hiện bằng
+         * vị trí kết thúc thay vì để lọt lên Server. */
+        const char *parse_end = NULL;
+        cJSON *data = cJSON_ParseWithLengthOpts(body + start, end - start, &parse_end, false);
+        bool ok = cJSON_IsObject(data) && data->child != NULL && parse_end == body + end;
+        cJSON_Delete(data);
+        if (!ok) {
+            return false;
+        }
+        *off = (uint16_t)start;
+        *dlen = (uint16_t)(end - start);
+        return true;
+    }
+    return false;
+}
+
+static void handle_telemetry_v2(size_t idx, const espnow_frame_view_t *f, const cJSON *body)
 {
     const gw_device_info_t *dev = gw_registry_get(idx);
     if (dev->kind != GW_DEV_NODE) {
         ESP_LOGW(TAG, "drop TELEMETRY from %s: not a node", dev->device_id);
         return;
     }
-    const cJSON *sid = cJSON_GetObjectItemCaseSensitive(body, "sensor_id");
     const cJSON *jts = cJSON_GetObjectItemCaseSensitive(body, "sn_timestamp");
+    const cJSON *jctr = cJSON_GetObjectItemCaseSensitive(body, "sn_ctr");
     const cJSON *sig = cJSON_GetObjectItemCaseSensitive(body, "sn_hmac");
-    const cJSON *data = cJSON_GetObjectItemCaseSensitive(body, "data");
-    int64_t ts;
+    gw_telemetry_meta_t meta = {0};
 
-    if (!cJSON_IsString(sid) || !json_unix_ts(jts, &ts) || !cJSON_IsString(sig) || !cJSON_IsObject(data) ||
-        data->child == NULL) {
-        ESP_LOGW(TAG, "drop TELEMETRY from %s: missing sensor_id/sn_timestamp/sn_hmac/data", dev->device_id);
+    if (!json_unix_ts(jts, &meta.ts) || !cJSON_IsNumber(jctr) || jctr->valuedouble < 1 ||
+        jctr->valuedouble > CTR_MAX_VALID || floor(jctr->valuedouble) != jctr->valuedouble || !cJSON_IsString(sig) ||
+        !is_hex64(sig->valuestring)) {
+        ESP_LOGW(TAG, "drop TELEMETRY from %s: missing/invalid sn_timestamp/sn_ctr/sn_hmac", dev->device_id);
         return;
     }
-    /* Gắn danh tính với MAC: gói từ MAC của node A không được mang sensor_id của node B. */
-    if (strcmp(sid->valuestring, dev->device_id) != 0) {
-        ESP_LOGW(TAG, "drop TELEMETRY from %s: sensor_id does not match paired device", dev->device_id);
+    meta.ctr = (int64_t)jctr->valuedouble;
+    if (!locate_data((const char *)f->body, f->body_len, &meta.data_off, &meta.data_len)) {
+        ESP_LOGW(TAG, "drop TELEMETRY from %s: \"data\" must be the last key and a JSON object", dev->device_id);
         return;
     }
     int64_t now;
     if (!gw_time_now(&now)) {
-        ESP_LOGW(TAG, "drop TELEMETRY from %s: gateway clock not synced, cannot verify", dev->device_id);
+        ESP_LOGW(TAG, "drop TELEMETRY from %s: gateway clock not synced", dev->device_id);
         return;
     }
-    sm_verify_result_t r = gw_registry_verify(idx, ts, sig->valuestring, now);
-    if (r != SM_VERIFY_OK) {
-        ESP_LOGW(TAG, "drop TELEMETRY from %s: %s", dev->device_id, verify_reason(r));
+    if (llabs(now - meta.ts) > SM_TIMESTAMP_WINDOW_S) {
+        ESP_LOGW(TAG, "drop TELEMETRY from %s: timestamp outside ±%d s", dev->device_id, SM_TIMESTAMP_WINDOW_S);
         return;
     }
-    if (ts < s_peers[idx].last_telemetry_ts) {
-        ESP_LOGW(TAG, "drop TELEMETRY from %s: sn_timestamp older than previous (replay?)", dev->device_id);
+    if (meta.ctr <= s_peers[idx].last_ctr) {
+        ESP_LOGW(TAG, "drop TELEMETRY from %s: sn_ctr not increasing (replay?)", dev->device_id);
         return;
     }
-    s_peers[idx].last_telemetry_ts = ts;
-    ESP_LOGI(TAG, "TELEMETRY %s verified (ts %" PRId64 ")", dev->device_id, ts);
+    s_peers[idx].last_ctr = meta.ctr;
+    strlcpy(meta.sig, sig->valuestring, sizeof(meta.sig));
+    ESP_LOGI(TAG, "TELEMETRY %s accepted (ts %" PRId64 ", ctr %" PRId64 ")", dev->device_id, meta.ts, meta.ctr);
     if (s_cbs.on_telemetry) {
-        s_cbs.on_telemetry(idx, (const char *)f->body, f->body_len, s_cbs.ctx);
+        s_cbs.on_telemetry(idx, (const char *)f->body, f->body_len, &meta, s_cbs.ctx);
     }
 }
 
@@ -322,8 +361,12 @@ static void handle_item(const rx_item_t *item)
     case ESPNOW_MSG_HEARTBEAT:
         handle_heartbeat((size_t)idx, body);
         break;
+    case ESPNOW_MSG_TELEMETRY_V2:
+        handle_telemetry_v2((size_t)idx, &f, body);
+        break;
     case ESPNOW_MSG_TELEMETRY:
-        handle_telemetry((size_t)idx, &f, body);
+        ESP_LOGW(TAG, "drop TELEMETRY v1 from %s: node firmware too old — flash firmware with signature v2",
+                 dev->device_id);
         break;
     case ESPNOW_MSG_EVENT:
         handle_event((size_t)idx, body);

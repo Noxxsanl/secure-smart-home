@@ -16,10 +16,10 @@ Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.2,
 | Đọc identity, Local AP, MAC Gateway, LMK từ NVS | Có | `services/src/cam_config.c` |
 | WiFi STA vào Local AP, WPA2 trở lên, tự nối lại (1 → 30 s) | Có | `services/src/cam_wifi.c` |
 | ESP-NOW: PING, HEARTBEAT 30 s, EVENT motion, CMD `snapshot`, CMD_ACK, TIME_SYNC | Có, mã `type` là **đề xuất** | `services/src/cam_espnow.c`, `../common/espnow_proto` |
-| Gửi ảnh `POST /local/camera/snapshot` có HMAC, ≤ 200 KB | Có | `services/src/cam_snapshot.c` |
-| `GET /stream` MJPEG, kiểm HMAC ±300 s, 1 luồng (409), VGA/QVGA. Mỗi khung gửi 2 chunk (boundary + part header gộp, rồi JPEG); trần `CAM_STREAM_MAX_FPS` mặc định 20; log mỗi 5 s `sent X.Y fps, avg frame N B` | Có | `services/src/cam_stream.c` |
+| Gửi ảnh `POST /local/camera/snapshot` ký `v2\|cam-up\|<cam_id>\|<ts>\|<ctr>\|<trigger>\|<command_id hoặc rỗng>` (header `X-Counter`, `ctr` từ `sm_counter_next`), ≤ 200 KB | Có | `services/src/cam_snapshot.c` |
+| `GET /stream` MJPEG, kiểm `v2\|cam-stream\|<cam_id>\|<ts>\|<ctr>\|<fs>\|<q>` (`X-Device-Id` = id của camera, ±300 s, `ctr` tăng ngặt trong RAM), 1 luồng (409), VGA/QVGA. Mỗi khung gửi 2 chunk (boundary + part header gộp, rồi JPEG); trần `CAM_STREAM_MAX_FPS` mặc định 20; log mỗi 5 s `sent X.Y fps, avg frame N B` | Có | `services/src/cam_stream.c` |
 | Nối sự kiện: chuyển động → EVENT + chụp; lệnh → chụp → CMD_ACK | Có | `application/src/cam_app.c` |
-| HMAC dùng chung `HMAC-SHA256(secret, "<device_id>:<unix_ts>")` | Có | `../common/security_manager` |
+| HMAC + bộ đếm `sm_counter` (sàn NVS `sec/ctr_floor`) dùng chung với Gateway/Node; không còn chuỗi cũ `<device_id>:<unix_ts>` (phải nạp Camera + Gateway cùng lúc) | Có | `../common/security_manager` |
 | Ghép nối ECDH (`PAIR_*`), nhận LMK + Local AP qua ESP-NOW | **Chưa**: đang nạp tay qua NVS | — |
 | PMK ESP-NOW chung | **Chưa**: dùng PMK mặc định của ESP-IDF | — |
 | Đèn flash bật khi chụp trong tối, LED báo lỗi (nháy kiểu khác khi mất kết nối) | **Chưa** | — |
@@ -136,19 +136,20 @@ Cần camera có giờ để kiểm HMAC. Khi dev dùng hotspot có Internet:
 
 ```bash
 read -rs SECRET                       # nhập secret, không lưu vào history
-ID=<device_id>; CAM=<ip-camera>; TS=$(date +%s)
-SIG=$(printf '%s' "$ID:$TS" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')
+ID=<device_id>; CAM=<ip-camera>; TS=$(date +%s); CTR=$(( $(date +%s) * 1000 ))
+# fs, q phải là giá trị đã chuẩn hoá khớp query bên dưới (vga, 12)
+SIG=$(printf '%s' "v2|cam-stream|$ID|$TS|$CTR|vga|12" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')
 
 # 200 + lưu 5 giây luồng, mở bằng VLC/ffplay
 curl -s --max-time 5 -o stream.mjpg -w '%{http_code}\n' \
-  -H "X-Device-Id: $ID" -H "X-Timestamp: $TS" -H "X-Signature: $SIG" "http://$CAM/stream?fs=vga&q=12"
+  -H "X-Device-Id: $ID" -H "X-Timestamp: $TS" -H "X-Counter: $CTR" -H "X-Signature: $SIG" "http://$CAM/stream?fs=vga&q=12"
 
 # 401 khi sai chữ ký
-curl -s -o /dev/null -w '%{http_code}\n' -H "X-Device-Id: $ID" -H "X-Timestamp: $TS" \
+curl -s -o /dev/null -w '%{http_code}\n' -H "X-Device-Id: $ID" -H "X-Timestamp: $TS" -H "X-Counter: $((CTR + 1))" \
   -H "X-Signature: $(printf '0%.0s' {1..64})" "http://$CAM/stream"
 ```
 
-Mở 2 luồng cùng lúc thì luồng thứ hai nhận `409`.
+Mở 2 luồng cùng lúc thì luồng thứ hai nhận `409`. `CTR` phải tăng ngặt giữa các lần thử (camera nhớ `ctr` lớn nhất đã nhận trong RAM); chạy lệnh lần sau thì lấy lại `date +%s` để `CTR` lớn hơn. Đặt `fs`/`q` trong query phải khớp chuỗi ký (vắng `fs` → `vga`, vắng `q` → `12`).
 
 ## Thông lượng luồng MJPEG
 

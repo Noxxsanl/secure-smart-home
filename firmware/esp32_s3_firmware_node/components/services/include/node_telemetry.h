@@ -1,13 +1,15 @@
 /*
- * Dựng sensor_payload cho ESP-NOW TELEMETRY — y hệt payload backend đang nhận (API_DESIGN §9.1, §11):
+ * Dựng body khung ESP-NOW TELEMETRY_V2 (0x12) — chữ ký v2 (API_DESIGN §3, §11):
  *
- *   {"sensor_id":"<device_id>","sn_timestamp":<unix>,"sn_hmac":"<64 hex>","data":{"temperature":28.4,...}}
+ *   {"sn_timestamp":<unix>,"sn_ctr":<ctr>,"sn_hmac":"<64 hex>","data":{"temperature":28.4,...}}
  *
- * sn_hmac = HMAC-SHA256(secret node, "<device_id>:<unix_ts>") hex thường (bất biến 5, common/security_manager).
+ * sn_hmac = HMAC-SHA256(secret node, "v2|sn|<device_id>|<ts>|<ctr>|<sha256_hex(data)>") hex thường (bất biến 5,
+ * common/security_manager sm_sensor_sign_v2): ký CẢ nội dung data và bộ đếm ctr tăng ngặt (sm_counter, common/security_manager) → backend
+ * từ chối gói bị sửa hoặc phát lại. Secret Node chỉ Node và backend biết — Gateway không giữ, chỉ chuyển nguyên văn.
+ * Không gửi sensor_id: Gateway biết node theo MAC đã ghép và thêm vào gói gửi Server.
  * Chưa có giờ từ Gateway → không ký (ESP_ERR_INVALID_STATE): backend từ chối lệch > 300 giây.
  *
- * Tên trường đề xuất cho node phòng khách: temperature (°C), humidity (%), light (lux).
- * Toàn bộ ≤ 246 byte (giới hạn ESP-NOW v1 trừ 4 byte đầu khung) — 3 trường đo vừa đủ.
+ * Toàn bộ ≤ 246 byte (giới hạn ESP-NOW v1 trừ 4 byte đầu khung): phần đầu ~135 byte, còn ~110 byte cho data.
  */
 #pragma once
 

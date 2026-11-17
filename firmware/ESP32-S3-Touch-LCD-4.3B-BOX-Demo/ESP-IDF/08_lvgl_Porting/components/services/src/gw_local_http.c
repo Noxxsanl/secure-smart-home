@@ -17,12 +17,16 @@
 static const char *TAG = "gw_local_http";
 
 #define TS_DIGITS_MAX 12
+#define CTR_DIGITS_MAX 16
+#define CTR_MAX INT64_C(9007199254740991)   /* 2^53 − 1, như backend */
+#define CTR_MAX_AHEAD_S 86400               /* như backend: ctr ≤ (now + 1 ngày) * 1000 */
+#define CTR_HDR_CAP (CTR_DIGITS_MAX + 2)
 #define RECV_TIMEOUT_RETRIES 3
 
 static httpd_handle_t s_server;
 static gw_snapshot_cb_t s_on_snapshot;
 static void *s_ctx;
-static int64_t s_last_ts[GW_REGISTRY_MAX];   /* chỉ task httpd truy cập */
+static int64_t s_last_ctr[GW_REGISTRY_MAX];   /* ctr lớn nhất đã nhận theo camera (RAM); chỉ task httpd truy cập */
 
 static esp_err_t reply(httpd_req_t *req, const char *status, const char *error)
 {
@@ -65,6 +69,24 @@ static bool parse_ts(const char *s, int64_t *out)
     return true;
 }
 
+/* ctr chỉ gồm chữ số, tối đa 16 ký tự (2^53 − 1) — chặn tràn khi parse. Sai định dạng → false. */
+static bool parse_ctr(const char *s, int64_t *out)
+{
+    size_t n = strlen(s);
+    if (n == 0 || n > CTR_DIGITS_MAX) {
+        return false;
+    }
+    int64_t v = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (s[i] < '0' || s[i] > '9') {
+            return false;
+        }
+        v = v * 10 + (s[i] - '0');
+    }
+    *out = v;
+    return v > 0 && v <= CTR_MAX;
+}
+
 /* Kết nối phải tới IP của Gateway trên Local AP — không nhận ảnh từ mạng router của nhà. */
 static bool from_local_ap(httpd_req_t *req)
 {
@@ -103,15 +125,20 @@ static esp_err_t snapshot_handler(httpd_req_t *req)
 
     char dev_id[GW_DEVICE_ID_MAX + 1];
     char ts_str[TS_DIGITS_MAX + 2];
+    char ctr_str[CTR_HDR_CAP];
     char sig[SM_HMAC_HEX_LEN + 2];
     char trigger[12];
     char ctype[32];
     char cmd_id[GW_COMMAND_ID_MAX + 1] = "";
     int64_t ts;
+    int64_t ctr = 0;   /* thiếu/sai X-Counter → 0 → chữ ký không thể đúng → AUTH_FAIL như mọi lỗi xác thực */
     if (!get_hdr(req, "X-Device-Id", dev_id, sizeof(dev_id)) || !get_hdr(req, "X-Timestamp", ts_str, sizeof(ts_str)) ||
         !get_hdr(req, "X-Signature", sig, sizeof(sig)) || !get_hdr(req, "X-Trigger", trigger, sizeof(trigger)) ||
         !parse_ts(ts_str, &ts)) {
         return reply(req, "400 Bad Request", "MISSING_HEADERS");
+    }
+    if (!get_hdr(req, "X-Counter", ctr_str, sizeof(ctr_str)) || !parse_ctr(ctr_str, &ctr)) {
+        ctr = 0;
     }
     gw_snap_trigger_t trig;
     if (strcmp(trigger, "motion") == 0) {
@@ -137,14 +164,17 @@ static esp_err_t snapshot_handler(httpd_req_t *req)
         ESP_LOGW(TAG, "reject snapshot: gateway clock not synced");
         return reply(req, "503 Service Unavailable", "CLOCK_NOT_SYNCED");
     }
-    sm_verify_result_t r = gw_registry_verify((size_t)idx, ts, sig, now);
+    sm_verify_result_t r = gw_registry_cam_upload_verify((size_t)idx, ts, ctr, trigger, cmd_id, sig, now);
     if (r != SM_VERIFY_OK) {
         ESP_LOGW(TAG, "reject snapshot from %s: %s", dev_id,
-                 r == SM_VERIFY_EXPIRED ? "timestamp outside ±300 s" : "bad signature");
+                 r == SM_VERIFY_EXPIRED ? "timestamp outside ±300 s" : "bad signature/counter");
         return reply(req, "401 Unauthorized", "AUTH_FAIL");
     }
-    if (ts < s_last_ts[idx]) {
-        ESP_LOGW(TAG, "reject snapshot from %s: timestamp older than previous (replay?)", dev_id);
+    /* Sau khởi động last_ctr = 0 → sàn = (now − 300) * 1000, tương ứng cửa sổ ts. */
+    const int64_t ctr_floor = s_last_ctr[idx] > 0 ? s_last_ctr[idx] : (now - SM_TIMESTAMP_WINDOW_S) * 1000;
+    /* Chặn ctr quá xa tương lai (camera lệch giờ): nếu không, last_ctr bị đẩy lên và chặn mọi request thật tới khi khởi động lại. */
+    if (ctr <= ctr_floor || ctr > (now + CTR_MAX_AHEAD_S) * 1000) {
+        ESP_LOGW(TAG, "reject snapshot from %s: counter not increasing or too far ahead", dev_id);
         return reply(req, "401 Unauthorized", "AUTH_FAIL");
     }
 
@@ -182,7 +212,7 @@ static esp_err_t snapshot_handler(httpd_req_t *req)
         free(jpeg);
         return reply(req, "415 Unsupported Media Type", "NOT_JPEG");
     }
-    s_last_ts[idx] = ts;
+    s_last_ctr[idx] = ctr;
 
     gw_snapshot_t snap = {
         .camera_idx = (size_t)idx,

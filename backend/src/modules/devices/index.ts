@@ -1,10 +1,13 @@
 // Cửa ra DUY NHẤT của module devices: module khác chỉ được import từ đây (quy tắc phụ thuộc, modules/README.md).
-// Danh sách tường minh từ devices.facade.ts — worker (presence monitor, track-device-ip) gắn qua devices.module.ts.
+// Danh sách tường minh từ devices.facade.ts — worker (presence monitor, heartbeat, seal-secrets) gắn qua devices.module.ts.
 export { devicesModule } from "./devices.module";
 export {
+  ackMessageV2,
   AC_SETPOINT_MAX,
   AC_SETPOINT_MIN,
   buildReading,
+  cameraEventMessageV2,
+  claimDeviceCounter,
   CURTAIN_POS_MAX,
   CURTAIN_POS_MIN,
   deleteDevicesForTransfer,
@@ -15,10 +18,15 @@ export {
   getDeviceRowByUid,
   getGatewayCounts,
   insertDevice,
+  isCounterInRange,
+  isDeviceIp,
+  isHmacHex,
   isSafeDeviceId,
   isTimestampValid,
+  isUnixSeconds,
   isValidAcCodes,
   isValidAcSetpoint,
+  isValidCounter,
   isValidCurtainPos,
   isWellFormedUid,
   jsonHasNul,
@@ -39,6 +47,7 @@ export {
   requireDevice,
   requireDeviceAccess,
   requireGateway,
+  sealForStorage,
   setDeviceAcCodesBit,
   setDeviceAcSetpoint,
   setDeviceCurtainPos,
@@ -57,13 +66,19 @@ export {
   upsertNodeAppliance,
   verifyDeviceHMAC,
   verifyGatewayHMAC,
+  verifyGatewayTelemetryV2,
+  verifySensorTelemetryV2,
 } from "./devices.facade";
 export type {
+  AckFieldsV2,
   AuthFailureResult,
+  CameraEventFieldsV2,
   DeviceLoadState,
   DeviceTypeStatus,
   ExistingDeviceRef,
   GatewaySigner,
+  GatewayTelemetryFieldsV2,
+  SensorTelemetryFieldsV2,
   HardwareDeviceRecord,
   HMACVerifyResult,
   LearnSlot,

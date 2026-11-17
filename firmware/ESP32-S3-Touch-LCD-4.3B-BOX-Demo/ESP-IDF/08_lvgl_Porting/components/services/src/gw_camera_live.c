@@ -17,6 +17,7 @@
 #include "gw_time.h"
 #include "gw_wifi.h"
 #include "sdkconfig.h"
+#include "sm_counter.h"
 
 static const char *TAG = "gw_camera_live";
 
@@ -228,10 +229,18 @@ static gw_live_err_t run_stream(int idx, int *http_status, uint32_t *frames)
         ESP_LOGW(TAG, "gateway clock not synced — cannot sign stream request");
         return GW_LIVE_ERR_NO_TIME;
     }
+    /* ctr tăng ngặt (sm_counter, NVS) — camera từ chối ctr cũ. fs/q ký là giá trị đã chuẩn hoá camera sẽ dùng
+     * (đúng các giá trị đặt trong URL bên dưới; Kconfig giới hạn q trong 10..30). */
+    int64_t ctr;
+    if (sm_counter_next(now, &ctr) != ESP_OK) {
+        return GW_LIVE_ERR_CONNECT;
+    }
     char ts_str[24];
+    char ctr_str[24];
     char sig[SM_HMAC_HEX_LEN + 1];
     snprintf(ts_str, sizeof(ts_str), "%" PRId64, now);
-    if (gw_registry_sign((size_t)idx, now, sig) != ESP_OK) {
+    snprintf(ctr_str, sizeof(ctr_str), "%" PRId64, ctr);
+    if (gw_registry_cam_stream_sign((size_t)idx, now, ctr, LIVE_FS, CONFIG_GW_CAMERA_LIVE_QUALITY, sig) != ESP_OK) {
         return GW_LIVE_ERR_CONNECT;
     }
 
@@ -252,6 +261,7 @@ static gw_live_err_t run_stream(int idx, int *http_status, uint32_t *frames)
     }
     esp_http_client_set_header(client, "X-Device-Id", dev->device_id);
     esp_http_client_set_header(client, "X-Timestamp", ts_str);
+    esp_http_client_set_header(client, "X-Counter", ctr_str);
     esp_http_client_set_header(client, "X-Signature", sig);
 
     gw_live_err_t result;

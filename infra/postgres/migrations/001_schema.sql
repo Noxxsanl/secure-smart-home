@@ -144,7 +144,8 @@ CREATE TABLE IF NOT EXISTS devices (
   device_id    VARCHAR(64)  NOT NULL,
   device_name  VARCHAR(128) NOT NULL,
   device_type  VARCHAR(16)  NOT NULL,
-  secret_key   VARCHAR(64)  NOT NULL,
+  -- Secret HMAC của thiết bị: bản mã AES-256-GCM "enc1:…" khi backend có DEVICE_SECRET_KEY (FR-12.8), ngược lại bản rõ.
+  secret_key   VARCHAR(255) NOT NULL,
   status       VARCHAR(16)  NOT NULL DEFAULT 'inactive',
   location     VARCHAR(255) NULL,
   fail_count   SMALLINT     NOT NULL DEFAULT 0,
@@ -169,8 +170,11 @@ CREATE TABLE IF NOT EXISTS devices (
   ac_codes     INTEGER      NULL,
   curtain_pos  SMALLINT     NULL,
   updated_at   TIMESTAMPTZ  NULL,
+  -- Telemetry chữ ký v2: sn_ctr lớn nhất đã nhận (chống phát lại); NULL = chưa có gói v2 / vừa đăng ký lại.
+  last_ctr     BIGINT       NULL,
   PRIMARY KEY (id),
   CONSTRAINT uq_devices_device_id UNIQUE (device_id),
+  CONSTRAINT ck_devices_last_ctr         CHECK (last_ctr > 0),
   CONSTRAINT ck_devices_device_type      CHECK (device_type IN ('sensor','gateway')),
   CONSTRAINT ck_devices_status           CHECK (status IN ('inactive','active','blocked')),
   CONSTRAINT ck_devices_category         CHECK (category IN ('gateway','sensor','relay','camera','door_contact')),

@@ -1,7 +1,9 @@
 /*
  * HTTP server trên camera: GET /stream?fs=vga|qvga&q=10..30 (API_DESIGN §10.3, IOT_NODE_NETWORK §5.4).
  *
- *   Header X-Device-Id, X-Timestamp, X-Signature — Gateway ký bằng secret của camera, cửa sổ ±300 s.
+ *   Header X-Device-Id (= id của chính camera), X-Timestamp, X-Counter, X-Signature — Gateway ký bằng secret của camera:
+ *   HMAC-SHA256(secret, "v2|cam-stream|<cam_id>|<ts>|<ctr>|<fs>|<q>") với fs, q ĐÃ CHUẨN HOÁ (vắng fs → vga, vắng q → 12),
+ *   cửa sổ ±300 s, ctr phải > ctr lớn nhất đã nhận (RAM; sau khởi động sàn = (now − 300) * 1000).
  *   200 multipart/x-mixed-replace (mỗi phần 1 khung JPEG) · 400 tham số sai · 401 sai HMAC
  *   409 đã có 1 luồng · 503 camera chưa có giờ (chưa nhận TIME_SYNC).
  *

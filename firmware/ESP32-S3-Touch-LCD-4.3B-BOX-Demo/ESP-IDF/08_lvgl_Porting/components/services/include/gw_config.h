@@ -8,6 +8,8 @@
  *   local_ap/ssid, /password  Local AP cho Camera (WPA2, mật khẩu ≥ 8 ký tự). Thiếu → tự sinh và lưu NVS.
  *   cloud/mqtt_uri, /api_url  ghi đè mặc định trong menuconfig (không bí mật)
  *   cloud/home_id             (tuỳ chọn) home_id trên backend; không có thì học từ topic lệnh hợp lệ đầu tiên
+ *   cloud/mqtt_cert, /mqtt_key  PEM chứng chỉ + khoá riêng client MQTT (mTLS, CN = gateway_id) — sinh bằng
+ *                             infra/pki/gen_mqtt_client.sh, nạp bằng dòng `file` của nvs_dev.csv. Thiếu → broker từ chối.
  *
  * Không log mật khẩu/secret (bất biến 2).
  */
@@ -49,11 +51,14 @@ void gw_config_wipe_passwords(gw_config_t *cfg);
 /** gateway_id (công khai) — "" nếu chưa load. */
 const char *gw_config_gateway_id(void);
 
+/** PEM chứng chỉ client MQTT (cloud/mqtt_cert), NULL nếu chưa nạp. Sống suốt chương trình (esp-mqtt giữ con trỏ). */
+const char *gw_config_mqtt_client_cert(void);
+
+/** PEM khoá riêng client MQTT (cloud/mqtt_key), NULL nếu chưa nạp. CHỈ gw_mqtt dùng; không log, không gửi đi. */
+const char *gw_config_mqtt_client_key(void);
+
 /** HMAC-SHA256(secret gateway, msg) hex thường. */
 esp_err_t gw_config_sign(const char *msg, char out_hex[SM_HMAC_HEX_LEN + 1]);
-
-/** HMAC-SHA256(secret gateway, "<gateway_id>:<ts>") — gw_hmac của telemetry, X-Signature của API thiết bị (/api/device). */
-esp_err_t gw_config_sign_ts(int64_t ts, char out_hex[SM_HMAC_HEX_LEN + 1]);
 
 /** So chữ ký lệnh từ Server với HMAC-SHA256(secret gateway, msg), thời gian hằng. */
 bool gw_config_verify(const char *msg, const char *sig_hex);

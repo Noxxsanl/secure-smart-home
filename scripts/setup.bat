@@ -52,6 +52,15 @@ if errorlevel 1 (
     echo [OK] .env ^(PostgreSQL^) da ton tai.
 )
 
+:: Khoa ma hoa secret thiet bi trong DB (FR-12.8) - sinh 1 lan; MAT KHOA = phai dang ky lai thiet bi
+findstr /b /r /c:"DEVICE_SECRET_KEY=[0-9a-fA-F]" .env >nul 2>&1
+if errorlevel 1 (
+    powershell -NoProfile -Command "$b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $k=-join($b|%%{$_.ToString('x2')}); $p=Join-Path (Get-Location) '.env'; $l=@(Get-Content $p | Where-Object {$_ -notmatch '^DEVICE_SECRET_KEY='}); $l+='DEVICE_SECRET_KEY='+$k; [IO.File]::WriteAllLines($p,[string[]]$l)"
+    echo [OK] Da tao DEVICE_SECRET_KEY trong .env ^(giu ban sao an toan^).
+) else (
+    echo [OK] DEVICE_SECRET_KEY da co trong .env.
+)
+
 :: Setup backend .env
 if not exist "backend\.env" (
     if exist "backend\.env.example" (
@@ -82,7 +91,11 @@ if not exist "infra\mosquitto\certs\server.crt" (
     "%ProgramFiles%\Git\bin\bash.exe" infra/pki/gen_mqtt_certs.sh %*
     if errorlevel 1 exit /b 1
 ) else (
-    echo [OK] Chung chi MQTT TLS da co.
+    if not exist "infra\mosquitto\certs\web.crt" (
+        echo [WARN] Thieu chung chi web/client/CRL ^(mTLS + HTTPS^). Mo Git Bash va chay: bash infra/pki/gen_mqtt_certs.sh ^<IP LAN^>
+    ) else (
+        echo [OK] Chung chi TLS da co.
+    )
 )
 
 :: Build and start

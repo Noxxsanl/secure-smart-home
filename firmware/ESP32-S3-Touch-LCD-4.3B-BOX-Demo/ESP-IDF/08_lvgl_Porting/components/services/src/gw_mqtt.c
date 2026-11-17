@@ -293,7 +293,10 @@ static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *da
             ESP_LOGW(TAG, "transport error: tls 0x%x, sock errno %d", e->error_handle->esp_tls_last_esp_err,
                      e->error_handle->esp_transport_sock_errno);
         } else if (e->error_handle && e->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
-            ESP_LOGW(TAG, "connection refused by broker (code %d)", e->error_handle->connect_return_code);
+            ESP_LOGW(TAG, "connection refused by broker (code %d)%s", e->error_handle->connect_return_code,
+                     e->error_handle->connect_return_code == MQTT_CONNECTION_REFUSE_NOT_AUTHORIZED
+                         ? " — client certificate revoked or CN not allowed"
+                         : "");
         }
         break;
     default:
@@ -353,6 +356,15 @@ esp_err_t gw_mqtt_start(const char *uri, const gw_mqtt_callbacks_t *cbs)
     if (!gw_tls_uri_allowed(uri, "mqtts://", "mqtt://", &secure)) {
         return ESP_ERR_INVALID_ARG;
     }
+    /* mTLS: broker (require_certificate) chỉ nhận client có chứng chỉ do CA nội bộ ký; CN = gateway_id là username,
+     * ACL chỉ cho topic của chính gateway này (infra/mosquitto/acl). */
+    const char *client_cert = gw_config_mqtt_client_cert();
+    const char *client_key = gw_config_mqtt_client_key();
+    if (secure && (client_cert == NULL || client_key == NULL)) {
+        ESP_LOGE(TAG, "missing MQTT client certificate (NVS cloud/mqtt_cert, cloud/mqtt_key) — "
+                      "run infra/pki/gen_mqtt_client.sh %s and re-flash NVS", gw_config_gateway_id());
+        return ESP_ERR_INVALID_STATE;
+    }
     if (cbs) {
         s_cbs = *cbs;
     }
@@ -360,12 +372,17 @@ esp_err_t gw_mqtt_start(const char *uri, const gw_mqtt_callbacks_t *cbs)
         .broker.address.uri = uri,
         /* Kiểm chứng chứng chỉ broker bằng CA nhúng + so tên host với SAN (bất biến 3) */
         .broker.verification.certificate = secure ? gw_tls_ca_pem() : NULL,
+        .credentials.authentication.certificate = secure ? client_cert : NULL,
+        .credentials.authentication.key = secure ? client_key : NULL,
+        /* Broker ép client id = CN chứng chỉ (use_username_as_clientid); đặt trùng cho rõ ràng */
         .credentials.client_id = gw_config_gateway_id(),
         .session.keepalive = 30,
         .network.reconnect_timeout_ms = 5000,
         .network.timeout_ms = 10000,
         .buffer.size = 2048,
-        .buffer.out_size = 2048,
+        /* Heartbeat v2 lớn nhất (8 thiết bị, body_raw ~1,7 KB + vỏ JSON thoát dấu ngoặc kép ~2,1 KB) vượt 2048;
+         * gw_envelope chặn body_raw ở 4096 byte → vỏ tối đa ~6 KB, esp-mqtt chia nhỏ khi vượt bộ đệm ghi. */
+        .buffer.out_size = 4096,
         .task.stack_size = 6144,
     };
     s_client = esp_mqtt_client_init(&cfg);

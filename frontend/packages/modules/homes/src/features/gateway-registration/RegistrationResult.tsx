@@ -19,6 +19,7 @@ type RegistrationResultProps = {
 
 export default function RegistrationResult({ result, onReset }: RegistrationResultProps) {
   const { home, owner, devices } = result;
+  const gatewayUid = devices.find((d) => d.category === "gateway")?.device_id ?? "<gateway_id>";
   return (
     <div className={`${CARD} space-y-4 p-5`}>
       <div className="flex items-start gap-2.5 rounded border border-success/30 bg-success-soft px-3 py-2.5 text-sm text-success">
@@ -64,6 +65,16 @@ export default function RegistrationResult({ result, onReset }: RegistrationResu
           Gateway cần biết nhà của mình để gửi heartbeat và sự kiện camera: ghi{" "}
           <span className="font-mono font-semibold">cloud/home_id = {home.id}</span> vào NVS của gateway rồi nạp lại NVS
           (xem docs/guides/LEN_SERVER.md, mục 5). Nhiệt độ/độ ẩm và ảnh camera vẫn lên server khi chưa ghi.
+        </p>
+      </div>
+
+      <div className="flex items-start gap-2.5 rounded border border-gray-200 dark:border-slate-600 bg-gray-50 dark:bg-slate-900 px-3 py-2.5 text-sm text-gray-600 dark:text-slate-300">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+        <p>
+          Broker MQTT chỉ nhận thiết bị có chứng chỉ riêng: trên máy chủ chạy{" "}
+          <span className="font-mono font-semibold">bash infra/pki/gen_mqtt_client.sh {gatewayUid}</span>, thêm{" "}
+          <span className="font-mono font-semibold">cloud/mqtt_cert</span>, <span className="font-mono font-semibold">cloud/mqtt_key</span>{" "}
+          vào NVS của gateway rồi nạp lại NVS (docs/guides/MQTT_TLS.md).
         </p>
       </div>
 

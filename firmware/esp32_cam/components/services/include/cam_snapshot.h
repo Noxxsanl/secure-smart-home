@@ -1,7 +1,8 @@
 /*
  * Chụp ảnh và gửi Gateway: POST http://<ip-gateway>/local/camera/snapshot (API_DESIGN §10.2, IOT_NODE_NETWORK §5.2).
  *
- *   X-Device-Id, X-Timestamp, X-Signature = HMAC-SHA256(secret_camera, "<device_id>:<unix_ts>")
+ *   X-Device-Id, X-Timestamp, X-Counter (sm_counter_next, tăng ngặt), X-Signature =
+ *   HMAC-SHA256(secret_camera, "v2|cam-up|<device_id>|<ts>|<ctr>|<trigger>|<command_id hoặc rỗng>") — không băm ảnh
  *   X-Trigger: motion | request,  X-Command-Id (khi chụp theo lệnh),  Content-Type: image/jpeg, ≤ 200 KB
  *   Gateway trả 201 nhận / 401 sai HMAC / 413 quá lớn.
  */

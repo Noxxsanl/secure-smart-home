@@ -4,6 +4,7 @@ import { queryOne, queryRows, runSql } from "../../../infrastructure/database/db
 import { verifyJWT } from "../middleware/verify-jwt";
 import { requireRole } from "../middleware/require-role";
 import { log } from "../../audit";
+import { sealForStorage } from "../../devices";
 import { createNotification } from "../infrastructure/legacy-notification";
 
 function sanitize(value: unknown, maxLength: number): string {
@@ -57,7 +58,7 @@ router.post(
     const result = await runSql(
       `INSERT INTO devices (device_id, device_name, device_type, category, secret_key, status, location, fail_count, created_by)
        VALUES (?, ?, ?, ?, ?, 'inactive', ?, 0, ?) RETURNING id`,
-      [device_id, device_name, device_type, category, secret_key, location ?? null, user.id]
+      [device_id, device_name, device_type, category, sealForStorage(device_id, secret_key), location ?? null, user.id]
     );
 
     const insertedId = result.insertId;

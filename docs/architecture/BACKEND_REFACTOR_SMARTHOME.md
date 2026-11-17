@@ -118,7 +118,7 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 
 | Vấn đề | Chi tiết |
 |---|---|
-| 2 broker, không TLS, `allow_anonymous true` | Đã xác nhận qua đường dẫn `infra/mosquitto/broker1/mosquitto.conf`, `infra/mosquitto/broker2/mosquitto.conf` (prototype — từ 2026-11-12 gộp thành 1 broker TLS `infra/mosquitto/mosquitto.conf`; nội dung đã thẩm định ở `SMART_HOME_WIFI_PROVISIONING.md` mục 20, điểm 11) — chấp nhận được cho demo, **không chấp nhận được cho production thương mại**. |
+| 2 broker, không TLS, `allow_anonymous true` | Đã xác nhận qua đường dẫn `infra/mosquitto/broker1/mosquitto.conf`, `infra/mosquitto/broker2/mosquitto.conf` (prototype — từ 2026-11-12 gộp thành 1 broker TLS `infra/mosquitto/mosquitto.conf`; nội dung đã thẩm định ở `SMART_HOME_WIFI_PROVISIONING.md` mục 20, điểm 11) — chấp nhận được cho demo, **không chấp nhận được cho production thương mại** (*đã xử lý 2026-11-16*: broker mTLS + ACL). |
 | Topic không namespace theo khách hàng | `gateway/+/data` (broker2), `local/sensors/+/data` (broker1) — không có `home_id` trong topic, không thể áp ACL theo khách hàng ở tầng broker (`mqttDataService.ts:174`). |
 | Chỉ có 1 topic ("data") — không có `command`/`status`/`heartbeat`/`ota`/`provision` | Toàn bộ giao tiếp hiện tại là **1 chiều** (thiết bị → cloud). Không có cơ chế gửi lệnh xuống thiết bị (bật/tắt relay), không có OTA qua MQTT, không có heartbeat riêng biệt (trạng thái online suy ra từ `last_seen` cập nhật mỗi lần có dữ liệu — không phân biệt được "thiết bị mất kết nối" và "thiết bị active nhưng không có gì để gửi"). |
 | `mqttTracker.ts` phụ thuộc vào định dạng log `$SYS` của Mosquitto | Regex parse chuỗi log (`CONNECT_RE` ở `mqttTracker.ts:6`) — cách lấy IP thiết bị **rất giòn** (brittle), phụ thuộc định dạng log nội bộ của 1 phiên bản broker cụ thể, gãy ngay khi đổi broker (EMQX/VerneMQ) hoặc đổi cấu hình log level. |
@@ -875,7 +875,7 @@ sequenceDiagram
 
 | Hạng mục | Thiết kế |
 |---|---|
-| **TLS cho MQTT** | Broker MQTT (Gateway↔Backend) bắt buộc TLS 1.2+ trong production — vá vấn đề #9 (hiện tại `allow_anonymous true`, không TLS). Broker 1 (Sensor↔Gateway nội bộ qua ESP-NOW) không bắt buộc TLS vì không phải giao thức IP/MQTT thật theo `SMART_HOME_WIFI_PROVISIONING.md`. |
+| **TLS cho MQTT** | Broker MQTT (Gateway↔Backend) bắt buộc TLS 1.2+ trong production — vá vấn đề #9 (Prototype `allow_anonymous true`, không TLS; *đã xử lý 2026-11-16*: mTLS + `allow_anonymous false` + ACL theo CN, xem [MQTT TLS](../guides/MQTT_TLS.md)). Broker 1 (Sensor↔Gateway nội bộ qua ESP-NOW) không bắt buộc TLS vì không phải giao thức IP/MQTT thật theo `SMART_HOME_WIFI_PROVISIONING.md`. |
 | **HTTPS** | Toàn bộ API (`/api/dashboard`, `/api/mobile`, `/api/device`) bắt buộc TLS ở tầng Nginx/Load Balancer, không có ngoại lệ. |
 | **JWT** | 2 secret riêng biệt cho Dashboard/Mobile (Phần 7.3), thời hạn ngắn cho Mobile Access Token (15 phút). |
 | **Refresh Token** | Random 256-bit, chỉ lưu hash trong DB, rotate mỗi lần dùng, phát hiện reuse → thu hồi toàn bộ session (Phần 7.3). |

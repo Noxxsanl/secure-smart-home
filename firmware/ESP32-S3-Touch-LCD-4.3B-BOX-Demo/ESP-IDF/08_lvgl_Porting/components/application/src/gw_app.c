@@ -93,6 +93,7 @@ typedef struct {
             size_t idx;
             uint16_t len;
             char payload[PAYLOAD_MAX + 1];
+            gw_telemetry_meta_t meta;   /* ts, ctr, chữ ký Node, vị trí data nguyên văn trong payload */
         } tel;
         struct {
             size_t idx;
@@ -212,12 +213,12 @@ static void post(const app_event_t *ev, const char *what)
     }
 }
 
-static void on_telemetry(size_t idx, const char *payload, size_t len, void *ctx)
+static void on_telemetry(size_t idx, const char *payload, size_t len, const gw_telemetry_meta_t *meta, void *ctx)
 {
-    if (len > PAYLOAD_MAX) {
+    if (len > PAYLOAD_MAX || meta == NULL) {
         return;
     }
-    app_event_t ev = {.type = EV_TELEMETRY, .tel = {.idx = idx, .len = (uint16_t)len}};
+    app_event_t ev = {.type = EV_TELEMETRY, .tel = {.idx = idx, .len = (uint16_t)len, .meta = *meta}};
     memcpy(ev.tel.payload, payload, len);
     ev.tel.payload[len] = '\0';
     post(&ev, "telemetry");
@@ -338,7 +339,7 @@ static void learn_home(const char *home)
 
 static void publish_ack(const char *home, const char *device_id, const char *command_id, bool ok, int power)
 {
-    char *json = gw_envelope_ack(command_id, ok, power);
+    char *json = gw_envelope_ack(device_id, command_id, ok, power);
     if (json == NULL) {
         ESP_LOGW(TAG, "ack %s: cannot build payload", command_id);
         return;
@@ -588,9 +589,12 @@ static void handle_telemetry(const app_event_t *ev)
     if (dev->kind == GW_DEV_NODE) {
         s_room_idx = (int)ev->tel.idx;
     }
+    /* body v2 có "data" và "sn_timestamp" như trước — màn hình đọc thẳng */
     gw_ui_set_telemetry(dev->device_id, ev->tel.payload, ev->tel.len);
 
-    char *json = gw_envelope_telemetry(ev->tel.payload, ev->tel.len);
+    const gw_telemetry_meta_t *m = &ev->tel.meta;
+    char *json = gw_envelope_telemetry_v2(dev->device_id, m->ts, m->ctr, m->sig, ev->tel.payload + m->data_off,
+                                          m->data_len);
     if (json == NULL) {
         ESP_LOGW(TAG, "telemetry from %s: cannot build payload", dev->device_id);
         return;

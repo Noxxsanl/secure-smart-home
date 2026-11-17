@@ -2,7 +2,9 @@
  * gw_camera_live — Gateway kéo luồng MJPEG của Camera trên Local AP (API_DESIGN §10.3, IOT_NODE_NETWORK §5.4):
  *
  *   GET http://<ip camera>/stream?fs=vga|qvga&q=<10..30>
- *   X-Device-Id, X-Timestamp, X-Signature = HMAC-SHA256(secret camera, "<device_id>:<unix_ts>")  (gw_registry_sign)
+ *   X-Device-Id (= id camera đích), X-Timestamp, X-Counter (sm_counter_next), X-Signature =
+ *   HMAC-SHA256(secret camera, "v2|cam-stream|<device_id>|<ts>|<ctr>|<fs>|<q>") (gw_registry_cam_stream_sign;
+ *   fs, q là giá trị đã chuẩn hoá trong URL)
  *   200 multipart/x-mixed-replace, mỗi phần: Content-Type: image/jpeg, Content-Length: <n>, rồi n byte JPEG.
  *
  * - IP camera = IP mà DHCP của Local AP cấp cho MAC camera đã ghép (gw_registry) — không nhận IP do ai khai báo.

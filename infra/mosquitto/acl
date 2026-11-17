@@ -1,0 +1,29 @@
+# ACL của Broker MQTT (acl_file trong mosquitto.conf) — FR-12.4.
+# Username = CN chứng chỉ client (use_identity_as_username). Không có dòng nào cho phép → bị từ chối (kể cả $SYS/#).
+# Đổi file này thì khởi động lại broker: docker compose restart mqtt-broker
+#
+# Gateway: %u = CN = gateway_id. Mỗi gateway chỉ publish/subscribe topic mang đúng id của nó; backend còn kiểm
+# gateway_id trong payload = id trên topic, home_id trên topic = nhà của gateway (heartbeat) và chữ ký HMAC từng gói.
+pattern write gateway/%u/data
+pattern write home/+/gateway/%u/heartbeat
+pattern write home/+/gateway/%u/device/+/command/ack
+pattern write home/+/gateway/%u/device/+/camera/event
+pattern read home/+/gateway/%u/device/+/command
+pattern read home/+/gateway/%u/command
+pattern read home/+/gateway/%u/ota/command
+
+# Backend: 4 kết nối, mỗi kết nối một chứng chỉ (backend/src/infrastructure/mqtt/broker.ts) và đúng quyền nó cần.
+user iot-backend-data
+topic read gateway/+/data
+
+user iot-backend-heartbeat
+topic read home/+/gateway/+/heartbeat
+
+user iot-backend-camera
+topic read home/+/gateway/+/device/+/camera/event
+
+user iot-backend-commands
+topic read home/+/gateway/+/device/+/command/ack
+topic write home/+/gateway/+/device/+/command
+topic write home/+/gateway/+/command
+topic write home/+/gateway/+/ota/command

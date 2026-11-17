@@ -164,7 +164,7 @@ Khung chung về OTA và NVS ở [Firmware](EMBEDDED_ARCHITECTURE_ESP_IDF.md) §
 ### 4.1. Nguyên tắc chung cho mọi node
 
 - Giao tiếp với Gateway bằng **ESP-NOW**; không giữ WiFi thật, không biết địa chỉ Server.
-- Mỗi node có `device_id` và `secret` riêng (bất biến 1: secret chỉ trả 1 lần khi tạo), lưu NVS, ký HMAC đúng định dạng `HMAC-SHA256(secret, "<device_id>:<unix_ts>")` hex thường (bất biến 5).
+- Mỗi node có `device_id` và `secret` riêng (bất biến 1: secret chỉ trả 1 lần khi tạo), lưu NVS, ký HMAC telemetry v2 `HMAC-SHA256(secret node, "v2|sn|<sensor_id>|<sn_timestamp>|<sn_ctr>|<sha256_hex(data_raw)>")` hex thường (bất biến 5; từ 2026-11-16, [API](../API_DESIGN.md) §3). Gateway không giữ secret Node, chữ ký Node chỉ backend kiểm; camera ký chặng Camera ↔ Gateway bằng chuỗi v2 riêng `v2|cam-up|…`/`v2|cam-stream|…` (mục 5.2, 5.4).
 - Không có NTP — thời gian lấy từ Gateway (mục 7).
 - Báo heartbeat 30 giây/lần (RSSI, uptime, pin nếu có, phiên bản firmware).
 
@@ -241,7 +241,8 @@ Khoảng 200 byte với 2–3 trường đo. Node phòng khách gửi cả trạ
 POST http://<ip-gateway-trên-Local-AP>/local/camera/snapshot
 X-Device-Id: <camera device_id>
 X-Timestamp: <unix_ts>
-X-Signature: HMAC-SHA256(secret_camera, "<device_id>:<unix_ts>")
+X-Counter: <ctr>
+X-Signature: HMAC-SHA256(secret_camera, "v2|cam-up|<device_id>|<unix_ts>|<ctr>|<trigger>|<command_id hoặc rỗng>")
 X-Trigger: motion | request
 X-Command-Id: <command_id nếu chụp theo lệnh>
 Content-Type: image/jpeg
@@ -249,8 +250,8 @@ Content-Type: image/jpeg
 <JPEG>
 ```
 
-- Gateway kiểm tra HMAC và cửa sổ thời gian ±300 giây giống backend (`modules/devices/domain/hmac.service.ts`), từ chối ảnh > 200 KB.
-- Kênh này không có TLS. Nội dung ảnh được bảo vệ bằng WPA2 của Local AP; HMAC hiện tại chỉ ký `device_id:ts`, không ký nội dung — cùng giới hạn với telemetry hiện nay (xem [Bảo mật](../SECURITY_ARCHITECTURE.md)).
+- Gateway kiểm theo thứ tự: camera đã ghép → đồng hồ đã đồng bộ → cửa sổ thời gian ±300 giây (như backend, `modules/devices/domain/hmac.service.ts`) → chữ ký (so thời gian hằng) → `ctr` > `last_ctr` của camera đó (RAM; sau khởi động lấy sàn `(now − 300) × 1000`), mọi lỗi xác thực trả `401 AUTH_FAIL` không nói lý do; từ chối ảnh > 200 KB. `last_ctr` chỉ cập nhật sau khi nhận đủ thân ảnh hợp lệ. Bộ đếm `ctr` lấy từ `sm_counter_next` (dùng chung với Node và Gateway, sàn NVS `sec/ctr_floor`).
+- Kênh này không có TLS. Nội dung ảnh được bảo vệ bằng WPA2 của Local AP; chữ ký chặng Camera → Gateway (từ 2026-11-16, build kiểm, chưa nạp board) phủ camera, trigger, `command_id` và `ctr` nên gói bắt được không phát lại được và không chuyển được thành lệnh chụp khác, nhưng **không băm nội dung ảnh** (telemetry Node ký nội dung từ 2026-11-16; ảnh Gateway → Server có ký sha256 của body — xem [Bảo mật](../SECURITY_ARCHITECTURE.md)). Không còn chế độ chữ ký cũ `<device_id>:<unix_ts>`, nên Camera và Gateway phải nạp cùng lúc.
 
 ### 5.3. Gateway → Server
 
@@ -258,9 +259,9 @@ Content-Type: image/jpeg
 |---|---|---|---|
 | Telemetry | MQTT TLS Broker MQTT | `gateway/<GW_ID>/data`, payload `{gateway_id, gw_timestamp, gw_hmac, gateway_ip, sensor_payload}` | **Đã có** — `backend/src/modules/telemetry/features/ingest-mqtt/` |
 | Lệnh xuống thiết bị | MQTT, Server → Gateway | `home/{home}/gateway/{gw}/device/{dev}/command`, HMAC `command_id:device_id:action:ts` bằng secret gateway | **Đã có** ở backend (`backend/src/modules/control/`); firmware chưa xử lý |
-| Ack lệnh | MQTT, Gateway → Server | `.../device/{dev}/command/ack`, HMAC `command_id:status:ts` | **Đã có** ở backend |
-| Heartbeat gateway | MQTT | `home/{home}/gateway/{gw}/heartbeat` | Thiết kế ở [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §10.2, chưa có |
-| Sự kiện camera | MQTT | `home/{home}/gateway/{gw}/device/{dev}/camera/event` `{type:"motion", ts, snapshot_id?}` | Thiết kế ở [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §10.2, chưa có |
+| Ack lệnh | MQTT, Gateway → Server | `.../device/{dev}/command/ack`, `{"v":2, …}` HMAC `v2|ack|<gw>|<dev>|<command_id>|<status>|<power>|<ts>` | **Đã có** ở backend và firmware Gateway (build kiểm, chưa nạp board) |
+| Heartbeat gateway | MQTT | `home/{home}/gateway/{gw}/heartbeat` `{"v":2, ts, ctr, hmac, body_raw}`, HMAC `v2|hb|<gw>|<ts>|<ctr>|<sha256_hex(body_raw)>` | **Đã có** — `backend/src/modules/devices/features/gateway-heartbeat/` |
+| Sự kiện camera | MQTT | `home/{home}/gateway/{gw}/device/{dev}/camera/event` `{"v":2, type:"motion", ts, snapshot_id?, hmac}`, HMAC `v2|evt|<gw>|<dev>|<type>|<ts>|<snapshot_id hoặc rỗng>` | **Đã có** — `backend/src/modules/camera/features/camera-event/` |
 | Ảnh camera | HTTPS | `POST /api/device/camera/snapshot` — header HMAC gateway như `/api/device/data`, body JPEG, trả `snapshot_id` | **(đề xuất)** — cần backend thêm endpoint + lưu file (cột `last_snapshot_url`, [Kiến trúc sản phẩm](../SMART_HOME_PRODUCT_ARCHITECTURE.md)) |
 
 Ảnh đi HTTPS thay vì MQTT vì: payload nhị phân 20–60 KB, base64 qua MQTT làm tăng ~33% và chiếm bộ nhớ broker; HTTP có sẵn kiểm tra kích thước, mã lỗi và retry rõ ràng. Gateway kiểm chứng chứng chỉ Server bằng CA (không `setInsecure()`, bất biến 3).
@@ -273,10 +274,11 @@ Content-Type: image/jpeg
 GET http://<ip-camera-trên-Local-AP>/stream?fs=vga&q=12
 X-Device-Id: <camera device_id>
 X-Timestamp: <unix_ts>
-X-Signature: HMAC-SHA256(secret_camera, "<device_id>:<unix_ts>")
+X-Counter: <ctr>
+X-Signature: HMAC-SHA256(secret_camera, "v2|cam-stream|<device_id>|<unix_ts>|<ctr>|<fs>|<q>")
 ```
 
-- Gateway đã giữ secret của camera (để kiểm HMAC telemetry), nên ký yêu cầu mở luồng bằng chính secret đó — cùng định dạng bất biến 5, camera kiểm cửa sổ ±300 giây.
+- Gateway đã giữ secret của camera (để kiểm chữ ký ảnh `v2|cam-up`), nên ký yêu cầu mở luồng bằng chính secret đó — cùng định dạng bất biến 5. `<fs>`/`<q>` là giá trị **đã chuẩn hoá** camera sẽ dùng (vắng `fs` → `vga`, vắng `q` → `12`). Camera kiểm theo thứ tự: `X-Device-Id` = id của chính nó → cửa sổ ±300 giây → chữ ký → `ctr` > `last_ctr` của luồng (RAM, sàn như trên); sai → `401`. `ctr` do Gateway lấy từ `sm_counter_next`.
 - Camera chỉ cho **1 kết nối luồng** cùng lúc. Mọi người xem khác (màn hình Gateway, Mobile) dùng chung luồng mà Gateway đã kéo về.
 - Khi đang phát luồng mà PIR kích hoạt, camera lấy luôn khung hiện tại làm snapshot (không đổi độ phân giải giữa chừng).
 - Mất kết nối → Gateway thử lại sau 1, 2, 4 giây; quá 3 lần thì hiện "Không kết nối được camera" trên màn hình.

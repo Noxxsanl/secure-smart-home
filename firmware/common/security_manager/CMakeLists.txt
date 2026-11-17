@@ -1,3 +1,4 @@
-idf_component_register(SRCS "security_manager.c"
+idf_component_register(SRCS "security_manager.c" "sm_counter.c"
                        INCLUDE_DIRS "include"
-                       PRIV_REQUIRES mbedtls)
+                       REQUIRES esp_common
+                       PRIV_REQUIRES mbedtls nvs_flash)

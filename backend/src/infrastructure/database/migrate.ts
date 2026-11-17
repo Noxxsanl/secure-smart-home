@@ -379,6 +379,17 @@ SELECT l.id, l."timestamp", l.smart_home_id AS home_id, l.room_id, l.device_id, 
     name: "add_idx_scheduled_actions_agent_request",
     sql: "CREATE INDEX IF NOT EXISTS idx_scheduled_actions_agent_request ON scheduled_actions (agent_request_id)",
   },
+  // Telemetry chữ ký v2 (API_DESIGN §3): bộ đếm chống phát lại sn_ctr lớn nhất đã nhận của từng thiết bị. NULL = chưa
+  // nhận gói v2 nào (đăng ký lại phần cứng đặt về NULL).
+  {
+    name: "add_last_ctr_to_devices",
+    sql: "ALTER TABLE devices ADD COLUMN IF NOT EXISTS last_ctr BIGINT NULL CONSTRAINT ck_devices_last_ctr CHECK (last_ctr > 0)",
+  },
+  // Mã hoá secret thiết bị khi lưu (FR-12.8): bản mã "enc1:…" (~140 ký tự) dài hơn VARCHAR(64) của secret dạng rõ.
+  {
+    name: "widen_devices_secret_key",
+    sql: "ALTER TABLE devices ALTER COLUMN secret_key TYPE VARCHAR(255)",
+  },
 ];
 
 // Lỗi PostgreSQL "đối tượng đã tồn tại" (SQLSTATE): DB tạo từ 001_schema.sql đã có sẵn schema cuối cùng

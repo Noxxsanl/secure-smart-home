@@ -5,9 +5,10 @@
 //        → device_type gateway (403) + active (403) → camera thuộc gateway (404) + active (403).
 //   2. express.raw (≤ 204800 byte, vượt → 413) — gắn ở camera.module.ts.
 //   3. verifySnapshotSignature — kiểm HMAC bằng getGatewaySigner (secret không rời module devices, invariant 1, 2).
-// Các bước kiểm + xử lý lỗi xác thực (gateway lạ, ts quá hạn, HMAC sai → audit authFailureEventType, registerAuthFailure,
-// khoá gateway sau 5 lần sai, 401 GATEWAY_AUTH_FAIL) nằm ở camera/domain/gateway-auth.ts, DÙNG CHUNG với uplink WebSocket
-// camera live (invariant 4: một logic xác thực). Không còn dùng verifyGatewayHMAC (chuỗi ngắn "<gw>:<ts>") cho route này.
+// Các bước kiểm + xử lý lỗi xác thực (gateway lạ, ts quá hạn, HMAC sai → audit authFailureEventType + 401
+// GATEWAY_AUTH_FAIL; KHÔNG tăng fail_count/khoá gateway — chống khoá-DoS, thay bằng giới hạn lỗi theo IP 20/15 phút ở
+// core/http/rate-limit.ts) nằm ở camera/domain/gateway-auth.ts, DÙNG CHUNG với uplink WebSocket camera live
+// (invariant 4: một logic xác thực). Không còn dùng verifyGatewayHMAC (chuỗi ngắn "<gw>:<ts>") cho route này.
 // Không log chữ ký/secret.
 import type { NextFunction, Request, Response } from "express";
 import { requestMeta } from "../../../../core/http/request-meta";

@@ -37,14 +37,36 @@ export { toCustomerDeviceOne, toCustomerDevices } from "./domain/device-view";
 
 // ── Xác thực HMAC thiết bị (dùng chung HTTP + MQTT — invariant 4) ───────────
 export {
+  isCounterInRange,
+  isDeviceIp,
+  isHmacHex,
   isSafeDeviceId,
   isTimestampValid,
+  isUnixSeconds,
+  isValidCounter,
   isWellFormedUid,
   jsonHasNul,
   verifyDeviceHMAC,
   verifyGatewayHMAC,
+  verifyGatewayTelemetryV2,
+  verifySensorTelemetryV2,
 } from "./domain/hmac.service";
-export type { HMACVerifyResult, VerifiedDevice } from "./domain/hmac.service";
+export type {
+  GatewayTelemetryFieldsV2,
+  HMACVerifyResult,
+  SensorTelemetryFieldsV2,
+  VerifiedDevice,
+} from "./domain/hmac.service";
+/**
+ * Chống phát lại v2 theo thiết bị: nhận ctr chỉ khi lớn hơn last_ctr của dòng đó (gọi sau khi chữ ký đã hợp lệ).
+ * Dùng cho telemetry Node (dòng node) và heartbeat Gateway (dòng gateway).
+ */
+export { claimDeviceCounter } from "./infrastructure/device.repository";
+/** Chuỗi ký v2 của ack lệnh và sự kiện camera (Gateway → Server) — control/camera dùng với GatewaySigner.verify. */
+export { ackMessageV2, cameraEventMessageV2 } from "./domain/signature-v2";
+export type { AckFieldsV2, CameraEventFieldsV2 } from "./domain/signature-v2";
+/** Giá trị cột secret_key khi GHI (mã hoá nếu có DEVICE_SECRET_KEY) — route legacy tạo thiết bị dùng. */
+export { sealForStorage } from "./infrastructure/device-secret.repository";
 export { registerAuthFailure } from "./domain/auth-failure";
 export type { AuthFailureResult } from "./domain/auth-failure";
 /** Ký/kiểm HMAC bằng secret gateway (lệnh, OTA, ack) — secret không rời module devices (invariant 1, 2). */

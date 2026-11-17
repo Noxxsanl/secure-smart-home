@@ -7,9 +7,10 @@
 
 #include "mbedtls/md.h"
 #include "mbedtls/platform_util.h"
+#include "mbedtls/sha256.h"
 
-/* "<device_id>:<unix_ts>" — device_id tối đa 64 ký tự (UUID 36), ts tối đa 20 chữ số. */
-#define SM_MSG_MAX 96
+/* "v2|sn|" + id 64 + "|" + ts 20 + "|" + ctr 20 + "|" + sha 64 + NUL */
+#define SM_MSG_V2_MAX 192
 #define SM_UNIX_TS_MAX INT64_C(4102444800) /* 2100-01-01 */
 
 static const char HEX_DIGITS[] = "0123456789abcdef";
@@ -40,26 +41,6 @@ esp_err_t sm_hmac_sha256_hex(const char *key, const char *msg, char out_hex[SM_H
     out_hex[SM_HMAC_HEX_LEN] = '\0';
     mbedtls_platform_zeroize(digest, sizeof(digest));
     return ESP_OK;
-}
-
-static esp_err_t build_message(const char *device_id, int64_t unix_ts, char *buf, size_t cap)
-{
-    if (device_id == NULL || device_id[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
-    }
-    int n = snprintf(buf, cap, "%s:%" PRId64, device_id, unix_ts);
-    return (n > 0 && (size_t)n < cap) ? ESP_OK : ESP_ERR_INVALID_SIZE;
-}
-
-esp_err_t sm_device_sign(const char *secret, const char *device_id, int64_t unix_ts,
-                         char out_hex[SM_HMAC_HEX_LEN + 1])
-{
-    char msg[SM_MSG_MAX];
-    esp_err_t err = build_message(device_id, unix_ts, msg, sizeof(msg));
-    if (err != ESP_OK) {
-        return err;
-    }
-    return sm_hmac_sha256_hex(secret, msg, out_hex);
 }
 
 static bool is_hex_char(char c)
@@ -110,31 +91,140 @@ bool sm_hmac_verify_hex(const char *key, const char *msg, const char *sig_hex)
     return ok;
 }
 
-sm_verify_result_t sm_device_verify(const char *secret, const char *device_id, int64_t unix_ts,
-                                    const char *sig_hex, int64_t now_unix)
+esp_err_t sm_sha256_hex(const void *data, size_t len, char out_hex[SM_HMAC_HEX_LEN + 1])
 {
-    if (secret == NULL || device_id == NULL || sig_hex == NULL) {
-        return SM_VERIFY_BAD_INPUT;
+    if ((data == NULL && len > 0) || out_hex == NULL) {
+        return ESP_ERR_INVALID_ARG;
     }
-    if (!sig_hex_well_formed(sig_hex)) {
-        return SM_VERIFY_BAD_INPUT;
+    uint8_t digest[32];
+    if (mbedtls_sha256((const unsigned char *)data, len, digest, 0) != 0) {
+        return ESP_FAIL;
     }
+    for (size_t i = 0; i < sizeof(digest); i++) {
+        out_hex[2 * i] = HEX_DIGITS[digest[i] >> 4];
+        out_hex[2 * i + 1] = HEX_DIGITS[digest[i] & 0x0f];
+    }
+    out_hex[SM_HMAC_HEX_LEN] = '\0';
+    return ESP_OK;
+}
 
-    /* Chặn giá trị vô lý trước khi trừ (tránh tràn int64 với ts do bên ngoài gửi). */
-    if (unix_ts < 0 || unix_ts > SM_UNIX_TS_MAX || now_unix < 0 || now_unix > SM_UNIX_TS_MAX) {
+esp_err_t sm_sensor_sign_v2(const char *secret, const char *device_id, int64_t ts, int64_t ctr, const char *data,
+                            size_t data_len, char out_hex[SM_HMAC_HEX_LEN + 1])
+{
+    if (device_id == NULL || device_id[0] == '\0' || strchr(device_id, '|') != NULL || data == NULL || data_len == 0 ||
+        ts <= 0 || ctr <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char sha[SM_HMAC_HEX_LEN + 1];
+    esp_err_t err = sm_sha256_hex(data, data_len, sha);
+    if (err != ESP_OK) {
+        return err;
+    }
+    char msg[SM_MSG_V2_MAX];
+    int n = snprintf(msg, sizeof(msg), "v2|sn|%s|%" PRId64 "|%" PRId64 "|%s", device_id, ts, ctr, sha);
+    if (n <= 0 || (size_t)n >= sizeof(msg)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return sm_hmac_sha256_hex(secret, msg, out_hex);
+}
+
+/* "v2|cam-up|" + id 64 + ts 20 + ctr 20 + trigger 16 + command_id 64 + dấu '|' + NUL */
+#define SM_MSG_CAM_MAX 256
+
+static bool field_ok(const char *s, bool allow_empty)
+{
+    if (s == NULL) {
+        return allow_empty;
+    }
+    if (s[0] == '\0') {
+        return allow_empty;
+    }
+    return strchr(s, '|') == NULL;
+}
+
+static esp_err_t build_cam_up_msg(const char *cam_id, int64_t ts, int64_t ctr, const char *trigger,
+                                  const char *command_id, char *buf, size_t cap)
+{
+    if (!field_ok(cam_id, false) || !field_ok(trigger, false) || !field_ok(command_id, true) || ts <= 0 || ctr <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    int n = snprintf(buf, cap, "v2|cam-up|%s|%" PRId64 "|%" PRId64 "|%s|%s", cam_id, ts, ctr, trigger,
+                     command_id != NULL ? command_id : "");
+    return (n > 0 && (size_t)n < cap) ? ESP_OK : ESP_ERR_INVALID_SIZE;
+}
+
+static esp_err_t build_cam_stream_msg(const char *cam_id, int64_t ts, int64_t ctr, const char *fs, int q, char *buf,
+                                      size_t cap)
+{
+    if (!field_ok(cam_id, false) || !field_ok(fs, false) || q <= 0 || ts <= 0 || ctr <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    int n = snprintf(buf, cap, "v2|cam-stream|%s|%" PRId64 "|%" PRId64 "|%s|%d", cam_id, ts, ctr, fs, q);
+    return (n > 0 && (size_t)n < cap) ? ESP_OK : ESP_ERR_INVALID_SIZE;
+}
+
+/* Cửa sổ ±300 s rồi so thời gian hằng chữ ký với HMAC(secret, msg). */
+static sm_verify_result_t verify_msg_in_window(const char *secret, const char *msg, int64_t ts, const char *sig_hex,
+                                               int64_t now_unix)
+{
+    if (secret == NULL || sig_hex == NULL || !sig_hex_well_formed(sig_hex)) {
         return SM_VERIFY_BAD_INPUT;
     }
-    int64_t skew = now_unix - unix_ts;
+    if (ts < 0 || ts > SM_UNIX_TS_MAX || now_unix < 0 || now_unix > SM_UNIX_TS_MAX) {
+        return SM_VERIFY_BAD_INPUT;
+    }
+    int64_t skew = now_unix - ts;
     if (skew > SM_TIMESTAMP_WINDOW_S || skew < -SM_TIMESTAMP_WINDOW_S) {
         return SM_VERIFY_EXPIRED;
     }
-
     char expected[SM_HMAC_HEX_LEN + 1];
-    if (sm_device_sign(secret, device_id, unix_ts, expected) != ESP_OK) {
+    if (sm_hmac_sha256_hex(secret, msg, expected) != ESP_OK) {
         return SM_VERIFY_BAD_INPUT;
     }
-
     bool ok = hex_equal_ct(expected, sig_hex);
     mbedtls_platform_zeroize(expected, sizeof(expected));
     return ok ? SM_VERIFY_OK : SM_VERIFY_MISMATCH;
+}
+
+esp_err_t sm_cam_upload_sign(const char *secret, const char *cam_id, int64_t ts, int64_t ctr, const char *trigger,
+                             const char *command_id, char out_hex[SM_HMAC_HEX_LEN + 1])
+{
+    char msg[SM_MSG_CAM_MAX];
+    esp_err_t err = build_cam_up_msg(cam_id, ts, ctr, trigger, command_id, msg, sizeof(msg));
+    if (err != ESP_OK) {
+        return err;
+    }
+    return sm_hmac_sha256_hex(secret, msg, out_hex);
+}
+
+sm_verify_result_t sm_cam_upload_verify(const char *secret, const char *cam_id, int64_t ts, int64_t ctr,
+                                        const char *trigger, const char *command_id, const char *sig_hex,
+                                        int64_t now_unix)
+{
+    char msg[SM_MSG_CAM_MAX];
+    if (build_cam_up_msg(cam_id, ts, ctr, trigger, command_id, msg, sizeof(msg)) != ESP_OK) {
+        return SM_VERIFY_BAD_INPUT;
+    }
+    return verify_msg_in_window(secret, msg, ts, sig_hex, now_unix);
+}
+
+esp_err_t sm_cam_stream_sign(const char *secret, const char *cam_id, int64_t ts, int64_t ctr, const char *fs, int q,
+                             char out_hex[SM_HMAC_HEX_LEN + 1])
+{
+    char msg[SM_MSG_CAM_MAX];
+    esp_err_t err = build_cam_stream_msg(cam_id, ts, ctr, fs, q, msg, sizeof(msg));
+    if (err != ESP_OK) {
+        return err;
+    }
+    return sm_hmac_sha256_hex(secret, msg, out_hex);
+}
+
+sm_verify_result_t sm_cam_stream_verify(const char *secret, const char *cam_id, int64_t ts, int64_t ctr, const char *fs,
+                                        int q, const char *sig_hex, int64_t now_unix)
+{
+    char msg[SM_MSG_CAM_MAX];
+    if (build_cam_stream_msg(cam_id, ts, ctr, fs, q, msg, sizeof(msg)) != ESP_OK) {
+        return SM_VERIFY_BAD_INPUT;
+    }
+    return verify_msg_in_window(secret, msg, ts, sig_hex, now_unix);
 }

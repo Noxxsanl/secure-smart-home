@@ -1,28 +1,20 @@
 // POST /api/device/data – đường fallback HTTP để firmware đẩy dữ liệu lên.
 // Đường chính là MQTT (features/ingest-mqtt); endpoint này tồn tại để các thiết bị không kết nối được tới
 // MQTT broker (ví dụ: khác network segment) vẫn có thể gửi dữ liệu qua HTTP thông thường. Cả hai đường đều
-// xác thực HMAC 2 lớp bằng CÙNG các hàm của module devices (invariant 4) — ở đây là phần SAU middleware validate-device:
-// kiểm loại/trạng thái thiết bị → INSERT sensor_data → onTelemetryIngested → cập nhật last_seen → audit.
+// xác thực bằng CÙNG hàm domain/ingest-auth.ts (invariant 4: chữ ký v2, loại thiết bị, node thuộc gateway, chống phát
+// lại) — ở đây là phần SAU middleware validate-device: trạng thái thiết bị → INSERT sensor_data → onTelemetryIngested →
+// cập nhật last_seen → audit.
 import { log, logDataRecvWithPrune } from "../../../audit";
-import { jsonHasNul, listGatewayAndSensorTypeStatus } from "../../../devices";
+import { listGatewayAndSensorTypeStatus } from "../../../devices";
 import { markGatewayAndSensorSeen } from "../../domain/ingest-common";
 import { onTelemetryIngested } from "../../domain/telemetry-ingested";
 import { getReceivedAt, insertSensorData } from "../../infrastructure/sensor-data.repository";
 import type { IngestHttpInput, IngestHttpResult } from "./ingest-http.dto";
 
 export async function ingestHttpData(input: IngestHttpInput): Promise<IngestHttpResult> {
-  const { gateway, sensor, ip, userAgent, data } = input;
+  const { gateway, sensor, ip, userAgent, data, dataJson } = input;
 
-  if (data === undefined || data === null || typeof data !== "object" || Array.isArray(data)) {
-    return { status: 400, body: { error: "MISSING_PAYLOAD_DATA", detail: "Request body must include a 'data' object" } };
-  }
-  // JSONB không nhận `\u0000` (22P05) → coi như payload sai, khớp features/ingest-mqtt.
-  const dataJson = JSON.stringify(data);
-  if (jsonHasNul(dataJson)) {
-    return { status: 400, body: { error: "MISSING_PAYLOAD_DATA", detail: "'data' must not contain NUL characters" } };
-  }
-
-  // Fetch device_type and current status from DB (single round-trip for both devices)
+  // Loại + trạng thái hiện tại (đọc lại 1 lượt: thiết bị có thể vừa bị khoá/vô hiệu hoá trên Dashboard)
   const rows = await listGatewayAndSensorTypeStatus(gateway.id, sensor.id);
 
   const gwRow = rows.find((r) => r.id === gateway.id);
@@ -73,16 +65,12 @@ export async function ingestHttpData(input: IngestHttpInput): Promise<IngestHttp
   await onTelemetryIngested({
     sensorDbId: sensor.id,
     gatewayDbId: gateway.id,
-    data: data as Record<string, unknown>,
+    data,
     receivedAt,
   });
 
-  // Dùng IP do firmware tự báo (gateway_ip / sensor_ip trong body).
-  // Fallback về HTTP client IP nếu firmware cũ chưa gửi field này.
-  const resolvedGwIp  = (typeof input.gatewayIp === "string" && input.gatewayIp) ? input.gatewayIp : ip;
-  const resolvedSnIp  = (typeof input.sensorIp === "string" && input.sensorIp) ? input.sensorIp : null;
-
-  await markGatewayAndSensorSeen(gateway.id, resolvedGwIp, sensor.id, resolvedSnIp, data);
+  // Dùng IP do firmware tự báo (gateway_ip / sensor_ip trong body); không có thì IP client HTTP.
+  await markGatewayAndSensorSeen(gateway.id, input.gatewayIp ?? ip, sensor.id, input.sensorIp, data);
 
   // Audit log
   await logDataRecvWithPrune(sensor.id, ip, userAgent, {

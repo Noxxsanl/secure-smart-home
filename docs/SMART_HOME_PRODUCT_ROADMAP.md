@@ -295,7 +295,7 @@ flowchart TB
 
 | # | Module | Vấn đề cốt lõi | Cần refactor trước phiên bản nào | Tài liệu chi tiết |
 |---|---|---|---|---|
-| 1 | `GET /api/device/sensors` | Rò rỉ secret_key toàn hệ thống | **V1 (khẩn cấp)** | `SECURITY_ARCHITECTURE.md` #1 |
+| 1 | `GET /api/device/sensors` (đã gỡ 2026-11-16) | Rò rỉ secret_key toàn hệ thống | **V1 (khẩn cấp)** | `SECURITY_ARCHITECTURE.md` #1 |
 | 2 | Firmware config (`config_gw.h`/`config_1.h`) | WiFi/Secret hard-code compile vào binary (file đã `.gitignore`, không commit git) | **V1 (khẩn cấp)** | `EMBEDDED_ARCHITECTURE_ESP_IDF.md`, `SECURITY_ARCHITECTURE.md` |
 | 3 | `devices` table (schema gốc) | Gộp Gateway+Sensor, không Customer/Home/Room | **V1→V2** | `DATABASE_REFACTOR_SMARTHOME.md` |
 | 4 | `middleware/rbac.ts` (Prototype; nay `modules/legacy/middleware/require-role.ts`) | Không giới hạn phạm vi Home cho Operator | **V2** | `SECURITY_ARCHITECTURE.md` #4 |
@@ -404,7 +404,7 @@ quadrantChart
 
 | Thứ tự | Hạng mục | Lý do xếp trước/sau |
 |---|---|---|
-| 1 | Vá rò rỉ secret (`/api/device/sensors`) | Impact cực cao, effort cực thấp — không có lý do trì hoãn |
+| 1 | Vá rò rỉ secret (`/api/device/sensors` — đã làm 2026-11-16) | Impact cực cao, effort cực thấp — không có lý do trì hoãn |
 | 2 | NVS hoá cấu hình firmware | Điều kiện tiên quyết cho Provisioning — không thể làm Provisioning nếu credential vẫn hard-code |
 | 3 | Customer/Home/Room schema mới | Mọi tính năng V2 khác (Dashboard, Mobile, RBAC) đều phụ thuộc mô hình dữ liệu này |
 | 4 | RBAC theo Home + tách 2 Dashboard | Phụ thuộc bước 3, là nền tảng phân quyền cho mọi API sau đó |

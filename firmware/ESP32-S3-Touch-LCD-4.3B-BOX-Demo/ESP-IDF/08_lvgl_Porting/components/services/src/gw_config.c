@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "bootloader_random.h"
@@ -17,9 +18,34 @@ static const char *TAG = "gw_config";
 #define GW_SECRET_MAX 128
 #define AP_PASSWORD_LEN 16
 
+#define PEM_MAX 4000   /* giới hạn chuỗi NVS; cert ECDSA ký bởi CA RSA ~0,8 KB, khoá EC ~0,25 KB */
+
 /* Secret gateway chỉ sống ở đây (bất biến 1, 2): không có hàm nào trả giá trị ra ngoài. */
 static char s_secret[GW_SECRET_MAX + 1];
 static char s_gateway_id[GW_ID_MAX + 1];
+/* Chứng chỉ + khoá client MQTT (mTLS) — esp-mqtt giữ CON TRỎ (không chép) nên sống suốt chương trình. */
+static char *s_mqtt_cert;
+static char *s_mqtt_key;
+
+/* Đọc chuỗi PEM dài từ NVS vào heap; NULL nếu thiếu/không phải PEM. Không log nội dung. */
+static char *read_pem(nvs_handle_t h, const char *key)
+{
+    size_t len = 0;
+    if (nvs_get_str(h, key, NULL, &len) != ESP_OK || len < 32 || len > PEM_MAX) {
+        return NULL;
+    }
+    char *buf = malloc(len);
+    if (buf == NULL) {
+        return NULL;
+    }
+    if (nvs_get_str(h, key, buf, &len) != ESP_OK || strncmp(buf, "-----BEGIN ", 11) != 0) {
+        mbedtls_platform_zeroize(buf, len);
+        free(buf);
+        ESP_LOGW(TAG, "cloud/%s is not a PEM string", key);
+        return NULL;
+    }
+    return buf;
+}
 
 static bool valid_chars(const char *s, size_t max, bool allow_upper_dash)
 {
@@ -182,13 +208,35 @@ esp_err_t gw_config_load(gw_config_t *out)
                 ESP_LOGW(TAG, "cloud/home_id must be digits — ignored");
             }
         }
+        /* mTLS với Broker MQTT: chứng chỉ client CN = gateway_id (infra/pki/gen_mqtt_client.sh) */
+        if (s_mqtt_cert == NULL) {
+            s_mqtt_cert = read_pem(h, "mqtt_cert");
+        }
+        if (s_mqtt_key == NULL) {
+            s_mqtt_key = read_pem(h, "mqtt_key");
+        }
         nvs_close(h);
     }
+    if (s_mqtt_cert == NULL || s_mqtt_key == NULL) {
+        ESP_LOGW(TAG, "cloud/mqtt_cert + cloud/mqtt_key missing — broker requires a client certificate "
+                      "(bash infra/pki/gen_mqtt_client.sh %s, README: Nạp NVS)", out->device_id);
+    }
 
-    ESP_LOGI(TAG, "gateway_id=%s wifi=%s local_ap=%s mqtt=%s api=%s home_id=%s", out->device_id,
+    ESP_LOGI(TAG, "gateway_id=%s wifi=%s local_ap=%s mqtt=%s api=%s home_id=%s mqtt_client_cert=%s", out->device_id,
              out->has_wifi ? out->wifi_ssid : "(none)", out->ap_ssid, out->mqtt_uri, out->api_url,
-             out->home_id[0] ? out->home_id : "(learn from command)");
+             out->home_id[0] ? out->home_id : "(learn from command)",
+             (s_mqtt_cert && s_mqtt_key) ? "set" : "missing");
     return ESP_OK;
+}
+
+const char *gw_config_mqtt_client_cert(void)
+{
+    return s_mqtt_cert;
+}
+
+const char *gw_config_mqtt_client_key(void)
+{
+    return s_mqtt_key;
 }
 
 void gw_config_wipe_passwords(gw_config_t *cfg)
@@ -210,14 +258,6 @@ esp_err_t gw_config_sign(const char *msg, char out_hex[SM_HMAC_HEX_LEN + 1])
         return ESP_ERR_INVALID_STATE;
     }
     return sm_hmac_sha256_hex(s_secret, msg, out_hex);
-}
-
-esp_err_t gw_config_sign_ts(int64_t ts, char out_hex[SM_HMAC_HEX_LEN + 1])
-{
-    if (s_secret[0] == '\0') {
-        return ESP_ERR_INVALID_STATE;
-    }
-    return sm_device_sign(s_secret, s_gateway_id, ts, out_hex);
 }
 
 bool gw_config_verify(const char *msg, const char *sig_hex)

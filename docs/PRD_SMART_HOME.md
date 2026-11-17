@@ -401,11 +401,11 @@ FR-7.9, 7.14 (`plan_hash`; bản hiện thực chỉ có `request_hash` để x�
 
 | ID | Yêu cầu | Ưu tiên |
 |---|---|:---:|
-| FR-12.1 | Giữ nguyên HMAC-SHA256 2 lớp: Node ký → Gateway xác minh lại → Backend xác minh độc lập cả 2 chữ ký | M |
-| FR-12.2 | Khoá thiết bị sau 5 lần xác thực lỗi liên tiếp (đã có, giữ nguyên) | M |
+| FR-12.1 | Giữ HMAC-SHA256 2 lớp **độc lập**: Node ký (phủ nội dung số đo + bộ đếm chống phát lại, end-to-end tới Backend); Gateway ký lại (phủ cả chữ ký Node); Backend xác minh cả 2 chữ ký. Gateway **không giữ secret Node** — chặng Node → Gateway xác thực bằng mã hoá ESP-NOW (CCMP/LMK) + timestamp + bộ đếm, nên Gateway bị chiếm cũng không giả được số đo của Node. Chuỗi ký: [API](API_DESIGN.md) §3 | M |
+| FR-12.2 | Khoá thiết bị sau 5 lần xác thực lỗi liên tiếp — chỉ tính lỗi chữ ký quy được cho bên đã xác thực (gói qua MQTT, người gửi đã qua mTLS); lỗi qua HTTP chỉ ghi audit + giới hạn theo IP để kẻ lạ không khoá được thiết bị người khác (2026-11-16) | M |
 | FR-12.3 | **MQTT Gateway ↔ Backend dùng TLS** (tối thiểu server-auth). mTLS là mục tiêu S | M |
 | FR-12.4 | Tắt `allow_anonymous` trên broker, mỗi Gateway có credential riêng và ACL giới hạn theo topic của nhà mình | M |
-| FR-12.5 | **Vá rò rỉ secret:** không endpoint nào trả secret của sensor/gateway cho client. Gateway chỉ nhận secret của Node thuộc nhà mình | M |
+| FR-12.5 | **Vá rò rỉ secret:** không endpoint nào trả secret của sensor/gateway cho client (đã gỡ `GET /api/device/sensors`, 2026-11-16). Gateway không giữ secret Node — chữ ký Node chỉ backend kiểm; Gateway chỉ giữ secret camera và LMK của thiết bị đã ghép | M |
 | FR-12.6 | Xoá WiFi và secret viết cứng khỏi firmware, chuyển sang NVS được ghi lúc flash/provision | M |
 | FR-12.7 | Chống replay: payload thiết bị có timestamp/nonce, backend từ chối gói quá hạn hoặc trùng | S |
 | FR-12.8 | `gateway_secret` mã hoá khi lưu (encrypted-at-rest), không lưu plaintext trong DB | S |

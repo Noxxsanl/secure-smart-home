@@ -27,9 +27,9 @@ services:
       timeout: 5s
       retries: 5
 
-  # Broker MQTT: Gateway ↔ Backend — chỉ MQTT over TLS (port 8883). Node nói với Gateway qua ESP-NOW,
-  # không qua MQTT, nên chỉ cần 1 broker.
-  # Chạy infra/pki/gen_mqtt_certs.sh <IP/hostname broker> trước lần up đầu tiên.
+  # Broker MQTT: Gateway ↔ Backend — chỉ MQTT over TLS hai chiều (mTLS, port 8883) + ACL theo CN chứng chỉ client.
+  # Chạy infra/pki/gen_mqtt_certs.sh <IP/hostname broker> trước lần up đầu tiên; mỗi gateway cần cert client
+  # (infra/pki/gen_mqtt_client.sh <gateway_id>). Đổi acl/CRL → docker compose -f compose.prod.yaml restart mqtt-broker.
   mqtt-broker:
     image: eclipse-mosquitto:2
     container_name: iot-mosquitto
@@ -37,9 +37,11 @@ services:
     ports:
       - "8883:8883"
     volumes:
-      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/mosquitto/acl:/mosquitto/config/acl:ro
       # ca.key không mount vào container nào
       - ./infra/mosquitto/certs/ca.crt:/mosquitto/certs/ca.crt:ro
+      - ./infra/mosquitto/certs/ca.crl:/mosquitto/certs/ca.crl:ro
       - ./infra/mosquitto/certs/server.crt:/mosquitto/certs/server.crt:ro
       - ./infra/mosquitto/certs/server.key:/mosquitto/certs/server.key:ro
       - mosquitto_data:/mosquitto/data
@@ -54,6 +56,8 @@ services:
     container_name: iot-backend
     volumes:
       - ./infra/mosquitto/certs/ca.crt:/certs/mqtt-ca.crt:ro
+      # Chứng chỉ client MQTT của 4 kết nối backend (mTLS)
+      - ./infra/mosquitto/certs/clients:/certs/clients:ro
       # Firmware upload (FIRMWARE_STORAGE_DIR mặc định storage/firmware) — giữ qua mỗi lần tạo lại container.
       - firmware_data:/app/storage/firmware
       # Ảnh camera (SNAPSHOT_STORAGE_DIR mặc định storage/snapshots)
@@ -68,11 +72,15 @@ services:
       - DB_USER=${POSTGRES_APP_USER:-secure_smart_home_app}
       - DB_PASS=${POSTGRES_APP_PASSWORD:?Thiếu POSTGRES_APP_PASSWORD trong .env (xem .env.example)}
       - DB_NAME=${POSTGRES_DB:-secure_smart_home_iot}
-      # Backend kết nối broker MQTT qua TLS
+      # Backend kết nối broker MQTT qua mTLS
       - MQTT_HOST=mqtt-broker
       - MQTT_PORT=8883
       - MQTT_CA_FILE=/certs/mqtt-ca.crt
-      - FRONTEND_URL=http://localhost
+      - MQTT_CLIENT_CERT_DIR=/certs/clients
+      # Bắt buộc ở production: khoá AES-256-GCM mã hoá secret thiết bị khi lưu (FR-12.8). MẤT KHOÁ = đăng ký lại thiết bị.
+      - DEVICE_SECRET_KEY=${DEVICE_SECRET_KEY:?Thiếu DEVICE_SECRET_KEY trong .env (openssl rand -hex 32)}
+      - DEVICE_HMAC_V1=${DEVICE_HMAC_V1:-false}
+      - FRONTEND_URL=https://localhost
       # Backend chỉ nhận request qua nginx (không publish cổng) → tin đúng 1 hop X-Forwarded-For để
       # req.ip là IP thật của client; thiếu dòng này mọi client chung IP nginx và rate limit khoá cả hệ thống.
       - TRUST_PROXY=1
@@ -152,14 +160,15 @@ services:
     image: nginx:alpine
     container_name: iot-nginx
     ports:
+      # 80 chỉ chuyển hướng sang 443 (NFR-S1)
       - "80:80"
-      # HTTPS cho gateway (ảnh camera, fallback /api/device/data) — cert của infra/pki/gen_mqtt_certs.sh
+      # HTTPS cho web, app Mobile và gateway — web.crt của infra/pki/gen_mqtt_certs.sh
       - "443:443"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # Chỉ cert + khoá server (không mount ca.key)
-      - ./infra/mosquitto/certs/server.crt:/etc/nginx/certs/server.crt:ro
-      - ./infra/mosquitto/certs/server.key:/etc/nginx/certs/server.key:ro
+      # Chỉ cert + khoá web (không mount ca.key, không dùng chung khoá với broker)
+      - ./infra/mosquitto/certs/web.crt:/etc/nginx/certs/web.crt:ro
+      - ./infra/mosquitto/certs/web.key:/etc/nginx/certs/web.key:ro
     depends_on:
       - backend
       - frontend-admin

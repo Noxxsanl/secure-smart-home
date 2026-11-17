@@ -11,7 +11,7 @@
 static const char *TAG = "gw_time";
 
 #define TS_MIN INT64_C(1700000000)   /* 2023-11-14 */
-#define TS_MAX INT64_C(4102444799)   /* 2099-12-31 */
+#define TS_MAX INT64_C(2524607999)   /* 2049-12-31: NTP không xác thực, thu hẹp mốc để giờ giả không đẩy sàn ctr quá xa */
 
 typedef enum { SRC_NONE = 0, SRC_RTC, SRC_NTP } source_t;
 

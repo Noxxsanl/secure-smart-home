@@ -88,9 +88,15 @@ export default function GatewayRegistrationPage() {
       nodes: parsed.nodes.map((n) => newNodeRow(n.kind, n.deviceId, n.secret)),
     }));
     setFormError("");
+    const hasNode = parsed.nodes.some((n) => n.kind === "node");
     setImportNote({
       ok: true,
-      text: `Đã điền gateway và ${parsed.nodes.length} node/camera từ file (bỏ qua WiFi và các mục khác). Kiểm tra lại rồi bấm Đăng ký.`,
+      text:
+        `Đã điền gateway và ${parsed.nodes.length} node/camera từ file (bỏ qua WiFi và các mục khác). ` +
+        (hasNode
+          ? "Nhập Secret của từng Node từ NVS của chính Node (identity/device_secret) — gateway không giữ secret Node. "
+          : "") +
+        "Kiểm tra lại rồi bấm Đăng ký.",
     });
   }
 

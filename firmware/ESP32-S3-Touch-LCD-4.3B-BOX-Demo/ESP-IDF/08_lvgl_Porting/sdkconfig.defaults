@@ -66,6 +66,11 @@ CONFIG_ESP_WIFI_ESPNOW_MAX_ENCRYPT_NUM=8
 
 # TLS (MQTT 8883 + HTTPS) cấp phát trong PSRAM để chừa SRAM cho WiFi và bounce buffer của LCD RGB
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+# Kiểm hạn chứng chỉ (notBefore/notAfter) của Broker/Server theo giờ hệ thống: cert hết hạn bị từ chối. Giờ lấy từ RTC lúc
+# khởi động, SNTP khi có mạng; giờ chưa đúng thì bắt tay lỗi và esp-mqtt thử lại sau 5 s cho tới khi có giờ.
+# sdkconfig ĐÃ có sẵn trên máy thì defaults không đè: xoá sdkconfig (hoặc idf.py menuconfig) để áp dụng.
+CONFIG_MBEDTLS_HAVE_TIME=y
+CONFIG_MBEDTLS_HAVE_TIME_DATE=y
 
 # HTTP server Local AP: header của Camera có X-Device-Id, X-Timestamp, X-Signature (64 hex), X-Trigger, X-Command-Id
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024

@@ -4,13 +4,15 @@
  *   nodes/count       u8, số thiết bị (≤ GW_REGISTRY_MAX)
  *   nodes/<i>_kind    "node" | "camera"
  *   nodes/<i>_id      device_id trên backend (Node: device_type = sensor để backend nhận telemetry)
- *   nodes/<i>_secret  secret thiết bị — để kiểm HMAC lớp 1 (telemetry, ảnh) và ký yêu cầu mở luồng camera
+ *   nodes/<i>_secret  CHỈ camera: secret camera để kiểm ảnh /local/camera/snapshot và ký yêu cầu mở luồng /stream.
+ *                     Node KHÔNG có: Gateway không giữ secret Node — chữ ký telemetry v2 của Node chỉ backend kiểm
+ *                     (lớp 2 độc lập với Gateway); dòng cũ nếu còn thì bị bỏ qua (cảnh báo).
  *   nodes/<i>_mac     MAC Station của thiết bị, "AA:BB:CC:DD:EE:FF" — gói ESP-NOW chỉ nhận từ MAC này
- *   nodes/<i>_lmk     LMK ESP-NOW 16 byte = 32 hex, trùng pairing/session_key của thiết bị
+ *   nodes/<i>_lmk     LMK ESP-NOW 16 byte = 32 hex, trùng pairing/session_key của thiết bị (xác thực chặng ESP-NOW)
  *
- * Giai đoạn dev nạp tay (nvs_dev.csv); sau này ghi bởi luồng ghép nối ECDH (WiFi Provisioning §9) thay cho
- * GET /api/device/sensors (lỗ hổng đã biết — API_DESIGN §14 Q1). Secret và LMK chỉ nằm trong gw_registry.c:
- * tầng khác kiểm/ký qua gw_registry_verify/_sign, không đọc được giá trị (bất biến 1, 2).
+ * Giai đoạn dev nạp tay (nvs_dev.csv, sinh giá trị ngẫu nhiên: backend `npm run hw:rotate`); sau này ghi bởi luồng
+ * ghép nối ECDH (WiFi Provisioning §9). Secret và LMK chỉ nằm trong gw_registry.c: tầng khác kiểm/ký qua
+ * gw_registry_cam_upload_verify/cam_stream_sign, không đọc được giá trị (bất biến 1, 2).
  *
  * Bảng cố định sau gw_registry_load (đọc không cần khoá); trạng thái chạy (online, RSSI…) có mutex riêng.
  */
@@ -67,11 +69,17 @@ const gw_device_info_t *gw_registry_get(size_t idx);
 int gw_registry_find_mac(const uint8_t mac[6]);
 int gw_registry_find_id(const char *device_id);
 
-/** Kiểm HMAC thiết bị "<device_id>:<ts>" + cửa sổ ±300 s bằng secret của thiết bị idx. */
-sm_verify_result_t gw_registry_verify(size_t idx, int64_t ts, const char *sig_hex, int64_t now);
-
-/** Ký "<device_id>:<ts>" bằng secret thiết bị idx — VD Gateway mở GET /stream của camera (API_DESIGN §10.3). */
-esp_err_t gw_registry_sign(size_t idx, int64_t ts, char out_hex[SM_HMAC_HEX_LEN + 1]);
+/*
+ * Chữ ký Camera ↔ Gateway (v2, security_manager) bằng secret camera idx — secret không rời file này. Chuỗi ký:
+ *   ảnh Camera → Gateway:  "v2|cam-up|<cam_id>|<ts>|<ctr>|<trigger>|<command_id hoặc rỗng>"
+ *   luồng Gateway → Camera: "v2|cam-stream|<cam_id>|<ts>|<ctr>|<fs>|<q>" (fs, q đã chuẩn hoá)
+ * Chỉ camera (kind camera) mới có secret. Verify kiểm cửa sổ ±300 s rồi so thời gian hằng, KHÔNG kiểm ctr (bên gọi tự
+ * so ctr với last_ctr của camera).
+ */
+sm_verify_result_t gw_registry_cam_upload_verify(size_t idx, int64_t ts, int64_t ctr, const char *trigger,
+                                                 const char *command_id, const char *sig_hex, int64_t now);
+esp_err_t gw_registry_cam_stream_sign(size_t idx, int64_t ts, int64_t ctr, const char *fs, int q,
+                                      char out_hex[SM_HMAC_HEX_LEN + 1]);
 
 /** Chép LMK cho gw_espnow thêm peer. Bên gọi phải xoá bản sao (mbedtls_platform_zeroize). */
 bool gw_registry_copy_lmk(size_t idx, uint8_t out[GW_LMK_LEN]);

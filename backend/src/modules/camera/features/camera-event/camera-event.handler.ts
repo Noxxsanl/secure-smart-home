@@ -1,13 +1,15 @@
 // Xử lý một sự kiện camera (hiện chỉ "motion") do gateway publish:
 //   1. topic + payload hợp lệ; gateway tồn tại, device_type = 'gateway', active, home_id trên topic = gateway.home_id;
-//   2. ts trong cửa sổ ±300 s và HMAC-SHA256(secret gateway, "<camera_id>:motion:<ts>") khớp — verify qua
-//      getGatewaySigner (secret không rời module devices, invariant 1, 2);
+//   2. ts trong cửa sổ ±300 s và chữ ký khớp — v2 (`"v":2`): HMAC-SHA256(secret gateway,
+//      "v2|evt|<gw>|<camera_id>|<type>|<ts>|<snapshot_id hoặc rỗng>"); dạng cũ "<camera_id>:motion:<ts>" CHỈ khi
+//      DEVICE_HMAC_V1=true. Verify qua getGatewaySigner (secret không rời module devices, invariant 1, 2);
 //   3. camera tồn tại, category 'camera', thuộc gateway này và cùng nhà, status 'active';
 //   4. chống lặp 60 s / camera (RAM; khởi động lại coi như chưa báo) → thông báo CAMERA_MOTION cho thành viên nhà.
-// Message sai bị bỏ + log cảnh báo (không có chữ ký/secret). Không tăng fail_count: broker chưa có ACL nên không dùng
-// message giả để khoá gateway thật.
+// Message sai bị bỏ + log cảnh báo (không có chữ ký/secret). Không tăng fail_count: chữ ký sự kiện không có bộ đếm,
+// và broker (mTLS + ACL) đã chỉ cho chính gateway publish topic này.
+import { env } from "../../../../config/env";
 import { notifyHomeMembers } from "../../../notifications";
-import { getDeviceRowByUid, getGatewaySigner, isTimestampValid } from "../../../devices";
+import { cameraEventMessageV2, getDeviceRowByUid, getGatewaySigner, isTimestampValid } from "../../../devices";
 import { parseCameraEventPayload, parseCameraEventTopic } from "../../domain/camera-event";
 
 const MOTION_DEBOUNCE_MS = 60_000;
@@ -26,6 +28,11 @@ export async function handleCameraEvent(topic: string, raw: string): Promise<voi
     return;
   }
 
+  if (payload.version === 1 && !env.deviceHmacV1) {
+    console.warn(`[cameraEvent] ${gatewayUid} legacy v1 signature disabled – dropped`);
+    return;
+  }
+
   const gateway = await getDeviceRowByUid(gatewayUid);
   if (!gateway || gateway.device_type !== "gateway" || gateway.status !== "active") {
     console.warn(`[cameraEvent] ${gatewayUid} unknown, not a gateway or not active – dropped`);
@@ -40,7 +47,17 @@ export async function handleCameraEvent(topic: string, raw: string): Promise<voi
     return;
   }
   const signer = await getGatewaySigner(gateway.id);
-  if (!signer || !signer.verify(`${cameraUid}:motion:${payload.ts}`, payload.hmac)) {
+  const message =
+    payload.version === 2
+      ? cameraEventMessageV2({
+          gatewayId: gatewayUid,
+          cameraId: cameraUid,
+          type: payload.type,
+          ts: payload.ts,
+          snapshotId: payload.snapshotId,
+        })
+      : `${cameraUid}:motion:${payload.ts}`;
+  if (!signer || !signer.verify(message, payload.hmac)) {
     console.warn(`[cameraEvent] ${gatewayUid} bad signature – dropped`);
     return;
   }

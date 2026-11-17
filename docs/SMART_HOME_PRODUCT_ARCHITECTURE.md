@@ -51,7 +51,7 @@ Quyết định **"User không dùng Web Dashboard"** không phải là một th
 
 Prototype tổ chức toàn bộ DB, API và UI quanh **một registry thiết bị phẳng**: `devices` là bảng toàn cục không có `home_id`/`owner_id`, `/api/devices` trả mọi thiết bị cho bất kỳ ai đã đăng nhập, Dashboard chỉ phân tab Gateway/Sensor. Mô hình này sụp đổ khi thương mại hoá vì:
 
-1. **Không có ranh giới dữ liệu giữa các khách hàng (tenant isolation).** Khách hàng B thấy (hoặc backend không chặn) thiết bị của khách hàng A; `/api/device/sensors` còn trả secret của mọi sensor cho mọi gateway ([Bảo mật](SECURITY_ARCHITECTURE.md) §2, #1). Lỗ hổng xảy ra ngay khi có khách hàng thứ hai.
+1. **Không có ranh giới dữ liệu giữa các khách hàng (tenant isolation).** Khách hàng B thấy (hoặc backend không chặn) thiết bị của khách hàng A; `/api/device/sensors` từng trả secret của mọi sensor cho mọi gateway ([Bảo mật](SECURITY_ARCHITECTURE.md) §2, #1; endpoint đã gỡ 2026-11-16). Lỗ hổng xảy ra ngay khi có khách hàng thứ hai.
 2. **Sai đơn vị quản lý.** Khách hàng nghĩ theo "nhà tôi có phòng khách, phòng ngủ, phòng bếp", không theo "tôi có 1 gateway và 3 sensor". Tuya/Xiaomi/Aqara vẫn có hub vật lý nhưng giấu nó khỏi người dùng cuối.
 3. **Không mở rộng được loại thiết bị.** `device_type ENUM('sensor','gateway')` không có chỗ cho relay, camera, khoá cửa, cảm biến khói/gas.
 4. **Không vận hành được ở quy mô lớn.** Không lọc được theo `home_id` bằng index — mọi truy vấn dashboard, danh sách, tìm kiếm đều quét toàn hệ thống.
@@ -664,7 +664,7 @@ Giữ nguyên thiết kế đã sửa ở tài liệu trước (`user_id` thay v
 
 ### 9.3. Namespace `/api/device/**` (HMAC — firmware, không đổi nguyên lý)
 
-Giữ nguyên `/api/device/data`, nhưng `/api/device/sensors` (endpoint hiện đang rò rỉ toàn hệ thống) được thay bằng `/api/device/gateways/:gateway_uuid/whitelist` — **chỉ trả danh sách thiết bị thuộc đúng `home_id` của gateway đó**, vá triệt để lỗ hổng đã nêu ở `SECURITY_ARCHITECTURE.md` §2, #1.
+Giữ nguyên `/api/device/data`, nhưng `/api/device/sensors` (endpoint từng rò rỉ toàn hệ thống — đã gỡ 2026-11-16; Gateway không còn giữ secret Node) được thay bằng `/api/device/gateways/:gateway_uuid/whitelist` — **chỉ trả danh sách thiết bị thuộc đúng `home_id` của gateway đó**, vá triệt để lỗ hổng đã nêu ở `SECURITY_ARCHITECTURE.md` §2, #1.
 
 ---
 

@@ -2,15 +2,17 @@
  * gw_espnow — kênh ESP-NOW Gateway ↔ Node/Camera (API_DESIGN §11, IOT_NODE_NETWORK §5.1, §6).
  * Khung tin: ../common/espnow_proto (dùng chung với esp32_s3_firmware_node và esp32_cam).
  *
- * Gateway nhận: PING → trả TIME_SYNC · HEARTBEAT → cập nhật trạng thái, trả TIME_SYNC · TELEMETRY · EVENT · CMD_ACK
+ * Gateway nhận: PING → trả TIME_SYNC · HEARTBEAT → cập nhật trạng thái, trả TIME_SYNC · TELEMETRY_V2 · EVENT · CMD_ACK
  * Gateway gửi:  TIME_SYNC {ts} · CMD {command_id, action, ts}
  *
  * Xác thực từng gói, theo thứ tự:
- *   1. MAC nguồn phải có trong gw_registry (đã ghép nối); peer mã hoá bằng LMK riêng của thiết bị.
+ *   1. MAC nguồn phải có trong gw_registry (đã ghép nối); peer mã hoá bằng LMK riêng của thiết bị (ESP-NOW CCMP —
+ *      chỉ thiết bị giữ LMK mới tạo được khung hợp lệ: đây là lớp xác thực chặng Node → Gateway).
  *   2. Khung đúng phiên bản, ≤ 250 byte, body là JSON object; bỏ gói trùng `seq` (8 gói gần nhất mỗi thiết bị).
- *   3. TELEMETRY (chỉ từ node): sensor_id PHẢI trùng device_id gắn với MAC đó (node A không gửi thay node B),
- *      sn_hmac = HMAC-SHA256(secret node, "<sensor_id>:<sn_timestamp>") khớp, lệch giờ ≤ ±300 s, sn_timestamp
- *      không lùi so với gói trước — giống hệt lớp 1 ở backend (bất biến 5).
+ *   3. TELEMETRY_V2 (chỉ từ node): đủ sn_timestamp / sn_ctr / sn_hmac / data, "data" là khoá cuối (lấy nguyên văn),
+ *      lệch giờ ≤ ±300 s, sn_ctr TĂNG NGẶT so với gói trước. Gateway KHÔNG kiểm sn_hmac (không giữ secret Node — chữ
+ *      ký v2 phủ nội dung chỉ backend kiểm, độc lập với Gateway); chuyển nguyên văn data + chữ ký lên Server.
+ *      Khung TELEMETRY cũ (0x10, chữ ký v1) bị bỏ: node chạy firmware cũ phải nạp lại.
  *   4. CMD_ACK: command_id/status đúng định dạng; khớp lệnh đang chờ là việc của tầng application.
  *
  * Callback chạy trong task gw_espnow — phải nhanh (đẩy sang task khác, không chặn). Chuỗi chỉ hợp lệ trong lúc gọi.
@@ -29,9 +31,18 @@ extern "C" {
 
 #define GW_ESPNOW_POWER_NONE (-1)
 
+/** Trường của khung TELEMETRY_V2 đã kiểm (chữ ký Node chưa kiểm — backend kiểm). */
 typedef struct {
-    /** sensor_payload đã qua lớp 1, nguyên văn từ node (không NUL ở cuối, dùng len). */
-    void (*on_telemetry)(size_t idx, const char *payload, size_t len, void *ctx);
+    int64_t ts;          /* sn_timestamp */
+    int64_t ctr;         /* sn_ctr, tăng ngặt */
+    char sig[65];        /* sn_hmac nguyên văn (64 hex) */
+    uint16_t data_off;   /* object data nằm ở payload[data_off .. data_off + data_len) — đúng các byte Node đã ký */
+    uint16_t data_len;
+} gw_telemetry_meta_t;
+
+typedef struct {
+    /** body TELEMETRY_V2 nguyên văn từ node (không NUL ở cuối, dùng len) + các trường đã tách. */
+    void (*on_telemetry)(size_t idx, const char *payload, size_t len, const gw_telemetry_meta_t *meta, void *ctx);
     /** {event, ts} — VD camera "motion". */
     void (*on_event)(size_t idx, const char *event, int64_t ts, void *ctx);
     /** power: 0/1, hoặc GW_ESPNOW_POWER_NONE nếu node không gửi. */

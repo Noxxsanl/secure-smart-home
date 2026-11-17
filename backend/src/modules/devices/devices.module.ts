@@ -13,22 +13,19 @@ import { startGatewayHeartbeat } from "./features/gateway-heartbeat/gateway-hear
 import { getDeviceDetailController } from "./features/get-device-detail/get-device-detail.controller";
 import { getGatewayDetailController } from "./features/get-gateway-detail/get-gateway-detail.controller";
 import { listConsoleDevicesController } from "./features/list-console-devices/list-console-devices.controller";
-import { listGatewaySensorsController } from "./features/list-gateway-sensors/list-gateway-sensors.controller";
 import { listGatewaysController } from "./features/list-gateways/list-gateways.controller";
 import { startDeviceMonitor } from "./features/presence-monitor/presence-monitor.job";
 import { removeDeviceController } from "./features/remove-device/remove-device.controller";
 import { renameDeviceController } from "./features/rename-device/rename-device.controller";
+import { startSecretSealer } from "./features/seal-secrets/seal-secrets.job";
 import { setDeviceStatusController } from "./features/set-device-status/set-device-status.controller";
-import { startMqttTracker } from "./features/track-device-ip/track-device-ip.consumer";
 import { updateDeviceController } from "./features/update-device/update-device.controller";
 
+// Đã gỡ GET /api/device/sensors (trả secret node cho chữ ký gateway — lỗ hổng đã biết, API_DESIGN §14 Q1): Gateway không
+// còn giữ secret của Node (chữ ký Node chỉ backend kiểm). Đã gỡ worker đọc log $SYS để dò IP: broker không còn publish
+// log ra topic; IP gateway lấy từ gateway_ip (telemetry) và ip (heartbeat).
 export const devicesModule: AppModule = {
   name: "devices",
-  device: (router) => {
-    const sensors = Router();
-    sensors.get("/", listGatewaySensorsController); // gateway lấy danh sách sensor được phép (Gateway HMAC)
-    router.use("/sensors", sensors);
-  },
   dashboard: (router) => {
     const gateways = Router();
     gateways.get("/", listGatewaysController);
@@ -50,6 +47,6 @@ export const devicesModule: AppModule = {
   workers: [
     { name: "deviceMonitor", start: startDeviceMonitor }, // online/offline thiết bị, tick 15 s (features/presence-monitor)
     { name: "gatewayHeartbeat", start: startGatewayHeartbeat }, // home/+/gateway/+/heartbeat (Broker MQTT, TLS)
-    { name: "mqttTracker", start: startMqttTracker }, // theo dõi log $SYS broker để cập nhật IP thiết bị
+    { name: "secretSealer", start: startSecretSealer }, // mã hoá dần secret_key còn dạng rõ (FR-12.8, cần DEVICE_SECRET_KEY)
   ],
 };

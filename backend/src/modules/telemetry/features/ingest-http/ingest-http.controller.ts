@@ -1,23 +1,23 @@
 import type { Request, Response } from "express";
-import { getClientIp, type IngestHttpDevice } from "./ingest-http.dto";
+import { getClientIp, type AuthenticatedHttpTelemetry } from "./ingest-http.dto";
 import { ingestHttpData } from "./ingest-http.handler";
 
-// POST /api/device/data — chạy SAU middleware validate-device (gắn req.gateway / req.sensor đã xác thực HMAC).
+// POST /api/device/data — chạy SAU middleware validate-device (gắn req.telemetry: gateway/sensor đã xác thực + số đo).
 export async function ingestHttpController(req: Request, res: Response): Promise<void> {
-  const gateway = (req as any).gateway as IngestHttpDevice;
-  const sensor = (req as any).sensor as IngestHttpDevice;
-
-  const { gateway_ip, sensor_payload } = req.body ?? {};
-  const { data, sensor_ip } = sensor_payload ?? {};
-
+  const telemetry = (req as Request & { telemetry?: AuthenticatedHttpTelemetry }).telemetry;
+  if (!telemetry) {
+    res.status(401).json({ error: "GATEWAY_AUTH_FAIL" });
+    return;
+  }
   const result = await ingestHttpData({
-    gateway,
-    sensor,
+    gateway: telemetry.gateway,
+    sensor: telemetry.sensor,
     ip: getClientIp(req),
     userAgent: req.headers["user-agent"] ?? null,
-    gatewayIp: gateway_ip,
-    sensorIp: sensor_ip,
-    data,
+    gatewayIp: telemetry.gatewayIp,
+    sensorIp: telemetry.sensorIp,
+    data: telemetry.data,
+    dataJson: telemetry.dataJson,
   });
   res.status(result.status).json(result.body);
 }

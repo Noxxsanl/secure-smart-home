@@ -126,7 +126,10 @@ export function parseNvsCsv(text: string): NvsImport | string {
   for (let i = 0; i < count; i++) {
     const kind = nodesNs?.get(`${i}_kind`);
     if (kind !== "node" && kind !== "camera") return `nodes/${i}_kind trong file phải là node hoặc camera.`;
-    nodes.push({ kind, deviceId: nodesNs?.get(`${i}_id`) ?? "", secret: nodesNs?.get(`${i}_secret`) ?? "" });
+    // Secret của Node KHÔNG nằm trong NVS gateway (chữ ký telemetry của Node chỉ server kiểm) — người dùng nhập từ NVS
+    // của chính Node. Camera thì gateway giữ secret để xác thực ảnh/luồng nội bộ.
+    const secret = kind === "camera" ? nodesNs?.get(`${i}_secret`) ?? "" : "";
+    nodes.push({ kind, deviceId: nodesNs?.get(`${i}_id`) ?? "", secret });
   }
   return { gatewayId: identity.get("device_uuid") ?? "", gatewaySecret: identity.get("device_secret") ?? "", nodes };
 }

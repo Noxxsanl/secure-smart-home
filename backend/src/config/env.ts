@@ -112,6 +112,28 @@ function readFrontendOrigins(): readonly string[] {
     .filter((origin) => origin.length > 0 && origin !== "*");
 }
 
+/**
+ * DEVICE_SECRET_KEY = 64 ký tự hex (32 byte): khoá AES-256-GCM mã hoá cột devices.secret_key (FR-12.8,
+ * modules/devices/domain/secret-box.ts). Production bắt buộc; dev thiếu thì chạy tiếp với secret dạng rõ (cảnh báo).
+ * MẤT KHOÁ = mọi thiết bị phải đăng ký lại (secret đã mã hoá không mở được). Không bao giờ log giá trị.
+ */
+function readDeviceSecretKey(): Buffer | null {
+  const raw = process.env.DEVICE_SECRET_KEY?.trim();
+  if (!raw) {
+    if (isProduction) {
+      console.error("[startup] DEVICE_SECRET_KEY is required in production (64 hex chars, see .env.example)");
+      process.exit(1);
+    }
+    console.warn("[startup] DEVICE_SECRET_KEY not set – device secrets stay in plaintext (FR-12.8). Generate: openssl rand -hex 32");
+    return null;
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
+    console.error("[startup] DEVICE_SECRET_KEY must be exactly 64 hex characters (32 bytes)");
+    process.exit(1);
+  }
+  return Buffer.from(raw, "hex");
+}
+
 function readTrustProxy(): boolean | number | string {
   const raw = process.env.TRUST_PROXY?.trim();
   if (!raw || raw.toLowerCase() === "false" || raw === "0") return false;
@@ -166,6 +188,13 @@ export interface AppEnv {
   serviceApiToken: string | null;
   /** Nguồn JSON giá LLM cho nút "Đồng bộ giá" (mặc định kho giá công khai của LiteLLM). */
   aiPricingSourceUrl: string;
+  /**
+   * Nhận telemetry chữ ký v1 ("<id>:<ts>", không ký nội dung, không chống phát lại) — chỉ bật tạm khi phần cứng chưa nạp
+   * firmware v2 (DEVICE_HMAC_V1=true). Mặc định false: gói v1 bị từ chối 401 PROTOCOL_V1_DISABLED.
+   */
+  deviceHmacV1: boolean;
+  /** Khoá AES-256-GCM (32 byte) mã hoá devices.secret_key; null = chưa cấu hình (dev) → lưu bản rõ. */
+  deviceSecretKey: Buffer | null;
 }
 
 export const env: Readonly<AppEnv> = Object.freeze({
@@ -186,4 +215,6 @@ export const env: Readonly<AppEnv> = Object.freeze({
   cameraSnapshotRetentionDays: readInt("CAMERA_SNAPSHOT_RETENTION_DAYS", 7, 1, 3650),
   serviceApiToken: readServiceToken(),
   aiPricingSourceUrl: readPricingSource(),
+  deviceHmacV1: readBool("DEVICE_HMAC_V1", false),
+  deviceSecretKey: readDeviceSecretKey(),
 });

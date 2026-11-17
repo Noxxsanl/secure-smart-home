@@ -26,7 +26,11 @@ typedef enum {
     ESPNOW_MSG_PING = 0x01,           /* Node → GW  {}                                   */
     ESPNOW_MSG_TIME_SYNC = 0x02,      /* GW → Node  {ts}                                 */
     ESPNOW_MSG_HEARTBEAT = 0x03,      /* Node → GW  {uptime, rssi, fw_version, battery?} */
-    ESPNOW_MSG_TELEMETRY = 0x10,      /* Node → GW  sensor_payload                       */
+    ESPNOW_MSG_TELEMETRY = 0x10,      /* Node → GW  sensor_payload chữ ký v1 — Gateway bỏ (firmware cũ) */
+    /* Node → GW  {"sn_timestamp":T,"sn_ctr":C,"sn_hmac":"<64 hex>","data":{...}} — chữ ký v2 (sm_sensor_sign_v2) phủ đúng
+     * các byte của object "data", nên "data" PHẢI là khoá cuối và không có khoảng trắng: Gateway lấy nguyên văn đoạn
+     * giữa `"data":` và `}` cuối cùng, không parse lại. Không có sensor_id: Gateway biết node theo MAC (đã ghép). */
+    ESPNOW_MSG_TELEMETRY_V2 = 0x12,
     ESPNOW_MSG_EVENT = 0x11,          /* Node → GW  {event, ts}                          */
     ESPNOW_MSG_CMD = 0x20,            /* GW → Node  {command_id, action, params?}        */
     ESPNOW_MSG_CMD_ACK = 0x21,        /* Node → GW  {command_id, status, power?}         */

@@ -15,6 +15,7 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 #include "security_manager.h"
+#include "sm_counter.h"
 
 static const char *TAG = "cam_snapshot";
 
@@ -44,10 +45,19 @@ static esp_err_t upload(const uint8_t *jpeg, size_t len, const snapshot_req_t *r
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* v2|cam-up|<cam_id>|<ts>|<ctr>|<trigger>|<command_id hoặc rỗng> — ctr tăng ngặt, Gateway chặn phát lại. */
+    const char *trigger = req->trigger == CAM_TRIGGER_MOTION ? "motion" : "request";
+    int64_t ctr;
+    esp_err_t err = sm_counter_next(ts, &ctr);
+    if (err != ESP_OK) {
+        return err;
+    }
     char ts_str[24];
+    char ctr_str[24];
     char sig[SM_HMAC_HEX_LEN + 1];
     snprintf(ts_str, sizeof(ts_str), "%" PRId64, ts);
-    esp_err_t err = sm_device_sign(s_cfg->device_secret, s_cfg->device_id, ts, sig);
+    snprintf(ctr_str, sizeof(ctr_str), "%" PRId64, ctr);
+    err = sm_cam_upload_sign(s_cfg->device_secret, s_cfg->device_id, ts, ctr, trigger, req->command_id, sig);
     if (err != ESP_OK) {
         return err;
     }
@@ -67,8 +77,9 @@ static esp_err_t upload(const uint8_t *jpeg, size_t len, const snapshot_req_t *r
     esp_http_client_set_header(client, "Content-Type", "image/jpeg");
     esp_http_client_set_header(client, "X-Device-Id", s_cfg->device_id);
     esp_http_client_set_header(client, "X-Timestamp", ts_str);
+    esp_http_client_set_header(client, "X-Counter", ctr_str);
     esp_http_client_set_header(client, "X-Signature", sig);
-    esp_http_client_set_header(client, "X-Trigger", req->trigger == CAM_TRIGGER_MOTION ? "motion" : "request");
+    esp_http_client_set_header(client, "X-Trigger", trigger);
     if (req->command_id[0] != '\0') {
         esp_http_client_set_header(client, "X-Command-Id", req->command_id);
     }

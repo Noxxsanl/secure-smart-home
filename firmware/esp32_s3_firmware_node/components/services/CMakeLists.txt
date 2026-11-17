@@ -2,7 +2,7 @@
 #   node_config     identity + ghép nối đọc từ NVS
 #   node_time       đồng hồ lấy từ Gateway (TIME_SYNC), node không có NTP
 #   node_link       ESP-NOW tới Gateway: dò kênh, peer mã hoá, heartbeat, lệnh + ack, chống trùng
-#   node_telemetry  dựng sensor_payload có HMAC lớp 1 (khớp backend)
+#   node_telemetry  dựng khung TELEMETRY_V2: chữ ký v2 phủ data + ctr (khớp backend, Gateway không giữ secret Node)
 #   node_ir_store   lưu mã IR đã học vào NVS
 #   node_state_store trạng thái tải giữ qua mất điện (relay đèn/quạt, vị trí + hành trình rèm) trong NVS
 #

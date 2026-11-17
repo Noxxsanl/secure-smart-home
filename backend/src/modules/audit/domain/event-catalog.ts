@@ -44,10 +44,12 @@ export const EVENT_CATALOG_ENTRIES: ReadonlyArray<readonly [string, LogCategory,
   ["SENSOR_AUTH_FAIL", "security", "warning"],
   ["REPLAY_ATTACK", "security", "warning"],
   ["PRIVILEGE_ESCALATION", "security", "warning"],
+  ["SENSOR_GATEWAY_MISMATCH", "security", "warning"], // thêm: gói của node không thuộc gateway đã ký (telemetry v2)
   ["CLAIM_RATE_LIMITED", "security", "warning"],
   ["REFRESH_TOKEN_REUSED", "security", "critical"],
   ["LOGIN_WRONG_CHANNEL", "security", "warning"],
   ["DEVICE_BLOCKED", "security", "critical"],
+  ["GATEWAY_DUPLICATE_SUSPECTED", "security", "warning"], // thêm: NGHI 2 board dùng chung danh tính Gateway (heartbeat, devices/domain/gateway-clone-detector.ts); warning vì có thể báo giả (khởi động lại 2 lần / 10 phút, NVS xoá mà chưa hw:register)
   // mqtt
   ["DATA_RECV", "mqtt", "info"],
   ["MQTT_CONNECTED", "mqtt", "info"],

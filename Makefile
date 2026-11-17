@@ -1,6 +1,6 @@
 # TẠM — lối tắt cho các lệnh hay dùng. Cần GNU make (Linux/macOS/WSL; Windows: Git Bash có cài make).
 # Ví dụ: make dev · make certs IP=192.168.1.100 · make test-security ARGS="http://localhost:5000 <GW_ID> ..."
-.PHONY: dev prod certs migrate test-security agent-venv agent-test
+.PHONY: dev prod certs gateway-cert revoke-gateway test-mqtt-acl migrate test-security agent-venv agent-test
 
 # venv do py launcher (Windows) tạo có .venv/Scripts, Linux/macOS có .venv/bin — chọn lúc chạy.
 AGENT_BIN = { [ -d .venv/Scripts ] && B=.venv/Scripts || B=.venv/bin; }
@@ -11,8 +11,17 @@ dev: ## Stack dev (compose.yaml + compose.override.yaml); -V làm mới anonymou
 prod: ## Stack prod
 	docker compose -f compose.prod.yaml up -d --build
 
-certs: ## Sinh CA + cert Broker MQTT (IP LAN máy chạy broker)
+certs: ## Sinh CA + cert Broker MQTT, nginx HTTPS, client MQTT của backend, CRL (IP LAN máy chạy broker)
 	bash infra/pki/gen_mqtt_certs.sh $(IP)
+
+gateway-cert: ## Cấp chứng chỉ client MQTT (mTLS) cho gateway: make gateway-cert GW=<gateway_id>
+	bash infra/pki/gen_mqtt_client.sh $(GW)
+
+revoke-gateway: ## Thu hồi chứng chỉ gateway rồi khởi động lại broker: make revoke-gateway GW=<gateway_id>
+	bash infra/pki/gen_mqtt_client.sh --revoke $(GW) && docker compose restart mqtt-broker
+
+test-mqtt-acl: ## Kiểm mTLS + ACL của broker đang chạy: make test-mqtt-acl GW=<gateway_id>
+	bash tests/security/check_mqtt_acl.sh $(GW)
 
 migrate: ## Chưa có lệnh riêng
 	@echo "Backend tự chạy migration khi khởi động (backend/src/infrastructure/database/migrate.ts) — chưa có service migrate riêng."

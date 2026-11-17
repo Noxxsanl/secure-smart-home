@@ -191,7 +191,7 @@ esp_err_t node_link_send_telemetry(const char *payload, size_t len)
     if (!atomic_load(&s_online)) {
         return ESP_ERR_INVALID_STATE;
     }
-    return send_frame(ESPNOW_MSG_TELEMETRY, payload, len);
+    return send_frame(ESPNOW_MSG_TELEMETRY_V2, payload, len);
 }
 
 esp_err_t node_link_send_event(const char *event, int64_t ts)

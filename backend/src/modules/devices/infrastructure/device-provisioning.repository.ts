@@ -4,6 +4,7 @@
 import { placeholders, queryOne, queryRows, runSql, type Queryable } from "../../../infrastructure/database/db";
 import type { Appliance } from "../domain/device.types";
 import type { DeviceCategory } from "../../../shared/types/domain";
+import { sealForStorage } from "./device-secret.repository";
 
 export interface NewDeviceRecord {
   uid: string;
@@ -36,7 +37,7 @@ export async function insertDevice(db: Queryable, device: NewDeviceRecord): Prom
       device.uid,
       device.name,
       device.deviceType,
-      device.secret,
+      sealForStorage(device.uid, device.secret),
       device.location,
       device.createdBy,
       device.homeId,
@@ -141,6 +142,7 @@ export async function upsertHardwareDevice(
        gateway_device_id = EXCLUDED.gateway_device_id,
        status = 'active',
        fail_count = 0,
+       last_ctr = NULL,
        is_simulated = FALSE
      WHERE devices.home_id IS NULL OR devices.home_id = EXCLUDED.home_id
      RETURNING id, device_name`,
@@ -148,7 +150,7 @@ export async function upsertHardwareDevice(
       device.uid,
       device.name,
       device.deviceType,
-      device.secret,
+      sealForStorage(device.uid, device.secret),
       device.location,
       device.createdBy,
       device.homeId,
@@ -205,7 +207,7 @@ export async function upsertNodeAppliance(
     [
       device.uid,
       device.name,
-      device.secret,
+      sealForStorage(device.uid, device.secret),
       device.location,
       device.createdBy,
       device.homeId,

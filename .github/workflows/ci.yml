@@ -64,11 +64,13 @@ jobs:
             -e '(^|/)config_(1|2|gw)\.h$' \
             -e '(^|/)mqtt_ca_cert\.h$' \
             -e '(^|/)nvs_[^/]*\.(csv|bin)$' \
+            -e '(^|/)nvs_[^/]*\.csv\.' \
+            -e '(^|/)certs/mqtt_client\.(crt|key)$' \
             -e '(^|/)\.env$' \
             -e '(^|/)\.env(\..+)?\.local$' \
             -e '^infra/mosquitto/certs/' \
             -e '\.(key|pem|p12|pfx)$' \
-            | grep -v '^infra/mosquitto/certs/\.gitkeep$' || true)
+            | grep -vE -e '^infra/mosquitto/certs/\.gitkeep$' -e '(^|/)nvs_[^/]*\.csv\.example$' || true)
           if [ -n "$bad" ]; then
             echo "::error::File bí mật bị commit — xoá khỏi git (git rm --cached) và đổi secret:"
             echo "$bad"
@@ -89,7 +91,7 @@ jobs:
           fi
 
   backend:
-    name: Backend (tsc + kiến trúc)
+    name: Backend (tsc + kiến trúc + test)
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -107,6 +109,8 @@ jobs:
       - run: npx tsc --noEmit
       # Quy tắc module → feature + chủ sở hữu bảng (backend/tools/check-architecture.mjs, giải thích ở src/modules/README.md)
       - run: npm run check:arch
+      # Test node:test (chữ ký telemetry v2, mã hoá secret, parse envelope) — không cần DB/broker
+      - run: npm test
 
   # Bắt lỗi cú pháp/thứ tự FK của schema PostgreSQL sớm (backend chỉ chạy tsc, không chạm DB).
   # PostgreSQL ở đây là service container dùng-một-lần; mật khẩu chỉ có tác dụng trong job này.

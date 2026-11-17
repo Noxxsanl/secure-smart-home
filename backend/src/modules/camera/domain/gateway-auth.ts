@@ -1,6 +1,7 @@
 // Xác thực gateway DÙNG CHUNG cho mọi đường camera do gateway gọi (ảnh chụp HTTP và uplink WebSocket camera live) —
-// tinh thần bất biến 4: một logic xác thực, không chép vào từng đường. Cùng đường với telemetry: audit
-// authFailureEventType (ts quá hạn = REPLAY_ATTACK), registerAuthFailure → đủ 5 lần sai thì gateway bị khoá.
+// tinh thần bất biến 4: một logic xác thực, không chép vào từng đường. Lỗi → audit authFailureEventType (ts quá hạn =
+// REPLAY_ATTACK) như telemetry, NHƯNG không đếm fail_count/không khoá gateway (xem failGatewayAuth: chống khoá-DoS);
+// giới hạn lỗi theo IP (20 / 15 phút → 429) đặt ở rate-limit.ts (snapshot) và uplink-fail-limiter.ts (WebSocket).
 //
 // Thứ tự kiểm "rẻ" (precheckGatewayCamera), chưa cần chữ ký:
 //   gateway tồn tại (401 NOT_FOUND) → ts trong ±300 s (401 TIMESTAMP_EXPIRED) → device_type gateway (403) + active (403)
@@ -11,13 +12,19 @@
 import type { RequestMeta } from "../../../core/http/request-meta";
 import { HttpError } from "../../../shared/errors/http-error";
 import { log } from "../../audit";
-import { getDeviceRowByUid, getGatewaySigner, isTimestampValid, registerAuthFailure } from "../../devices";
+import { getDeviceRowByUid, getGatewaySigner, isTimestampValid } from "../../devices";
 import type { DeviceRow } from "../../devices";
 import { authFailureEventType } from "../../telemetry";
 
 export type GatewayAuthFailureReason = "NOT_FOUND" | "TIMESTAMP_EXPIRED" | "HMAC_MISMATCH";
 
-/** Audit + đếm lần sai + 401 GATEWAY_AUTH_FAIL (luôn ném). gatewayDbId null khi gateway không tồn tại. */
+/**
+ * Audit + 401 GATEWAY_AUTH_FAIL (luôn ném). gatewayDbId null khi gateway không tồn tại.
+ * KHÔNG tăng fail_count / không khoá gateway: hai đường camera này không có danh tính transport (ai biết gateway_id cũng
+ * gọi được), nên nếu mỗi lần sai đều đếm thì 5 request rác (ts cũ, chữ ký bừa) sẽ khoá oan gateway thật của nhà khác
+ * (DoS). Chống dò/spam thay bằng giới hạn lỗi theo IP: snapshot — core/http/rate-limit.ts (cameraSnapshotFailLimiter),
+ * uplink WebSocket — domain/uplink-fail-limiter.ts. Mỗi lỗi vẫn ghi audit để Log Center thấy dấu vết.
+ */
 export async function failGatewayAuth(
   meta: RequestMeta,
   source: string,
@@ -30,15 +37,6 @@ export async function failGatewayAuth(
     reason,
     source,
   });
-  if (gatewayDbId !== null) {
-    const failure = await registerAuthFailure(gatewayDbId);
-    if (failure.blocked) {
-      await log("DEVICE_BLOCKED", gatewayDbId, meta.ip, meta.userAgent, {
-        gateway_id: gatewayUid,
-        fail_count: failure.failCount,
-      });
-    }
-  }
   throw new HttpError(401, "GATEWAY_AUTH_FAIL", undefined, { reason });
 }
 

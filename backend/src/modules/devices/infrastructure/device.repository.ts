@@ -15,9 +15,19 @@ export async function listDeviceLastSeen(db: Queryable = pool): Promise<{ id: nu
   return queryRows<{ id: number; last_seen: Date | null }>("SELECT id, last_seen FROM devices", [], db);
 }
 
-/** Cập nhật IP thiết bị theo UID (devices.device_id) khi broker báo client mới kết nối. */
-export async function updateDeviceIpByUid(deviceUid: string, ip: string, db: Queryable = pool): Promise<void> {
-  await runSql("UPDATE devices SET last_ip = ? WHERE device_id = ?", [ip, deviceUid], db);
+/**
+ * Chống phát lại v2 (API_DESIGN §3): nhận ctr của gói chỉ khi lớn hơn giá trị đã thấy — một câu UPDATE nguyên
+ * tử nên 2 gói trùng tới cùng lúc (MQTT + HTTP dự phòng) chỉ một gói thắng. true = gói mới; false = gói cũ/trùng.
+ * Gọi SAU khi chữ ký đã hợp lệ (kẻ không có secret không đẩy được last_ctr). `deviceDbId` là dòng của BÊN KÝ ctr:
+ * node với telemetry, gateway với heartbeat (hai dòng khác nhau nên hai dòng ctr không đụng nhau).
+ */
+export async function claimDeviceCounter(deviceDbId: number, ctr: number, db: Queryable = pool): Promise<boolean> {
+  const result = await runSql(
+    "UPDATE devices SET last_ctr = ? WHERE id = ? AND (last_ctr IS NULL OR last_ctr < ?)",
+    [ctr, deviceDbId, ctr],
+    db
+  );
+  return result.affectedRows === 1;
 }
 
 export interface DeviceTypeStatus {

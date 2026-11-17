@@ -3,14 +3,17 @@
  * IOT_NODE_NETWORK §5.2, §6.2):
  *
  *   POST /local/camera/snapshot
- *     X-Device-Id, X-Timestamp, X-Signature = HMAC-SHA256(secret camera, "<device_id>:<unix_ts>")
+ *     X-Device-Id, X-Timestamp, X-Counter, X-Signature =
+ *       HMAC-SHA256(secret camera, "v2|cam-up|<device_id>|<ts>|<ctr>|<trigger>|<command_id hoặc rỗng>")
  *     X-Trigger: motion | request,  X-Command-Id (khi chụp theo lệnh),  Content-Type: image/jpeg, ≤ 200 KB
- *   201 nhận · 400 thiếu/sai header · 401 sai HMAC/thiết bị lạ/lệch giờ · 403 không đến từ Local AP
- *   411 thiếu độ dài · 413 quá lớn · 415 không phải JPEG · 503 Gateway chưa có giờ / đang bận
+ *   201 nhận · 400 thiếu/sai header · 401 AUTH_FAIL (sai chữ ký/thiết bị lạ/lệch giờ/ctr cũ — không phân biệt lý do)
+ *   403 không đến từ Local AP · 411 thiếu độ dài · 413 quá lớn · 415 không phải JPEG
+ *   503 Gateway chưa có giờ / đang bận
  *
- * Kiểm theo thứ tự: interface (Local AP) → header → thiết bị là camera đã ghép → HMAC + cửa sổ ±300 s → kích thước
- * → mới đọc thân (không tốn RAM cho yêu cầu chưa xác thực). Nội dung ảnh không được ký (cùng giới hạn với
- * telemetry): toàn vẹn dựa vào WPA2 của Local AP.
+ * Kiểm theo thứ tự: interface (Local AP) → header → thiết bị là camera đã ghép → đồng hồ Gateway → cửa sổ ±300 s →
+ * chữ ký (thời gian hằng) → ctr > last_ctr của camera (RAM; sau khởi động sàn = (now − 300) * 1000) → kích thước
+ * → mới đọc thân (không tốn RAM cho yêu cầu chưa xác thực). last_ctr chỉ cập nhật sau khi nhận đủ thân hợp lệ.
+ * Nội dung ảnh không được băm vào chữ ký: toàn vẹn dựa vào WPA2 của Local AP.
  */
 #pragma once
 

@@ -287,8 +287,7 @@ static void send_state(int64_t now_us, bool changed)
             ESP_LOGI(CMD_TAG, "[4] state -> gateway: %s", text);
         }
     } else if (err == ESP_ERR_INVALID_SIZE) {
-        ESP_LOGE(TAG, "telemetry exceeds one ESP-NOW frame: device_id has %u chars, keep it <= 30 (README, Hợp đồng)",
-                 (unsigned)strlen(s_cfg.device_id));
+        ESP_LOGE(TAG, "telemetry exceeds one ESP-NOW frame (%u fields) — send fewer/shorter fields", (unsigned)n);
         s_next_send_us = now_us + TELEMETRY_INTERVAL_US;
     } else {
         /* Không ack tầng MAC: thử lại sau 1 s; node_link tự dò lại kênh sau vài lần lỗi liên tiếp. */

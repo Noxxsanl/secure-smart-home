@@ -1,5 +1,5 @@
-// Log request (morgan "dev") KHÔNG kèm query string: /api/device/sensors nhận gw_hmac qua query và token/mã
-// có thể nằm trong URL của client lạ — invariant 2 (không log token/secret). Format "dev" dùng token :url.
+// Log request (morgan "dev") KHÔNG kèm query string: token/mã/chữ ký có thể nằm trong URL của client lạ — invariant 2
+// (không log token/secret). Format "dev" dùng token :url.
 import type { Request, RequestHandler } from "express";
 import morgan from "morgan";
 

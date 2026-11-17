@@ -68,26 +68,59 @@ static bool get_hdr(httpd_req_t *req, const char *name, char *buf, size_t cap)
     return httpd_req_get_hdr_value_str(req, name, buf, cap) == ESP_OK && buf[0] != '\0';
 }
 
-static bool authorized(httpd_req_t *req)
+/* ctr chỉ gồm chữ số, tối đa 16 ký tự (2^53 − 1 có 16 chữ số) — chặn tràn khi parse. */
+static bool parse_ctr(const char *s, int64_t *out)
+{
+    size_t n = strnlen(s, 17);
+    if (n == 0 || n > 16) {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (!isdigit((unsigned char)s[i])) {
+            return false;
+        }
+    }
+    *out = strtoll(s, NULL, 10);
+    return *out > 0;
+}
+
+/* Bộ đếm lớn nhất đã nhận từ Gateway (RAM). 0 sau khởi động: sàn = (now − 300) * 1000, như cửa sổ ts. */
+static int64_t s_last_ctr;
+
+/*
+ * Chuỗi ký (khớp Gateway gw_camera_live): "v2|cam-stream|<cam_id>|<ts>|<ctr>|<fs>|<q>" với fs, q ĐÃ CHUẨN HOÁ.
+ * Thứ tự kiểm: X-Device-Id == id của chính camera → |now − ts| ≤ 300 → chữ ký (thời gian hằng) → ctr > last.
+ * ctr chỉ ghi nhận sau khi chữ ký đúng.
+ */
+static bool authorized(httpd_req_t *req, const char *fs, int q)
 {
     char dev[CAM_DEVICE_ID_MAX + 1];
     char ts_str[16];
+    char ctr_str[20];
     char sig[SM_HMAC_HEX_LEN + 1];
-    int64_t ts, now;
+    int64_t ts, ctr, now;
 
     if (!get_hdr(req, "X-Device-Id", dev, sizeof(dev)) || !get_hdr(req, "X-Timestamp", ts_str, sizeof(ts_str)) ||
-        !get_hdr(req, "X-Signature", sig, sizeof(sig))) {
+        !get_hdr(req, "X-Counter", ctr_str, sizeof(ctr_str)) || !get_hdr(req, "X-Signature", sig, sizeof(sig))) {
         return false;
     }
-    if (strcmp(dev, s_cfg->device_id) != 0 || !parse_ts(ts_str, &ts) || !cam_time_now(&now)) {
+    if (strcmp(dev, s_cfg->device_id) != 0 || !parse_ts(ts_str, &ts) || !parse_ctr(ctr_str, &ctr) ||
+        !cam_time_now(&now)) {
         return false;
     }
-    sm_verify_result_t r = sm_device_verify(s_cfg->device_secret, s_cfg->device_id, ts, sig, now);
+    sm_verify_result_t r = sm_cam_stream_verify(s_cfg->device_secret, s_cfg->device_id, ts, ctr, fs, q, sig, now);
     if (r != SM_VERIFY_OK) {
         /* Chỉ log loại lỗi, không log chữ ký. */
         ESP_LOGW(TAG, "stream auth failed (%s)", r == SM_VERIFY_EXPIRED ? "timestamp expired" : "bad signature");
         return false;
     }
+    int64_t floor = s_last_ctr > 0 ? s_last_ctr : (now - SM_TIMESTAMP_WINDOW_S) * 1000;
+    /* Chặn ctr quá xa tương lai (như backend: ≤ now + 1 ngày) và vượt 2^53 − 1, kẻo last_ctr bị đẩy lên chặn request thật. */
+    if (ctr <= floor || ctr > INT64_C(9007199254740991) || ctr > (now + 86400) * 1000) {
+        ESP_LOGW(TAG, "stream auth failed (counter replay or too far ahead)");
+        return false;
+    }
+    s_last_ctr = ctr;
     return true;
 }
 
@@ -230,13 +263,14 @@ static esp_err_t stream_handler(httpd_req_t *req)
     if (!cam_time_is_synced()) {
         return reply(req, "503 Service Unavailable", "clock not synced");
     }
-    if (!authorized(req)) {
-        return reply(req, "401 Unauthorized", "unauthorized");
-    }
+    /* Chữ ký phủ fs/q đã chuẩn hoá nên phải parse query trước khi kiểm (chưa làm gì với giá trị này). */
     framesize_t size;
     int quality;
     if (!parse_params(req, &size, &quality)) {
         return reply(req, "400 Bad Request", "fs=vga|qvga, q=10..30");
+    }
+    if (!authorized(req, size == FRAMESIZE_QVGA ? "qvga" : "vga", quality)) {
+        return reply(req, "401 Unauthorized", "unauthorized");
     }
 
     bool expected = false;

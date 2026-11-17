@@ -3,6 +3,7 @@
 import type { Express, Request } from "express";
 import rateLimit from "express-rate-limit";
 import { sha256Hex } from "../../shared/crypto";
+import { deviceDataFailKey, requestWasNotCountedFailure, snapshotFailKey } from "./fail-limiter-key";
 
 function makeLimiter(
   windowMs: number,
@@ -72,9 +73,42 @@ export function applyRateLimits(app: Express): void {
     message: { error: "TOO_MANY_REQUESTS", detail: "Too many failed service requests" },
   });
 
+  // Đường telemetry HTTP dự phòng: ai cũng POST được (không có danh tính transport) nên lỗi chữ ký ở đây KHÔNG khoá
+  // thiết bị (chống DoS "5 gói sai là khoá gateway nhà khác", telemetry/domain/ingest-auth.ts). Thay vào đó chặn theo
+  // `<ip>|<gateway_id>` (gateway_id trong body — express.json đã chạy trước limiter; core/http/fail-limiter-key.ts giải
+  // thích vì sao không chỉ theo IP): 20 gói bị từ chối xác thực (400/401/403/404) / 15 phút → 429. Gói hợp lệ và các lỗi
+  // không phải xác thực (409/413/415/5xx) không bị tính.
+  const deviceDataFailLimiter = rateLimit({
+    windowMs: LOGIN_WINDOW,
+    max: 20,
+    keyGenerator: deviceDataFailKey,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => requestWasNotCountedFailure(res.statusCode),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", detail: "Too many rejected device requests" },
+  });
+
+  // Ảnh camera từ gateway: lỗi xác thực KHÔNG khoá gateway (camera/domain/gateway-auth.ts — chống khoá-DoS: ai biết
+  // gateway_id cũng gửi được request rác) mà chặn theo `<ip>|<X-Gateway-Id>`: 20 request bị từ chối xác thực
+  // (400/401/403/404) / 15 phút → 429. Request hợp lệ và 409/413/415/5xx không bị tính. Đặt TRƯỚC cameraSnapshotLimiter
+  // để request rác vào xô đã bị chặn không tốn thêm hạn mức.
+  const cameraSnapshotFailLimiter = rateLimit({
+    windowMs: LOGIN_WINDOW,
+    max: 20,
+    keyGenerator: snapshotFailKey,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => requestWasNotCountedFailure(res.statusCode),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", detail: "Too many rejected camera requests" },
+  });
+
   app.use("/api/service", serviceFailLimiter);
   app.use("/api/auth/login", authLimiter);
+  app.use("/api/device/data", deviceDataFailLimiter);
   app.use("/api/device/data", deviceDataLimiter);
+  app.use("/api/device/camera/snapshot", cameraSnapshotFailLimiter);
   app.use("/api/device/camera/snapshot", cameraSnapshotLimiter);
 
   // Đăng nhập 3 kênh: mỗi kênh một bộ đếm riêng (10 / 15 phút) để demo đăng nhập 3 portal không

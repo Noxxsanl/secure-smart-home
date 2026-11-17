@@ -10,6 +10,9 @@ export function getClientIp(req: Request): string {
   return (req.ip || req.socket.remoteAddress || "").slice(0, 45);
 }
 
+/** Gói đã được middleware validate-device xác thực (domain/ingest-auth.ts) — gắn ở req.telemetry. */
+export type { AuthenticatedTelemetry as AuthenticatedHttpTelemetry } from "../../domain/ingest-auth";
+
 /** Thiết bị đã được middleware validate-device xác thực (xem VerifiedDevice của module devices — không có secret). */
 export interface IngestHttpDevice {
   id: number;
@@ -23,11 +26,13 @@ export interface IngestHttpInput {
   /** IP của client HTTP (req.ip theo trust proxy). */
   ip: string;
   userAgent: string | null;
-  /** body.gateway_ip / body.sensor_payload.sensor_ip do firmware tự báo (kiểu chưa kiểm). */
-  gatewayIp: unknown;
-  sensorIp: unknown;
-  /** body.sensor_payload.data (kiểu chưa kiểm). */
-  data: unknown;
+  /** gateway_ip / sensor_ip do firmware tự báo (đã kiểm định dạng ở envelope; null nếu không có). */
+  gatewayIp: string | null;
+  sensorIp: string | null;
+  /** Số đo đã xác thực (v2: JSON.parse(data_raw) mà Node đã ký). */
+  data: Record<string, unknown>;
+  /** JSON.stringify(data) — đã kiểm không có \u0000. */
+  dataJson: string;
 }
 
 /** Kết quả để controller gửi nguyên vẹn: mọi mã/shape lỗi của đường HTTP giữ như bản cũ. */

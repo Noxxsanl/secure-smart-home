@@ -4,8 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// Runtime configuration, read from `--dart-define`.
 ///
 /// - `API_BASE_URL`: backend origin without the `/api` suffix, e.g.
+///   `https://192.168.1.100` (qua nginx — chỉ HTTPS, cổng 80 chuyển hướng) hoặc
 ///   `https://smarthome.example.com`. Defaults to `http://10.0.2.2:5000` on
-///   Android (emulator → host machine) and `http://localhost:5000` elsewhere.
+///   Android (emulator → host machine, chỉ để dev) and `http://localhost:5000` elsewhere.
+/// - `API_CA_PEM_BASE64`: CA nội bộ (base64 của infra/mosquitto/certs/ca.crt)
+///   để tin chứng chỉ của nginx — xem core/config/trusted_ca_io.dart.
 /// - `AGENT_BASE_URL`: AI Agent endpoint of the voice/text assistant, e.g.
 ///   `http://10.0.2.2:8000/v1` (Android emulator → agent on the host). Defaults
 ///   to `<API_BASE_URL>/api/agent` (nginx forwards it to the agent).

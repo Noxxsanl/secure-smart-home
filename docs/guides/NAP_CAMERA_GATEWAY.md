@@ -298,7 +298,7 @@ Thử nhận ảnh khi chưa có camera (laptop nối Local AP, gửi JPEG có c
 | Camera không có dòng `time synced from gateway` dù đã vào Local AP | `gateway_mac` không phải MAC Station Gateway, hoặc LMK hai bên khác nhau, hoặc `0_mac` sai | Mục 2, 4.3 |
 | Màn hình Gateway: "Camera chưa vào Local AP" | Camera chưa nối Local AP, hoặc `nodes/0_mac` không phải MAC camera | Mục 2, 4.3 |
 | Màn hình Gateway: "Camera chưa có giờ: kiểm tra ghép nối ESP-NOW" (camera trả 503) | Như dòng trên | Mục 2, 4.3 |
-| Màn hình Gateway: "Camera từ chối chữ ký" (401); hoặc Gateway log `reject snapshot … bad signature` | `0_secret` (Gateway) khác `device_secret` (camera), hoặc giờ hai bên lệch > 300 s | Mục 4.3 |
+| Màn hình Gateway: "Camera từ chối chữ ký" (401); hoặc Gateway log `reject snapshot … bad signature` | `0_secret` (Gateway) khác `device_secret` (camera), giờ hai bên lệch > 300 s, hoặc firmware Camera/Gateway lệch phiên bản (từ 2026-11-16 ảnh ký `v2\|cam-up` kèm `X-Counter`, luồng ký `v2\|cam-stream`; phải nạp Camera + Gateway cùng lúc) | Mục 4.3; nạp lại cả hai |
 | Màn hình Gateway: "Camera đang phát cho kết nối khác" (409) | Luồng cũ chưa đóng hẳn | Đợi vài giây; vẫn bị thì reset camera |
 | Có hình nhưng giật (< 3 khung/s) | Giải nén JPEG bằng phần mềm trên S3 | Mục 7: QVGA hoặc tăng chất lượng JPEG |
 | `parttool.py` báo không đọc được bảng phân vùng / không thấy `nvs` | Ghi NVS khi board chưa có bảng phân vùng mới (VD vừa `erase-flash`) | Nạp firmware trước (mục 5 bước 5), rồi mới ghi NVS |

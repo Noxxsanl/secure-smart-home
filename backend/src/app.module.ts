@@ -5,7 +5,7 @@
 //   /health                     – liveness (không auth)
 //   /auth, /devices, /audit-log, /users, /notifications
 //                               – legacy Prototype (cookie `token`) — tests/security/attack_demo*.sh còn dùng
-//   /device/**                  – firmware (HMAC, không phiên): /device/data, /device/sensors, /device/camera/snapshot
+//   /device/**                  – firmware (HMAC, không phiên): /device/data, /device/camera/snapshot (đã gỡ /device/sensors)
 //   /dashboard/auth/**          – login, logout, me của ADMIN/OPERATOR (KHÔNG cần phiên, trừ /me)
 //   /dashboard/**               – sau requireDashboard("admin", "operator") (cookie sh_admin | sh_operator + X-Portal)
 //   /portal/auth/**, /portal/** – khách hàng web (cookie sh_user + X-Portal: user), cùng handler với /mobile

@@ -9,7 +9,7 @@ Thiết kế: [IOT_NODE_NETWORK](../../docs/firmware/IOT_NODE_NETWORK.md) §4.1,
 > - **Điều hòa qua hồng ngoại** (VS1838B GPIO1 học mã remote, LED IR GPIO2 phát lại — [Học mã IR điều hòa](../../docs/guides/HOC_MA_IR_DIEU_HOA.md)).
 > - **Đèn, quạt** qua relay HF46F 12 V (GPIO41, GPIO42), **rèm** qua động cơ bước 28BYJ-48 + ULN2003 (GPIO8/18/17/16, hiệu chuẩn trên màn hình); đèn/quạt khôi phục trạng thái khi có điện lại (mục [Đèn, quạt, rèm cửa](#đèn-quạt-rèm-cửa)).
 > - **LED WS2812** (GPIO40) báo trạng thái (mục [LED debug](#led-debug-ws2812)); **mic INMP441 + loa NS4168** viết sẵn, mặc định tắt (mục [Mic và loa](#mic-và-loa-mặc-định-tắt)).
-> - Số đo + trạng thái tải gửi về Gateway qua **ESP-NOW** (TELEMETRY có HMAC); Server điều khiển mọi tải qua Gateway (mục [Hợp đồng lệnh và telemetry](#hợp-đồng-lệnh-và-telemetry)).
+> - Số đo + trạng thái tải gửi về Gateway qua **ESP-NOW** (`TELEMETRY_V2`: chữ ký HMAC phủ nội dung + bộ đếm chống phát lại, xem mục [Bảo mật](#bảo-mật)); Server điều khiển mọi tải qua Gateway (mục [Hợp đồng lệnh và telemetry](#hợp-đồng-lệnh-và-telemetry)).
 >
 > Đã chạy trên PCB (2026-11-09, COM8): màn hình, SHT31, đầu-cuối Node → Gateway (`TELEMETRY node-living-01 verified` mỗi 10 s), điều hòa IR. **Relay, rèm, LED WS2812 mới biên dịch (ESP-IDF 5.4.4, 0 warning, cả cấu hình bật mic/loa), chưa nạp thử trên mạch** — làm theo mục [Chạy thử trên mạch](#chạy-thử-trên-mạch-sau-khi-nạp). Cảm ứng: T_DO luôn 0 khi SDO của LCD còn nối chung GPIO12; nay SDO để trống, GPIO12 chỉ nối T_DO — chưa thử lại trên board.
 
@@ -125,14 +125,14 @@ main ──► application ──► services ──► common/security_manager,
 | `node_config` | Đọc `identity/*`, `pairing/*` từ NVS; lưu kênh; xoá ghép nối | `node_config_load`, `_save_channel`, `_erase_pairing`, `_wipe` |
 | `node_time` | Giờ lấy từ `TIME_SYNC` của Gateway | `node_time_set_unix`, `_is_synced`, `_now` |
 | `node_link` | ESP-NOW: dò kênh 1–13 (thử kênh cũ trước), heartbeat 30 s, PING xin giờ, nhận `CMD`, gửi `TELEMETRY`/`EVENT`/`CMD_ACK`, dò lại khi mất ack 3 lần | `node_link_start(cfg, {on_cmd, on_state})`, `_send_telemetry`, `_send_event`, `_send_cmd_ack` |
-| `node_telemetry` | Dựng `sensor_payload` có `sn_hmac` lớp 1, ≤ 246 byte | `node_telemetry_build`, `node_telemetry_send` |
+| `node_telemetry` | Dựng body `TELEMETRY_V2` (`sn_timestamp`, `sn_ctr`, `sn_hmac`, `data`), ≤ 246 byte. Bộ đếm `sn_ctr` lấy từ `sm_counter_next` (`firmware/common/security_manager`, dùng chung với Gateway/Camera; thay `node_counter` cũ, cùng thuật toán và cùng sàn NVS `sec/ctr_floor`) | `node_telemetry_build`, `node_telemetry_send` |
 | `node_ir_store` | Lưu mã IR đã học (namespace `ir_codes`) | `node_ir_store_save/load/erase` |
 | `node_state_store` | Trạng thái tải giữ qua mất điện (namespace `loads`: `lamp`, `fan`, `cur_pos`, `cur_travel`) | `node_state_get/set_u8`, `node_state_get/set_i32` |
 
-`sensor_payload` gửi đi giống hệt payload backend đang nhận, Gateway chỉ cần bọc thêm lớp 2:
+Body khung ESP-NOW `TELEMETRY_V2` (`0x12`, giao thức v2 từ 2026-11-16; khung `0x10` cũ Gateway bỏ). `data` là **khoá cuối** của chuỗi JSON và **không có `sensor_id`** (Gateway biết node qua MAC/LMK); Gateway cắt đúng chuỗi byte `data` làm `data_raw`, thêm `sensor_id` và bọc lớp 2 thành envelope v2 gửi lên Server ([API_DESIGN](../../docs/API_DESIGN.md) §3, §11):
 
 ```json
-{"sensor_id":"<device_id>","sn_timestamp":1762500000,"sn_hmac":"<64 hex>","data":{"temperature":28.4,"humidity":61.0,"ac":1,"ac_temp":26,"lamp":1,"fan":0,"curtain":45}}
+{"sn_timestamp":1762500000,"sn_ctr":1762500000123,"sn_hmac":"<64 hex>","data":{"temperature":28.4,"humidity":61.0,"ac":1,"ac_temp":26,"lamp":1,"fan":0,"curtain":45}}
 ```
 
 Ý nghĩa từng trường: mục [Hợp đồng lệnh và telemetry](#hợp-đồng-lệnh-và-telemetry).
@@ -142,7 +142,7 @@ main ──► application ──► services ──► common/security_manager,
 | # | Biện pháp | Ở đâu |
 |---|---|---|
 | 1 | `device_id`, `secret`, LMK chỉ nằm trong NVS; không log giá trị (chỉ log "set"/"none"); xoá bản sao trong RAM bằng `mbedtls_platform_zeroize` | `node_config`, `node_link` |
-| 2 | Telemetry ký `HMAC-SHA256(secret, "<device_id>:<unix_ts>")` hex thường, dùng chung `common/security_manager` với Camera/Gateway (bất biến 5). Chưa có giờ thì **không ký**, không gửi | `node_telemetry` |
+| 2 | Telemetry v2 ký `HMAC-SHA256(secret node, "v2\|sn\|<device_id>\|<sn_timestamp>\|<sn_ctr>\|<sha256_hex(data_raw)>")` hex thường, dùng chung `common/security_manager` (bất biến 5): chữ ký phủ **nội dung số đo** và bộ đếm, Gateway **không giữ secret Node** nên chữ ký này chỉ backend kiểm (lớp độc lập). `sn_ctr` (`sm_counter_next`) tăng ngặt ≈ unix ms, max(ctr trước + 1, unix ms); mức sàn NVS `sec/ctr_floor` (đặt trước 10 phút, ghi flash ~6 lần/giờ) giữ qua mất điện. Chưa có giờ thì **không ký**, không gửi. Heartbeat Node qua ESP-NOW không ký HMAC (bảo vệ bằng CCMP/LMK) | `node_telemetry`, `common/security_manager` (`sm_counter`) |
 | 3 | Peer ESP-NOW **mã hoá** bằng LMK riêng của node. Thiếu LMK thì từ chối chạy, trừ khi bật `[DEV]` trong menuconfig | `node_link_start` |
 | 4 | Chỉ nhận khung từ MAC Gateway đã ghép nối; kiểm phiên bản khung, độ dài ≤ 250, body phải là JSON object | `node_link` |
 | 5 | Bỏ khung trùng `seq` (8 khung gần nhất) | `node_link` |
@@ -438,7 +438,9 @@ Chưa có ghép nối ECDH nên nạp tay **cả hai phía** với cùng `device
 | Phía | File (gitignore) | Mục |
 |---|---|---|
 | Node | `nvs_dev.csv` (mẫu `nvs_dev.csv.example`) | `identity/device_uuid`, `identity/device_secret`, `pairing/gateway_mac` = MAC **Station** của Gateway, `pairing/session_key` = LMK 32 hex (không để toàn số 0) |
-| Gateway | `08_lvgl_Porting/nvs_dev.csv` | thêm 1 mục vào `nodes`: `<i>_kind` = `node`, `<i>_id`, `<i>_secret` (trùng node), `<i>_mac` = MAC Station của node, `<i>_lmk` (trùng `session_key`), tăng `count` |
+| Gateway | `08_lvgl_Porting/nvs_dev.csv` | thêm 1 mục vào `nodes`: `<i>_kind` = `node`, `<i>_id`, `<i>_mac` = MAC Station của node, `<i>_lmk` (trùng `session_key`), tăng `count`. **Không có `<i>_secret` cho node** (Gateway không giữ secret Node; dòng đó nếu còn bị Gateway bỏ qua + cảnh báo) |
+
+**Secret Node chỉ nằm ở NVS của Node và backend.** Đăng ký lên backend bằng `cd backend && npm run hw:register` (đọc secret Node từ `--node-nvs`, mặc định `firmware/esp32_s3_firmware_node/nvs_dev.csv`) hoặc nhập secret Node từ NVS của Node ở trang Đăng ký Gateway; sinh secret/LMK ngẫu nhiên cho cả bộ bằng `npm run hw:rotate` (ghi vào các `nvs_dev.csv`, có `.bak`). Sau khi đổi giao thức v2, **nạp lại cả Node lẫn Gateway** (Gateway cũ bỏ khung `0x12`; backend từ chối envelope v1 `401 PROTOCOL_V1_DISABLED`).
 
 MAC Station: dòng `MAC:` khi chạy `python -m esptool --port COMx flash_id` (S3: MAC Station = MAC gốc), hoặc log Gateway `gateway STA MAC ...`. `device_id`/secret thật lấy lúc tạo thiết bị trên backend (secret chỉ trả **1 lần**) — chỉ cần khi muốn Server nhận số đo; Gateway hiện được số đo chỉ cần 2 phía khớp nhau. Bản demo hiện tại: `node-living-01`, secret/LMK sinh ngẫu nhiên (chưa có trên backend).
 
@@ -462,7 +464,9 @@ Sau khi cả hai đã nạp:
 | "Chưa ghép nối Gateway" (đỏ) | Log `node not provisioned` / `ESP-NOW not started`: chưa nạp NVS hoặc thiếu `gateway_mac`/`session_key` |
 | "Đang tìm Gateway..." mãi | Gateway chưa bật / chưa có node này trong `nodes`; `gateway_mac` phải là MAC **Station** (không phải AP) |
 | Log `gateway acks at MAC level but sends no TIME_SYNC` | LMK hai phía khác nhau, hoặc Gateway chưa có giờ (chưa vào mạng/NTP) |
-| Gateway log `drop TELEMETRY ... sensor_id does not match` / `bad signature` | `device_id`/secret hai phía khác nhau |
+| Gateway log `drop TELEMETRY ... sensor_id does not match` / `bad sn_timestamp` / `sn_ctr not increasing` | `<i>_id` ≠ `device_uuid`/MAC khác; lệch giờ > 300 s; hoặc bộ đếm lùi (nạp lại NVS làm mất `sec/ctr_floor` — chờ giờ unix ms vượt `last_ctr`, hoặc `hw:register` lại để backend đặt lại `last_ctr`) |
+| Backend `401 SENSOR_AUTH_FAIL HMAC_MISMATCH` | Secret trong NVS của Node ≠ secret trên backend (Gateway không còn giữ secret Node, chỉ backend kiểm) |
+| Backend `401 SENSOR_AUTH_FAIL REPLAYED` | `sn_ctr` ≤ `last_ctr` trên backend: gói phát lại, hoặc Node bị xoá NVS/đổi board |
 
 ## Hợp đồng lệnh và telemetry
 
@@ -476,7 +480,7 @@ Server gửi lệnh tới UID `<node_id>-<target>` (topic `home/<home_id>/gatewa
 
 Backend hiện gửi `turn_on`/`turn_off` (cộng `set_temp_*`, `learn_*` cho điều hòa); `toggle`, `stop`, `set_pos_*` Node nhận sẵn cho tính năng sau. Lệnh không có `target`, `target` lạ, hoặc tải tắt trong menuconfig → ack lỗi ngay.
 
-TELEMETRY (`data` của `sensor_payload`, ký HMAC lớp 1):
+TELEMETRY_V2 (`data` của body, ký HMAC lớp 1 — chữ ký v2 phủ cả `data`):
 
 | Khoá | Giá trị | Có mặt khi |
 |---|---|---|

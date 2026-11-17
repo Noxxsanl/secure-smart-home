@@ -2,9 +2,12 @@
 // và tạo/cập nhật nhà + phòng (Phòng khách, Camera) + thiết bị (gateway, node nhiệt/ẩm, camera) khớp đúng device_id/secret
 // đã nạp vào chip, kèm 4 thiết bị THẬT của phòng khách do Node điều khiển (đèn, quạt: relay; rèm: động cơ bước; điều hoà:
 // IR — xem LIVING_ROOM_APPLIANCES).
-//   npm run hw:register -- [--nvs <đường dẫn csv>] [--owner <email>] [--home-name <tên nhà>] [--force]
-// Mặc định: --nvs ../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/nvs_dev.csv (tính từ thư mục
-// backend), --owner user01@smarthome.local, --home-name "Nhà demo phần cứng".
+//   npm run hw:register -- [--nvs <csv gateway>] [--node-nvs <csv node> ...] [--owner <email>] [--home-name <tên nhà>] [--force]
+// Mặc định: --nvs ../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/nvs_dev.csv,
+// --node-nvs ../firmware/esp32_s3_firmware_node/nvs_dev.csv (tính từ thư mục backend), --owner user01@smarthome.local,
+// --home-name "Nhà demo phần cứng".
+// Secret của gateway và camera lấy từ CSV gateway; secret của Node lấy từ CSV của Node (Gateway không giữ secret Node —
+// chữ ký telemetry của Node chỉ backend kiểm). Đăng ký lại đặt last_ctr = NULL (bộ đếm chống phát lại bắt đầu lại).
 //
 // Trên console đã có trang "Đăng ký Gateway" (Admin/Operator, mọi tài khoản khách) cùng mô hình thiết bị — xem
 // modules/homes/features/register-gateway. Script này giữ cho thao tác nhanh trên máy dev.
@@ -27,10 +30,12 @@ import pool from "../infrastructure/database/pool";
 import { queryOne, runSql, withTransaction } from "../infrastructure/database/db";
 
 const DEFAULT_NVS = "../firmware/ESP32-S3-Touch-LCD-4.3B-BOX-Demo/ESP-IDF/08_lvgl_Porting/nvs_dev.csv";
+// Secret của Node nằm trong NVS của CHÍNH Node (Gateway không giữ — chữ ký Node chỉ backend kiểm, lớp 2 độc lập).
+const DEFAULT_NODE_NVS = "../firmware/esp32_s3_firmware_node/nvs_dev.csv";
 const DEFAULT_OWNER = "user01@smarthome.local";
 const DEFAULT_HOME_NAME = "Nhà demo phần cứng";
 const MAX_UID_LENGTH = 64;
-const MAX_SECRET_LENGTH = 64; // devices.secret_key VARCHAR(64)
+const MAX_SECRET_LENGTH = 64; // secret dạng rõ trong NVS (backend mã hoá khi lưu nếu có DEVICE_SECRET_KEY)
 const MAX_NODES = 32;
 
 // ── Đọc CSV NVS ────────────────────────────────────────────────────────────
@@ -91,7 +96,23 @@ function checkSecret(label: string, value: string | undefined): string {
   return value;
 }
 
-function buildPlan(data: NvsData): HardwarePlan {
+/**
+ * device_id → secret đọc từ NVS CSV của từng Node (identity/device_uuid, identity/device_secret). File không tồn tại thì
+ * bỏ qua (thiếu secret của node nào sẽ báo lỗi ở buildPlan).
+ */
+function loadNodeSecrets(paths: readonly string[]): Map<string, string> {
+  const secrets = new Map<string, string>();
+  for (const file of paths) {
+    if (!fs.existsSync(file)) continue;
+    const identity = parseNvsCsv(fs.readFileSync(file, "utf8")).get("identity");
+    const uid = identity?.get("device_uuid");
+    const secret = identity?.get("device_secret");
+    if (uid && secret) secrets.set(uid, secret);
+  }
+  return secrets;
+}
+
+function buildPlan(data: NvsData, nodeSecrets: ReadonlyMap<string, string>): HardwarePlan {
   const identity = data.get("identity");
   const nodes = data.get("nodes");
   if (!identity) return fail("NVS thiếu namespace identity");
@@ -106,11 +127,25 @@ function buildPlan(data: NvsData): HardwarePlan {
   for (let i = 0; i < count; i++) {
     const kind = nodes.get(`${i}_kind`);
     if (kind !== "node" && kind !== "camera") fail(`nodes/${i}_kind phải là node hoặc camera`);
-    result.push({
-      kind,
-      uid: checkUid(`nodes/${i}_id`, nodes.get(`${i}_id`)),
-      secret: checkSecret(`nodes/${i}_secret`, nodes.get(`${i}_secret`)),
-    });
+    const uid = checkUid(`nodes/${i}_id`, nodes.get(`${i}_id`));
+    if (kind === "camera") {
+      // Camera ↔ Gateway xác thực cục bộ bằng secret camera → Gateway vẫn giữ secret camera trong NVS của nó
+      result.push({ kind, uid, secret: checkSecret(`nodes/${i}_secret`, nodes.get(`${i}_secret`)) });
+      continue;
+    }
+    // Node: secret lấy từ NVS của Node. Gateway không còn cần (và không nên giữ) secret Node.
+    if (nodes.get(`${i}_secret`)) {
+      console.warn(
+        `[hw:register] nodes/${i}_secret trong NVS Gateway không còn dùng — xoá dòng đó khỏi CSV, nạp lại NVS Gateway và nên đổi secret Node (npm run hw:rotate)`
+      );
+    }
+    const secret = nodeSecrets.get(uid);
+    if (!secret) {
+      return fail(
+        `Không thấy secret của node ${uid}: truyền --node-nvs <nvs_dev.csv của Node> (identity/device_uuid phải = nodes/${i}_id)`
+      );
+    }
+    result.push({ kind, uid, secret: checkSecret(`identity/device_secret của node ${uid}`, secret) });
   }
   const uids = [gateway.uid, ...result.map((node) => node.uid)];
   if (new Set(uids).size !== uids.length) fail("device_id bị trùng trong NVS");
@@ -297,6 +332,7 @@ async function upsertDevice(
        gateway_device_id = EXCLUDED.gateway_device_id,
        status = 'active',
        fail_count = 0,
+       last_ctr = NULL,
        is_simulated = FALSE
      RETURNING id, device_name`,
     [
@@ -401,6 +437,18 @@ async function upsertAppliance(
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+/** Mọi giá trị của một cờ lặp lại được (VD --node-nvs a.csv --node-nvs b.csv). */
+function argValues(args: string[], name: string): string[] {
+  const values: string[] = [];
+  args.forEach((arg, index) => {
+    if (arg !== name) return;
+    const value = args[index + 1];
+    if (!value || value.startsWith("--")) fail(`Thiếu giá trị cho ${name}`);
+    values.push(value);
+  });
+  return values;
+}
+
 function argValue(args: string[], name: string, fallback: string): string {
   const index = args.indexOf(name);
   if (index === -1) return fallback;
@@ -420,7 +468,9 @@ async function main(): Promise<void> {
   const homeName = argValue(args, "--home-name", DEFAULT_HOME_NAME);
 
   if (!fs.existsSync(nvsPath)) fail(`Không thấy file NVS: ${nvsPath} (tạo từ nvs_dev.csv.example, hoặc truyền --nvs)`);
-  const plan = buildPlan(parseNvsCsv(fs.readFileSync(nvsPath, "utf8")));
+  const nodeNvsPaths = argValues(args, "--node-nvs");
+  const nodeSecrets = loadNodeSecrets((nodeNvsPaths.length > 0 ? nodeNvsPaths : [DEFAULT_NODE_NVS]).map((p) => path.resolve(p)));
+  const plan = buildPlan(parseNvsCsv(fs.readFileSync(nvsPath, "utf8")), nodeSecrets);
 
   const outcome = await withTransaction(async (conn) => {
     const ownerId = await findOwner(conn, ownerEmail);
@@ -481,6 +531,10 @@ async function main(): Promise<void> {
     if (device.unblocked) console.log(`    (đang 'blocked' trước đó — đã mở khoá: status='active', fail_count=0)`);
   }
   console.log(`[hw:register] Nhớ ghi cloud/home_id = ${outcome.home.id} vào NVS gateway để gửi heartbeat/sự kiện camera.`);
+  console.log(
+    `[hw:register] Broker MQTT dùng mTLS: gateway cần chứng chỉ client CN = ${plan.gateway.uid} — ` +
+      `bash infra/pki/gen_mqtt_client.sh ${plan.gateway.uid} (rồi thêm cloud/mqtt_cert, cloud/mqtt_key vào NVS gateway).`
+  );
 }
 
 main()

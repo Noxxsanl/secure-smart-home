@@ -159,9 +159,18 @@ static bool load_entry(nvs_handle_t h, unsigned i, entry_t *e, const char *gatew
         ESP_LOGW(TAG, "entry %u: id equals gateway_id", i);
         return false;
     }
-    if (get_str(h, i, "secret", e->secret, sizeof(e->secret)) != ESP_OK) {
-        ESP_LOGW(TAG, "entry %u (%s): missing secret", i, e->info.device_id);
-        return false;
+    if (e->info.kind == GW_DEV_CAMERA) {
+        /* Camera ↔ Gateway xác thực cục bộ (ảnh /local/camera/snapshot, luồng /stream) bằng secret camera. */
+        if (get_str(h, i, "secret", e->secret, sizeof(e->secret)) != ESP_OK) {
+            ESP_LOGW(TAG, "entry %u (%s): missing secret", i, e->info.device_id);
+            return false;
+        }
+    } else if (get_str(h, i, "secret", e->secret, sizeof(e->secret)) == ESP_OK) {
+        /* Node: Gateway KHÔNG giữ secret Node — chữ ký telemetry v2 của Node chỉ backend kiểm (lớp 2 độc lập); chặng
+         * Node → Gateway đã xác thực bằng ESP-NOW CCMP (LMK riêng). Bỏ giá trị cũ khỏi RAM, nhắc xoá khỏi NVS. */
+        mbedtls_platform_zeroize(e->secret, sizeof(e->secret));
+        ESP_LOGW(TAG, "entry %u (%s): nodes/%u_secret is no longer used — remove it from the gateway NVS", i,
+                 e->info.device_id, i);
     }
     if (get_str(h, i, "mac", buf, sizeof(buf)) != ESP_OK || !parse_mac(buf, e->info.mac)) {
         ESP_LOGW(TAG, "entry %u (%s): missing/malformed mac (unicast AA:BB:CC:DD:EE:FF)", i, e->info.device_id);
@@ -266,20 +275,23 @@ int gw_registry_find_id(const char *device_id)
     return -1;
 }
 
-sm_verify_result_t gw_registry_verify(size_t idx, int64_t ts, const char *sig_hex, int64_t now)
+sm_verify_result_t gw_registry_cam_upload_verify(size_t idx, int64_t ts, int64_t ctr, const char *trigger,
+                                                 const char *command_id, const char *sig_hex, int64_t now)
 {
-    if (idx >= s_count) {
+    if (idx >= s_count || s_entries[idx].info.kind != GW_DEV_CAMERA) {
         return SM_VERIFY_BAD_INPUT;
     }
-    return sm_device_verify(s_entries[idx].secret, s_entries[idx].info.device_id, ts, sig_hex, now);
+    return sm_cam_upload_verify(s_entries[idx].secret, s_entries[idx].info.device_id, ts, ctr, trigger, command_id,
+                                sig_hex, now);
 }
 
-esp_err_t gw_registry_sign(size_t idx, int64_t ts, char out_hex[SM_HMAC_HEX_LEN + 1])
+esp_err_t gw_registry_cam_stream_sign(size_t idx, int64_t ts, int64_t ctr, const char *fs, int q,
+                                      char out_hex[SM_HMAC_HEX_LEN + 1])
 {
-    if (idx >= s_count) {
+    if (idx >= s_count || s_entries[idx].info.kind != GW_DEV_CAMERA) {
         return ESP_ERR_INVALID_ARG;
     }
-    return sm_device_sign(s_entries[idx].secret, s_entries[idx].info.device_id, ts, out_hex);
+    return sm_cam_stream_sign(s_entries[idx].secret, s_entries[idx].info.device_id, ts, ctr, fs, q, out_hex);
 }
 
 bool gw_registry_copy_lmk(size_t idx, uint8_t out[GW_LMK_LEN])

@@ -16,9 +16,10 @@ Thiết kế: [IOT_NODE_NETWORK](../../../../docs/firmware/IOT_NODE_NETWORK.md) 
 | WiFi AP+STA: router của nhà + Local AP WPA2 cho camera (tự sinh nếu chưa có) | Có | `services/src/gw_wifi.c` |
 | Giờ: RTC → SNTP → ghi lại RTC | Có | `services/src/gw_time.c` |
 | ESP-NOW với Node/Camera: lọc MAC, peer mã hoá LMK, chống trùng `seq`, `PING`/`HEARTBEAT` → `TIME_SYNC` | Có | `services/src/gw_espnow.c` |
-| Kiểm HMAC lớp 1 telemetry của node (gắn `sensor_id` với MAC, ±300 s, không lùi giờ) | Có | `services/src/gw_espnow.c` |
-| Nhận ảnh camera `POST /local/camera/snapshot`: chỉ trên Local AP, HMAC camera, ≤ 200 KB, JPEG | Có | `services/src/gw_local_http.c` |
-| Telemetry → MQTT TLS `gateway/<gw>/data` (HMAC lớp 2), dự phòng `POST /api/device/data` | Có | `services/src/gw_envelope.c`, `gw_mqtt.c`, `gw_api.c` |
+| Telemetry node (khung ESP-NOW `TELEMETRY_V2` = `0x12`; khung `0x10` cũ bị bỏ): gắn `sensor_id` với MAC, `sn_timestamp` ±300 s + không lùi, `sn_ctr` tăng ngặt. **Không kiểm chữ ký Node** — Gateway không giữ secret Node, chữ ký Node (v2) chỉ backend kiểm | Có (2026-11-16) | `services/src/gw_espnow.c` |
+| Nhận ảnh camera `POST /local/camera/snapshot`: chỉ trên Local AP, chữ ký `v2\|cam-up` + `X-Counter` của camera, ≤ 200 KB, JPEG | Có | `services/src/gw_local_http.c` |
+| Telemetry → MQTT mTLS `gateway/<gw>/data` (envelope v2, Gateway ký lớp 2 phủ cả chữ ký Node), dự phòng `POST /api/device/data` | Có (2026-11-16) | `services/src/gw_envelope.c`, `gw_mqtt.c`, `gw_api.c` |
+| MQTT mTLS: trình chứng chỉ client (CN = `gateway_id`) đọc từ NVS `cloud/mqtt_cert` + `cloud/mqtt_key`, kiểm chứng broker bằng CA nhúng (`certs/mqtt_ca.crt`) và hạn cert (`CONFIG_MBEDTLS_HAVE_TIME_DATE=y`) | Có (2026-11-16); thiếu cert client thì cảnh báo, broker từ chối | `services/src/gw_config.c`, `gw_tls.c`, `gw_mqtt.c` |
 | Nhận lệnh `home/+/gateway/<gw>/device/+/command`: kiểm HMAC + ts + chống phát lại → ESP-NOW `CMD` → `CMD_ACK` → `.../command/ack` | Có | `services/src/gw_mqtt.c`, `application/src/gw_app.c` |
 | Lệnh gateway `restart` | Có | `application/src/gw_app.c` |
 | Lệnh camera `snapshot` (camera tự chụp, gửi ảnh, `CMD_ACK`) | Có | như trên |
@@ -66,7 +67,7 @@ Thiết kế: [IOT_NODE_NETWORK](../../../../docs/firmware/IOT_NODE_NETWORK.md) 
     └── application/                 # luồng nghiệp vụ: nối drivers ↔ services ↔ ui (gw_app)
 
 ../../../common/                     # dùng chung với Node/Camera
-├── security_manager/                # HMAC (sign, verify thời gian hằng ±300 s, sm_hmac_verify_hex)
+├── security_manager/                # HMAC (sign, verify thời gian hằng ±300 s, sm_hmac_verify_hex) + bộ đếm sm_counter (sàn NVS sec/ctr_floor)
 └── espnow_proto/                    # khung ESP-NOW {ver, type, seq, body JSON} ≤ 250 byte
 ```
 
@@ -102,13 +103,13 @@ Khung cũ chưa kịp xử lý bị thay (không xếp hàng) và được đế
 | Chặng | Kiểm gì | Ở đâu |
 |---|---|---|
 | Node → Gateway (ESP-NOW) | MAC nguồn đã ghép · peer mã hoá LMK riêng · khung đúng phiên bản, ≤ 250 byte, body JSON object · bỏ `seq` trùng (8 gói/thiết bị) | `gw_espnow.c` |
-| Telemetry node | `sensor_id` = device_id gắn với MAC đó · `sn_hmac = HMAC(secret node, "<sensor_id>:<sn_timestamp>")` · lệch ≤ ±300 s · `sn_timestamp` không lùi · chưa có giờ thì không nhận | `gw_espnow.c` → `gw_registry_verify` |
-| Camera → Gateway (ảnh) | Kết nối tới IP Local AP (không nhận từ mạng router) · camera đã ghép · `X-Signature = HMAC(secret camera, "<device_id>:<ts>")` ±300 s · ts không lùi · ≤ 200 KB · bắt đầu bằng `FF D8` · kiểm xong mới đọc thân | `gw_local_http.c` |
+| Telemetry node (v2) | `sensor_id` = device_id gắn với MAC đó (khung `0x12` không mang `sensor_id`) · mã hoá ESP-NOW CCMP/LMK riêng từng node · `sn_timestamp` lệch ≤ ±300 s, không lùi · `sn_ctr` tăng ngặt (≤ ctr đã thấy thì bỏ) · chưa có giờ thì không nhận. Chữ ký Node `HMAC(secret node, "v2\|sn\|<sensor_id>\|<ts>\|<ctr>\|<sha256(data_raw)>")` **chỉ backend kiểm** — Gateway không giữ secret Node, nên Gateway bị chiếm cũng không giả được số đo | `gw_espnow.c` |
+| Camera → Gateway (ảnh) | Kết nối tới IP Local AP (không nhận từ mạng router) · camera đã ghép · đồng hồ đã đồng bộ · `X-Signature = HMAC(secret camera, "v2\|cam-up\|<cam_id>\|<ts>\|<ctr>\|<trigger>\|<command_id hoặc rỗng>")` (`ctr` = header `X-Counter`) ±300 s · `ctr` > `ctr` lớn nhất đã nhận của camera đó (RAM; sau khởi động sàn `(now − 300) × 1000`; chỉ cập nhật sau khi nhận đủ thân hợp lệ) · mọi lỗi xác thực trả `401 AUTH_FAIL` như nhau, không ký nội dung ảnh · ≤ 200 KB · bắt đầu bằng `FF D8` · kiểm xong mới đọc thân | `gw_local_http.c` |
 | Gateway → Server (xem từ xa) | WSS tới base URL của `gw_api` (CA nhúng + so tên host; `http://` → `ws://` chỉ khi `[DEV]`) · header `X-Signature = HMAC(secret gw, "<gateway_id>:<ts>:<device_id>:<session_id>")` hex thường, ký lại mỗi lần nối · khung nhị phân = 1 JPEG nguyên vẹn · không log session_id/chữ ký | `gw_camera_relay.c` |
-| Gateway → Camera (mở luồng) | Chỉ tới IP mà DHCP Local AP cấp cho MAC camera đã ghép, khi camera đang kết nối · Gateway ký `HMAC(secret camera, "<device_id>:<ts>")`, camera kiểm ±300 s · mỗi khung ≤ 200 KB, bắt đầu bằng `FF D8` · nội dung khung không ký (dựa vào WPA2 Local AP, như ảnh chụp) | `gw_camera_live.c` |
+| Gateway → Camera (mở luồng) | Chỉ tới IP mà DHCP Local AP cấp cho MAC camera đã ghép, khi camera đang kết nối · Gateway ký `HMAC(secret camera, "v2\|cam-stream\|<cam_id>\|<ts>\|<ctr>\|<fs>\|<q>")` (header `X-Counter`, `ctr` từ `sm_counter_next`, `fs`/`q` đã chuẩn hoá), camera kiểm id + ±300 s + `ctr` tăng ngặt · mỗi khung ≤ 200 KB, bắt đầu bằng `FF D8` · nội dung khung không ký (dựa vào WPA2 Local AP, như ảnh chụp) | `gw_camera_live.c` |
 | Server → Gateway (lệnh MQTT) | Topic đúng gateway_id · home_id là số · `HMAC(secret gw, "<command_id>:<device_id>:<action>:<ts>")` · ±300 s · `command_id` chưa gặp (16 lệnh gần nhất). Dùng chung cho `live_start`/`live_stop` (camera phải là thiết bị đã ghép) | `gw_mqtt.c`, `gw_app.c` |
 | Gateway → Node (`CMD`) | Gửi kèm `ts` để node kiểm ±30 s; node bỏ lệnh trùng `command_id`; `CMD_ACK` phải đến từ đúng thiết bị đang chờ | `gw_espnow.c`, `gw_app.c` |
-| Gateway → Server | MQTT TLS 8883 kiểm chứng bằng CA nhúng + SAN; `gw_hmac = HMAC(secret gw, "<gateway_id>:<ts>")`; ack `HMAC(secret gw, "<command_id>:<status>:<ts>")` | `gw_tls.c`, `gw_envelope.c` |
+| Gateway → Server | MQTT **mTLS** 8883: kiểm chứng broker bằng CA nhúng + SAN, trình chứng chỉ client từ NVS (broker ép username = client id = CN, ACL chỉ cho topic của chính nó) · telemetry v2: `gw_hmac = HMAC(secret gw, "v2\|gw\|<gateway_id>\|<gw_ts>\|<gateway_ip hoặc rỗng>\|<sensor_id>\|<sn_ctr>\|<sn_hmac>")` · heartbeat `{"v":2, ts, ctr, hmac, body_raw}` ký `HMAC(secret gw, "v2\|hb\|<gateway_id>\|<ts>\|<ctr>\|<sha256_hex(body_raw)>")` (`ctr` từ `sm_counter_next`; `body_raw` ASCII ≤ 4096 byte, bộ đệm MQTT gửi 4096); ack `HMAC(secret gw, "v2\|ack\|<gateway_id>\|<device_uid>\|<command_id>\|<status>\|<power>\|<ts>")`; sự kiện camera `HMAC(secret gw, "v2\|evt\|<gateway_id>\|<cam_id>\|<type>\|<ts>\|<snapshot_id hoặc rỗng>")` | `gw_tls.c`, `gw_envelope.c` |
 
 Không log secret, LMK, mật khẩu WiFi, chữ ký (bất biến 2); màn hình không hiển thị chúng. `mqtt://` và `http://` bị từ chối trừ khi bật `[DEV] CONFIG_GW_DEV_ALLOW_PLAINTEXT`; không có tuỳ chọn bỏ kiểm chứng chứng chỉ (bất biến 3).
 
@@ -116,20 +117,20 @@ Không log secret, LMK, mật khẩu WiFi, chữ ký (bất biến 2); màn hìn
 
 | Chiều | Topic / endpoint | Payload | Backend |
 |---|---|---|---|
-| GW → S | MQTT `gateway/<gw>/data` QoS 1 | `{gateway_id, gw_timestamp, gw_hmac, gateway_ip?, sensor_payload}` | **Đã có** (`telemetry/features/ingest-mqtt`) |
+| GW → S | MQTT `gateway/<gw>/data` QoS 1 | `{"v":2, gateway_id, gw_timestamp, gw_hmac, gateway_ip?, sensor_payload:{sensor_id, sn_timestamp, sn_ctr, sn_hmac, data_raw}}` — `data_raw` là chuỗi JSON nguyên văn Node đã ký ([API_DESIGN](../../../../docs/API_DESIGN.md) §3, §9.1) | **Đã có** (`telemetry/features/ingest-mqtt`) |
 | GW → S | `POST /api/device/data` (khi MQTT mất kết nối) | như trên | **Đã có** (`ingest-http`) |
 | S → GW | `home/<h>/gateway/<gw>/device/<dev>/command` | `{command_id, action, ts, hmac}` | **Đã có** (`control`) |
-| GW → S | `home/<h>/gateway/<gw>/device/<dev>/command/ack` | `{command_id, status, power?, ts, hmac}` — trong 5 s | **Đã có** |
+| GW → S | `home/<h>/gateway/<gw>/device/<dev>/command/ack` | `{"v":2, command_id, status, power?, ts, hmac}` — trong 5 s, hmac `v2\|ack\|…` | **Đã có** |
 | S → GW | `home/<h>/gateway/<gw>/command` | `restart` (làm), `factory_reset` (chưa) | **Đã có** |
-| GW → S | `home/<h>/gateway/<gw>/heartbeat` mỗi 30 s | `{ts, uptime, rssi, ip, fw_version, nodes[], hmac}`, hmac `"<gateway_id>:<ts>"` | **Đã có** (`devices/features/gateway-heartbeat`): đánh dấu gateway + node `online:true` thuộc gateway là đang kết nối |
-| GW → S | `.../device/<cam>/camera/event` | `{type:"motion", ts, snapshot_id?, hmac}`, hmac `"<device_id>:<type>:<ts>"` | **Đã có** (`camera/features/camera-event`): thông báo "Phát hiện chuyển động" |
+| GW → S | `home/<h>/gateway/<gw>/heartbeat` mỗi 30 s | `{"v":2, ts, ctr, hmac, body_raw}` với `body_raw` = JSON `{uptime, rssi, ip, fw_version, nodes[]}`, hmac `v2\|hb\|<gateway_id>\|<ts>\|<ctr>\|<sha256_hex(body_raw)>` | **Đã có** (`devices/features/gateway-heartbeat`): đánh dấu gateway + node `online:true` thuộc gateway là đang kết nối |
+| GW → S | `.../device/<cam>/camera/event` | `{"v":2, type:"motion", ts, snapshot_id?, hmac}`, hmac `v2\|evt\|<gateway_id>\|<cam_id>\|<type>\|<ts>\|<snapshot_id hoặc rỗng>` | **Đã có** (`camera/features/camera-event`): thông báo "Phát hiện chuyển động" |
 | S → GW | `home/<h>/gateway/<gw>/device/<cam>/command` với `action` = `live_start` / `live_stop` | như lệnh thường (`command_id` = `session_id` của phiên xem); Gateway **không ack** | Backend làm song song (module `camera`/`control`) |
 | GW → S | WebSocket `GET /api/device/camera/live` (qua nginx :443) | header `X-Gateway-Id`, `X-Device-Id`, `X-Session-Id`, `X-Timestamp`, `X-Signature` (xem *Xem từ xa*); nhị phân = 1 khung JPEG; văn bản `{"type":"status","state":"connecting"/"streaming"/"camera_unavailable"}`, `{"type":"end"}` | Backend làm song song |
 | GW → S | `POST /api/device/camera/snapshot` | JPEG; header `X-Gateway-Id`, `X-Timestamp`, `X-Device-Id`, `X-Trigger`, `X-Command-Id?`, `X-Signature` = HMAC(secret gw, `"<gateway_id>:<ts>:<device_id>:<trigger>:<command_id>:<sha256 thân ảnh>"`) — gắn chữ ký với đúng ảnh (2026-11-10) | **Đã có** (`camera/features/ingest-snapshot`), qua nginx HTTPS :443; trả `201 {snapshot_id}` |
 
 Gateway subscribe `home/+/...` (wildcard home_id) nên không cần biết trước home_id. home_id dùng cho heartbeat/camera event lấy từ NVS `cloud/home_id`, hoặc học từ topic lệnh hợp lệ đầu tiên.
 
-Trên backend: Node phòng khách tạo với `device_type = sensor` (ingest chỉ nhận telemetry từ sensor), camera `category = camera` gán vào gateway này — `cd backend && npm run hw:register` làm việc này từ `nvs_dev.csv` (không in secret). Chuỗi ký heartbeat/camera event ở trên đã được backend dùng (2026-11-10). Từng bước nối Server: [LEN_SERVER](../../../../docs/guides/LEN_SERVER.md).
+Trên backend: Node phòng khách tạo với `device_type = sensor` (ingest chỉ nhận telemetry từ sensor), camera `category = camera` gán vào gateway này — `cd backend && npm run hw:register` làm việc này từ `nvs_dev.csv` (không in secret). Chuỗi ký heartbeat/ack/camera event v2 ở trên đã được backend dùng (2026-11-16; dạng cũ chỉ khi `DEVICE_HMAC_V1=true`). Camera ↔ Gateway đổi chuỗi ký v2 nên **nạp Camera + Gateway cùng lúc**. Từng bước nối Server: [LEN_SERVER](../../../../docs/guides/LEN_SERVER.md).
 
 ## Build lần đầu
 
@@ -141,6 +142,8 @@ cd E:\WorkSpace\secure-smart-home-iot\firmware\ESP32-S3-Touch-LCD-4.3B-BOX-Demo\
 # CA của Broker MQTT (infra/pki/gen_mqtt_certs.sh) — thiếu thì vẫn build được nhưng không kết nối TLS
 New-Item -ItemType Directory -Force certs | Out-Null
 Copy-Item ..\..\..\..\infra\mosquitto\certs\ca.crt certs\mqtt_ca.crt
+# Chứng chỉ client mTLS của gateway (Git Bash, gốc repo): bash infra/pki/gen_mqtt_client.sh <gateway_id>
+#   → certs\mqtt_client.crt + certs\mqtt_client.key (gitignore); nạp vào NVS ở mục dưới
 
 # sdkconfig hiện có sinh từ cấu hình ví dụ (1 app 1 MB, chưa có phân vùng OTA) → phải sinh lại
 Remove-Item sdkconfig, sdkconfig.old -ErrorAction SilentlyContinue
@@ -148,7 +151,7 @@ idf.py set-target esp32s3
 idf.py build
 ```
 
-`components/lvgl__lvgl`, `espressif__esp_lcd_touch*`, `espressif__esp_new_jpeg` đang có sẵn nên không tải lại; máy mới clone repo thì component manager tải về theo `components/drivers/idf_component.yml` (LVGL, GT911) và `components/ui/idf_component.yml` (`espressif/esp_new_jpeg ^1.0.2`: lần build đầu cần Internet, thư viện vào `managed_components/`; muốn build offline như LVGL thì chép `managed_components/espressif__esp_new_jpeg` sang `components/espressif__esp_new_jpeg` rồi xoá `managed_components/` — thư mục `components/*__*` đã gitignore). `dependencies.lock` sinh lại tự động (đường dẫn tuyệt đối của máy — đã gitignore). Đừng build với `IDF_COMPONENT_MANAGER=0`: component GT911 khai báo phụ thuộc `esp_lcd_touch` trong `idf_component.yml`.
+`components/lvgl__lvgl`, `espressif__esp_lcd_touch*`, `espressif__esp_new_jpeg` đang có sẵn nên không tải lại; máy mới clone repo thì component manager tải về theo `components/drivers/idf_component.yml` (LVGL, GT911) và `components/ui/idf_component.yml` (`espressif/esp_new_jpeg ^1.0.2`: lần build đầu cần Internet, thư viện vào `managed_components/`; muốn build offline như LVGL thì chép `managed_components/espressif__esp_new_jpeg` sang `components/espressif__esp_new_jpeg` rồi xoá `managed_components/` — thư mục `components/*__*` đã gitignore). `CONFIG_MBEDTLS_HAVE_TIME_DATE=y` (kiểm hạn chứng chỉ) nằm trong `sdkconfig.defaults`; `sdkconfig` đã sinh từ trước thì phải xoá hoặc bật bằng `idf.py menuconfig` để có hiệu lực. `dependencies.lock` sinh lại tự động (đường dẫn tuyệt đối của máy — đã gitignore). Đừng build với `IDF_COMPONENT_MANAGER=0`: component GT911 khai báo phụ thuộc `esp_lcd_touch` trong `idf_component.yml`.
 
 Đổi tuỳ chọn không bí mật: `idf.py menuconfig` → *Gateway S3: services* (URI broker, URL backend, NTP, kênh Local AP, timeout ack…) và *Example Configuration* (LVGL). Độ phân giải 1024×600 và cảm ứng: `ESP_PANEL_USE_1024_600_LCD`, `CONFIG_EXAMPLE_LCD_TOUCH_CONTROLLER_GT911` trong `components/drivers/src/lcd/lvgl_port.h` (macro của ví dụ, không phải Kconfig). Cảm ứng **đang bật** (= 1, 2026-11-08) cho thanh nav; đây là dòng duy nhất đã sửa trong code ví dụ.
 
@@ -160,8 +163,13 @@ Chưa có ghép nối/provisioning, nên nạp tay:
    - `identity`: `device_uuid`, `device_secret` của **gateway** trên backend (secret chỉ trả 1 lần lúc tạo).
    - `wifi`: router 2.4 GHz của nhà. Bỏ trống thì Gateway chỉ chạy Local AP.
    - `local_ap`: SSID + mật khẩu ≥ 8 ký tự. Camera ghi đúng cặp này vào `wifi/ssid`, `wifi/password` của nó. Bỏ trống thì Gateway tự sinh (không in mật khẩu ra log).
-   - `cloud`: `mqtt_uri` (host phải nằm trong SAN của cert broker), `api_url`; tuỳ chọn `home_id`.
-   - `nodes`: `count` + mỗi thiết bị `<i>_kind` (`node`|`camera`), `<i>_id`, `<i>_secret`, `<i>_mac` (MAC Station của thiết bị), `<i>_lmk` (32 hex, **trùng** `pairing/session_key` trong NVS của thiết bị đó).
+   - `cloud`: `mqtt_uri` (host phải nằm trong SAN của cert broker), `api_url`; tuỳ chọn `home_id`; **chứng chỉ client mTLS** — 2 dòng kiểu `file` (nội dung PEM lấy từ file khi sinh ảnh NVS):
+     ```csv
+     mqtt_cert,file,string,certs/mqtt_client.crt
+     mqtt_key,file,string,certs/mqtt_client.key
+     ```
+     Chạy `nvs_partition_gen` **từ thư mục project** này để đường dẫn `certs/...` đúng. Cặp cert/khoá do `bash infra/pki/gen_mqtt_client.sh <gateway_id>` cấp (CN = `gateway_id`); thiếu thì log cảnh báo và broker từ chối kết nối.
+   - `nodes`: `count` + mỗi thiết bị `<i>_kind` (`node`|`camera`), `<i>_id`, `<i>_mac` (MAC Station của thiết bị), `<i>_lmk` (32 hex, **trùng** `pairing/session_key` trong NVS của thiết bị đó), và `<i>_secret` **chỉ cho `camera`** (Gateway ↔ Camera xác thực cục bộ). **Không còn `<i>_secret` cho `node`**: Gateway không giữ secret Node (secret Node chỉ nằm trong NVS của Node và backend); dòng đó nếu còn bị bỏ qua kèm cảnh báo `nodes/<i>_secret is no longer used` — nên xoá.
 2. Phía Node/Camera: `pairing/gateway_mac` = MAC Station của Gateway — Gateway in ra khi khởi động: `gw_wifi: ... gateway STA MAC xx:xx:xx:xx:xx:xx`.
 3. Sinh ảnh và ghi vào phân vùng `nvs` (24K = `0x6000`):
 
@@ -206,20 +214,21 @@ mosquitto_sub -h 192.168.1.100 -p 8883 --cafile infra/mosquitto/certs/ca.crt -t 
 
 ```bash
 read -rs SECRET                       # secret camera, không lưu vào history
-ID=<camera device_id>; TS=$(date +%s)
-SIG=$(printf '%s' "$ID:$TS" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')
+ID=<camera device_id>; TS=$(date +%s); CTR=$(( $(date +%s) * 1000 ))
+# v2|cam-up|<cam_id>|<ts>|<ctr>|<trigger>|<command_id hoặc rỗng> — không có X-Command-Id nên để rỗng
+SIG=$(printf '%s' "v2|cam-up|$ID|$TS|$CTR|motion|" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $NF}')
 
 # 201
-curl -s -w '%{http_code}\n' -X POST -H "X-Device-Id: $ID" -H "X-Timestamp: $TS" -H "X-Signature: $SIG" \
+curl -s -w '%{http_code}\n' -X POST -H "X-Device-Id: $ID" -H "X-Timestamp: $TS" -H "X-Counter: $CTR" -H "X-Signature: $SIG" \
   -H "X-Trigger: motion" -H "Content-Type: image/jpeg" --data-binary @anh.jpg http://192.168.4.1/local/camera/snapshot
 
-# 401 khi sai chữ ký
-curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-Device-Id: $ID" -H "X-Timestamp: $TS" \
+# 401 khi sai chữ ký (hoặc gửi lại đúng gói trên: ctr không tăng → 401)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-Device-Id: $ID" -H "X-Timestamp: $TS" -H "X-Counter: $((CTR + 1))" \
   -H "X-Signature: $(printf '0%.0s' {1..64})" -H "X-Trigger: motion" -H "Content-Type: image/jpeg" \
   --data-binary @anh.jpg http://192.168.4.1/local/camera/snapshot
 ```
 
-Gửi cùng yêu cầu từ mạng router (IP STA của Gateway) phải nhận `403`. Nhận `201` thì log có `gw_local_http: snapshot from <id>: … bytes`.
+`CTR` phải tăng ngặt giữa các lần thử (Gateway nhớ `ctr` lớn nhất đã nhận theo từng camera trong RAM); chạy lần sau thì lấy lại `date +%s` để `CTR` lớn hơn. Gửi cùng yêu cầu từ mạng router (IP STA của Gateway) phải nhận `403`. Nhận `201` thì log có `gw_local_http: snapshot from <id>: … bytes`.
 
 **Giao diện và xem trực tiếp** — màn hình 800×480:
 
@@ -291,7 +300,11 @@ Log đúng: `gw_app: live view <id> (camera page)` rồi `gw_camera_live: stream
 | Màn hình "Gateway chưa được cấp phát" | Chưa nạp `nvs_dev.bin`, sai tên namespace/key |
 | `mqtts://... needs CA` | Thiếu `certs/mqtt_ca.crt` lúc build |
 | MQTT `transport error` | Host trong `mqtt_uri` không có trong SAN của cert broker, hoặc sai giờ (cert "chưa hiệu lực") |
-| `drop TELEMETRY ... HMAC mismatch` | `<i>_secret` khác secret trong NVS của node |
+| `cloud/mqtt_cert + cloud/mqtt_key missing` rồi broker từ chối | Chưa nạp chứng chỉ client vào NVS (mục *Nạp NVS*); hoặc cert đã bị thu hồi (`gen_mqtt_client.sh --revoke`) hoặc cấp cho `gateway_id` khác — broker log `certificate required`/`revoked`, `Denied` |
+| `drop TELEMETRY ... sn_ctr not increasing (replay?)` | Node gửi `sn_ctr` ≤ lần trước (Node reset mất bộ đếm — firmware Node đặt mức sàn NVS `sec/ctr_floor` để tránh) hoặc gói bị phát lại |
+| `drop TELEMETRY ... missing/invalid sn_timestamp/sn_ctr/sn_hmac` | Node còn firmware cũ (khung `0x10`) — nạp firmware Node giao thức v2 |
+| Backend `401 SENSOR_AUTH_FAIL HMAC_MISMATCH` cho node | Secret Node trên backend khác secret trong NVS của **Node** (`hw:register`/trang Đăng ký Gateway nhập secret Node từ NVS của Node) |
+| Backend `401 PROTOCOL_V1_DISABLED` | Gateway gửi envelope v1 — nạp lại firmware Gateway này (v2) |
 | `drop TELEMETRY ... gateway clock not synced` | Chưa có NTP và RTC chưa từng được đặt giờ |
 | Node log "gateway acks at MAC level but sends no TIME_SYNC" | LMK hai bên khác nhau, hoặc Gateway chưa có giờ |
 | `peer ... has no LMK — refusing unencrypted ESP-NOW` | Thiếu `<i>_lmk`. Khi dev có thể bật `[DEV]` ở cả hai phía |
@@ -310,11 +323,11 @@ Log đúng: `gw_app: live view <id> (camera page)` rồi `gw_camera_live: stream
 ## Việc còn lại
 
 1. ~~Font tiếng Việt có dấu~~ — xong 2026-11-09: `ui/fonts/gw_font_vi_16/20/24.c` (Montserrat Medium + biểu tượng LVGL, chỉ ASCII + `°` + 134 chữ cái tiếng Việt), sinh lại bằng `bash components/ui/fonts/gen_fonts.sh` (cần Node.js, npx tải `lv_font_conv@1.5.2`). Thêm ký tự mới (VD `…`, `₫`) thì sửa script rồi chạy lại.
-2. Ghép nối ECDH + PMK chung (WiFi Provisioning §9) thay cho nạp tay `nodes/*` — bỏ hẳn nhu cầu `GET /api/device/sensors`.
-3. Backend: `POST /api/device/camera/snapshot`, subscribe `heartbeat` và `camera/event`, chốt chuỗi ký (API_DESIGN §14 Q2), thêm action `snapshot` vào `DeviceAction`.
+2. Ghép nối ECDH + PMK chung (WiFi Provisioning §9) thay cho nạp tay `nodes/*` (LMK) và cấp cert client bằng CSR trên thiết bị. (`GET /api/device/sensors` đã gỡ 2026-11-16 — Gateway không còn giữ secret Node.)
+3. Backend: thêm action `snapshot` vào `DeviceAction` (endpoint ảnh, subscribe `heartbeat`/`camera/event` và chuỗi ký `v2|hb`/`v2|ack`/`v2|evt` đã có, API_DESIGN §3).
 4. Đo trên board (mục tiêu 12–15 khung/s): fps nhận / hiển thị / relay, ms giải nén (log 5 s). `esp_new_jpeg` + pipeline tách task đã làm 2026-11-13, **chưa chạy trên board**. Xem từ xa trên web user cần Backend có WebSocket `/api/device/camera/live` (làm song song); Mobile ngoài phạm vi đợt này.
 5. Đệm thẻ TF khi mất Internet (§7, §10 Q3), OTA, `factory_reset` có xác nhận 2 bước trên màn hình.
-6. Production: NVS Encryption, Flash Encryption + Secure Boot v2 (đốt eFuse — làm khi ổn định), ACL Mosquitto theo gateway.
+6. Production: NVS Encryption, Flash Encryption + Secure Boot v2 (đốt eFuse, không đảo ngược — làm khi ổn định; hiện cert client, secret gateway/camera và LMK trong NVS vẫn dạng rõ). Broker đã mTLS + ACL theo CN (2026-11-16); ACL theo `home_id` chưa.
 
 ## Kiểm tra
 

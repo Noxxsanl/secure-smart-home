@@ -426,7 +426,7 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(camera)
 ```
 
-> HMAC phải đúng một bản dùng chung: `HMAC-SHA256(secret, "<device_id>:<unix_ts>")`, hex chữ thường, phải khớp backend ↔ gateway ↔ sensor. Không chép hàm HMAC vào từng project.
+> HMAC phải đúng một bản dùng chung (hex chữ thường, khớp backend ↔ gateway ↔ sensor): chữ ký v2 `v2|sn|…` (Node), `v2|gw|…`, `v2|hb|…`, `v2|ack|…`, `v2|evt|…` (Gateway), `v2|cam-up|…`, `v2|cam-stream|…` (Camera ↔ Gateway) — [API](../API_DESIGN.md) §3; lệnh Server → Gateway, ảnh Gateway → Server và uplink camera dùng chuỗi riêng từng loại. Bộ đếm `ctr` dùng chung `sm_counter` trong `security_manager`. Không chép hàm HMAC vào từng project.
 
 ### 2.6. Thêm thư viện từ ESP Component Registry
 

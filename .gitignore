@@ -26,10 +26,14 @@ firmware/esp32_s3_firmware_node/components/*__*/
 firmware/esp32_s3_firmware_node/dependencies.lock
 firmware/**/certs/
 firmware/**/nvs_*.csv
+firmware/**/nvs_*.csv.*
 firmware/**/nvs_*.bin
 
-# MQTT TLS — sinh bởi infra/pki/gen_mqtt_certs.sh (có khoá riêng CA/server)
+# MQTT TLS / HTTPS — sinh bởi infra/pki/gen_mqtt_certs.sh, gen_mqtt_client.sh (khoá riêng CA/server/web/client, sổ cái CA, CRL)
 infra/mosquitto/certs/*
+# Broker chạy ngoài Docker (docs/guides/CHAY_LOCAL.md): cấu hình có đường dẫn máy + dữ liệu persistence
+infra/mosquitto/broker_local.conf
+infra/mosquitto/data/
 !infra/mosquitto/certs/.gitkeep
 firmware/gateway-node/include/mqtt_ca_cert.h
 
