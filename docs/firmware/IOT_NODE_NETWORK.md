@@ -196,7 +196,7 @@ PCB do nhóm tự thiết kế, module **ESP32-S3-WROOM-1 N16R8** (flash 16 MB, 
 | Nhóm | Thiết bị | Chân ESP32-S3 | Firmware |
 |---|---|---|---|
 | Cảm biến | SHT31 nhiệt độ, độ ẩm (I2C0) | SDA 15, SCL 7 | `board_sensors`, gửi `temperature`, `humidity` |
-| Màn hình | TFT 3.5" ILI9488 SPI + cảm ứng XPT2046, LVGL 8.4 | SCK 21, MOSI 13, MISO (T_DO) 12, LCD CS 38, RESET 39, DC 48, LED 47, T_CS 14 | `board_display` + `node_ui`: 4 ô Đèn / Quạt / Rèm / Điều hòa nhận chạm |
+| Màn hình | TFT 3.5" ILI9488 SPI + cảm ứng XPT2046, LVGL 8.4 | SCK 21, MOSI 13, MISO (T_DO) 12, LCD CS 39, RESET 38, DC 48, LED 47, T_CS 14 | `board_display` + `node_ui`: 4 ô Đèn / Quạt / Rèm / Điều hòa nhận chạm |
 | Điều hòa | LED IR 940 nm (RMT TX) + mắt thu VS1838B (RMT RX) | TX 2, RX 1 | `node_ac`: học mã remote, phát lại ([Học mã IR](../guides/HOC_MA_IR_DIEU_HOA.md)) |
 | Đèn, quạt | Relay HF46F 12 V, kích qua transistor (mức cao = đóng) | Đèn 41 (Relay_1), Quạt 42 (Relay_2) | `node_switches`: khôi phục trạng thái khi có điện lại |
 | Rèm cửa | Động cơ bước 28BYJ-48 5 V qua ULN2003, không công tắc hành trình | IN1 8, IN2 18, IN3 17, IN4 16 | `node_curtain`: vị trí đếm theo bước, hiệu chuẩn trên màn hình, lưu NVS |

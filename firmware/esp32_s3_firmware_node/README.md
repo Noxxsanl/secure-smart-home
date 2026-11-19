@@ -170,8 +170,8 @@ PCB dùng module **ESP32-S3-WROOM-1 N16R8** (flash 16 MB, PSRAM Octal 8 MB), n�
 |---|---|---|---|
 | VCC | 3V3 (hoặc 5V nếu module có ổn áp, xem mạch in) | | Logic 3,3 V |
 | GND | GND | | |
-| CS | GPIO38 | 31 | |
-| RESET | GPIO39 | 32 | `-1` nếu nối RESET lên 3V3 |
+| CS | GPIO39 | 32 | |
+| RESET | GPIO38 | 31 | `-1` nếu nối RESET lên 3V3 |
 | DC/RS | GPIO48 | 25 | |
 | SDI (MOSI) | GPIO13 | 21 | chung với T_DIN |
 | SCK | GPIO21 | 23 | chung với T_CLK |
@@ -370,8 +370,8 @@ Module **ESP32-S3-WROOM-1 N16R8**. Chân nào cũng chỉnh được trong menuc
 | 23 | IO21 | LCD_SCLK | LCD SCK + T_CLK | SPI2 | màn hình |
 | 24 | IO47 | LED | Đèn nền LCD | LEDC | màn hình |
 | 25 | IO48 | LCD_DC/RS | LCD DC | GPIO | màn hình |
-| 31 | IO38 | LCD_CS | LCD CS | SPI2 | màn hình |
-| 32 | IO39 | LCD_RESET | LCD RESET | GPIO | màn hình |
+| 31 | IO38 | LCD_RESET | LCD RESET | GPIO | màn hình |
+| 32 | IO39 | LCD_CS | LCD CS | SPI2 | màn hình |
 | 33 | IO40 | RGB | WS2812 DIN | RMT TX | LED debug |
 | 34 | IO41 | Relay_1 | Đèn | GPIO | relay |
 | 35 | IO42 | Relay_2 | Quạt | GPIO | relay |

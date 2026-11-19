@@ -1,5 +1,5 @@
 # Màn hình TFT 3.5" ILI9488 SPI + cảm ứng điện trở XPT2046 — chân GPIO, hướng, hiệu chuẩn (README, mục Màn hình).
-# Mặc định = PCB Node phòng khách (module ESP32-S3-WROOM-1 N16R8): SCK 21, MOSI 13, CS 38, RESET 39, DC 48, LED 47,
+# Mặc định = PCB Node phòng khách (module ESP32-S3-WROOM-1 N16R8): SCK 21, MOSI 13, CS 39, RESET 38, DC 48, LED 47,
 # T_CS 14, T_DO 12, T_IRQ không nối. LCD không có MISO (chân SDO để trống), MISO của bus chỉ là T_DO.
 # Không phải chân IOMUX của SPI2 → tín hiệu qua ma trận GPIO, tối đa 40 MHz.
 menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
@@ -18,7 +18,7 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
         config NODE_LCD_PIN_CS
             int "LCD CS"
             range 0 48
-            default 38
+            default 39
 
         config NODE_LCD_PIN_DC
             int "LCD DC/RS"
@@ -28,7 +28,7 @@ menu "Node S3: màn hình (ILI9488 + cảm ứng XPT2046)"
         config NODE_LCD_PIN_RST
             int "LCD RESET (-1 = nối RESET lên 3V3, reset bằng lệnh)"
             range -1 48
-            default 39
+            default 38
 
         config NODE_LCD_PIN_BL
             int "LCD LED / đèn nền (-1 = nối thẳng 3V3, không chỉnh độ sáng)"

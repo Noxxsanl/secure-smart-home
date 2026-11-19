@@ -422,7 +422,7 @@ Luồng: Camera —HTTP MJPEG trong Local AP (WPA2)→ Gateway —WSS `/api/devi
 
 ### 9.2. Trợ lý AI (giọng nói/chữ) — mô hình đe doạ, hiện trạng 2026-11-14, luật "lệnh rõ → làm ngay" cập nhật 2026-11-15
 
-Luồng: trình duyệt —`/api/agent/*` (nginx)→ agent Python (STT + LLM) —`/api/service/agent/**`→ Backend. Hợp đồng và luật: [API](API_DESIGN.md) §5.1 "Trợ lý AI". Đã viết theo hợp đồng, chưa red-team với OpenAI thật.
+Luồng: trình duyệt —`/api/agent/*` (nginx)→ agent Python (STT + LLM) —`/api/service/agent/**`→ Backend. Hợp đồng và luật: [API](API_DESIGN.md) §5.1 "Trợ lý AI". Đã viết theo hợp đồng và đã chạy với OpenAI thật (2026-11-17); chưa red-team (thử prompt injection có hệ thống).
 
 | Mối đe doạ | Kiểm soát |
 |---|---|

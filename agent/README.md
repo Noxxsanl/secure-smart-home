@@ -7,8 +7,8 @@ Dịch vụ Python (FastAPI) nhận câu nói tiếng Việt của khách hàng 
 
 > **Trạng thái (2026-11):** đã hiện thực API `/v1/homes/{id}/voice` + `/messages` + `/health`, STT OpenAI, planner
 > (Responses API, tool `ask_clarification` / `propose_plan`), guard, hội thoại trong RAM, rate limit, client backend,
-> bộ eval. Kiểm bằng test giả (OpenAI/backend giả) — **chưa chạy với key OpenAI thật**; chạy `eval/run_eval.py`
-> khi có key để đo chất lượng hiểu tiếng Việt. Chưa làm: STT `whisper_local`, tool đọc dữ liệu động, lưu hội thoại
+> bộ eval. Có bộ test giả (OpenAI/backend giả) và **đã chạy với key OpenAI thật** (xác nhận 2026-11-17); chạy
+> `eval/run_eval.py` để đo chất lượng hiểu tiếng Việt. Chưa làm: STT `whisper_local`, tool đọc dữ liệu động, lưu hội thoại
 > bền, giới hạn chung nhiều replica (rate limit đang ở bộ nhớ tiến trình), ngân sách USD/ngày, luật dự phòng
 > (FR-7.18).
 
