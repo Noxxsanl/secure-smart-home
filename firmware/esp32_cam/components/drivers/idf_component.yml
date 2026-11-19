@@ -1,0 +1,6 @@
+## Thư viện từ ESP Component Registry — commit file này và dependencies.lock, không commit managed_components/.
+dependencies:
+  idf: ">=5.1.0"
+  espressif/esp32-camera:
+    version: "^2.0.0"
+    require: public   # tầng services dùng camera_fb_t qua cam_camera.h

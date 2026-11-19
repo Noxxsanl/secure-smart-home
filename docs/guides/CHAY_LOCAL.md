@@ -5,14 +5,14 @@
 
 ---
 
-## Tổng quan — 5 service cần chạy
+## Tổng quan — 4 service cần chạy
 
 ```
 Terminal 1: PostgreSQL 16         (database, port 5433 nếu chạy bằng Docker / 5432 nếu cài trực tiếp)
-Terminal 2: Mosquitto Broker 1    (Sensor ↔ Gateway, port 1883)
-Terminal 3: Mosquitto Broker 2    (Gateway → Backend, TLS port 8883)
-Terminal 4: Backend Express       (API,      port 5000)
-Terminal 5: Frontend Next.js      (3 app web: Admin 3001, Operator 3002, Khách hàng 3003)
+Terminal 2: Mosquitto broker      (Gateway ↔ Backend, chỉ mTLS port 8883)
+Terminal 3: Backend Express       (API,      port 5000)
+Terminal 4: Frontend Next.js      (3 app web: Admin 3001, Operator 3002, Khách hàng 3003)
+(tuỳ chọn) Agent Python           (Trợ lý AI, port 8000, xem Bước 6c)
 (tuỳ chọn) Mobile Flutter         (app khách hàng, xem Bước 7)
 ```
 
@@ -140,81 +140,60 @@ Kết quả mong đợi (V2 có thêm nhiều bảng: `customers`, `smart_homes`
 audit_log, device_tokens, devices, sensor_data, users, notifications, + các bảng V2
 ```
 
-> `001_schema.sql` là baseline PostgreSQL đầy đủ (đã gộp toàn bộ migration MySQL cũ). Mảng `migrations` trong `backend/src/config/migrate.ts` hiện **rỗng**; backend vẫn chạy nó mỗi lần khởi động (theo dõi qua bảng `_migrations`) để áp các thay đổi schema thêm sau này. Dữ liệu demo (admin, operator, nhà mẫu…) do bước seed của backend tạo khi `SEED_DEMO_DATA` bật — xem phần "Dữ liệu demo" bên dưới.
+> `001_schema.sql` là baseline PostgreSQL đầy đủ (đã gộp toàn bộ migration MySQL cũ). Mảng `migrations` trong `backend/src/infrastructure/database/migrate.ts` hiện **rỗng**; backend vẫn chạy nó mỗi lần khởi động (theo dõi qua bảng `_migrations`) để áp các thay đổi schema thêm sau này. Dữ liệu demo (admin, operator, nhà mẫu…) do bước seed của backend tạo khi `SEED_DEMO_DATA` bật — xem phần "Dữ liệu demo" bên dưới.
 
 ---
 
-## Bước 3 — Cấu hình và chạy Mosquitto (2 Broker)
+## Bước 3 — Cấu hình và chạy Mosquitto
 
-### Tạo file config cho Broker 1 (Sensor ↔ Gateway, port 1883)
+### Sinh chứng chỉ cho Broker MQTT (mTLS)
 
-Tạo file `mosquitto\broker1_local.conf`:
-
-```powershell
-# Tạo thư mục data nếu chưa có
-New-Item -ItemType Directory -Force -Path "e:\WorkSpace\secure-smart-home-iot\mosquitto\data"
-
-# Tạo file config Broker 1
-@'
-listener 1883
-allow_anonymous true
-log_type all
-log_dest stdout
-persistence true
-persistence_location e:\WorkSpace\secure-smart-home-iot\mosquitto\data\broker1\
-'@ | Out-File -Encoding utf8 "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf"
-```
-
-### Sinh chứng chỉ TLS cho Broker 2
-
-Broker 2 chỉ nhận MQTT over TLS (FR-12.3). Mở **Git Bash** ở thư mục gốc repo, truyền IP LAN của máy này (IP mà gateway dùng làm `MQTT_BROKER2_HOST`):
+Broker MQTT chỉ nhận MQTT over **mTLS** (FR-12.3, FR-12.4): cả broker lẫn client (backend, gateway) trình chứng chỉ do CA nội bộ ký. Mở **Git Bash** ở thư mục gốc repo, truyền IP LAN của máy này (host trong NVS `cloud/mqtt_uri` của gateway):
 
 ```bash
 bash infra/pki/gen_mqtt_certs.sh 192.168.1.100
 ```
 
-Script tạo `mosquitto\certs\` (CA + cert broker) và `firmware\gateway-node\include\mqtt_ca_cert.h`. Chỉ cần chạy lại khi đổi IP LAN — CA giữ nguyên nên không phải nạp lại firmware. Chi tiết: [`MQTT_TLS.md`](MQTT_TLS.md).
+Script tạo `infra\mosquitto\certs\` (CA, `ca.crl`, cert broker `server.crt`, cert nginx `web.crt`, 4 cert client của backend trong `clients\`) và chép CA vào `certs\mqtt_ca.crt` của project gateway ESP-IDF. Chỉ cần chạy lại khi đổi IP LAN — CA giữ nguyên nên không phải nạp lại firmware. Mỗi gateway cần thêm chứng chỉ client riêng: `bash infra/pki/gen_mqtt_client.sh <gateway_id>` (2 dòng NVS `cloud/mqtt_cert`, `cloud/mqtt_key` — xem [`LEN_SERVER.md`](LEN_SERVER.md) Bước 3, 5). Chi tiết: [`MQTT_TLS.md`](MQTT_TLS.md).
 
-### Tạo file config cho Broker 2 (Gateway → Backend, TLS port 8883)
+### Tạo file config cho broker (Gateway ↔ Backend, mTLS port 8883)
 
-Tạo file `mosquitto\broker2_local.conf`:
+Tạo file `infra\mosquitto\broker_local.conf` (đường dẫn tuyệt đối tới `acl` và `certs`; tên file này là bản chạy ngoài Docker, **không** commit):
 
 ```powershell
-# Tạo file config Broker 2 — chỉ listener TLS, không còn cổng plaintext
+# Tạo thư mục data nếu chưa có
+New-Item -ItemType Directory -Force -Path "e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\data"
+
+# Tạo file config broker — chỉ listener mTLS + ACL, không còn cổng plaintext, không cho kết nối ẩn danh
 @'
+per_listener_settings false
+allow_anonymous false
+acl_file e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\acl
+
 listener 8883
-cafile   e:\WorkSpace\secure-smart-home-iot\mosquitto\certs\ca.crt
-certfile e:\WorkSpace\secure-smart-home-iot\mosquitto\certs\server.crt
-keyfile  e:\WorkSpace\secure-smart-home-iot\mosquitto\certs\server.key
+cafile   e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\certs\ca.crt
+certfile e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\certs\server.crt
+keyfile  e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\certs\server.key
+crlfile  e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\certs\ca.crl
 tls_version tlsv1.2
-allow_anonymous true
+require_certificate true
+use_identity_as_username true
+use_username_as_clientid true
+
 log_type all
 log_dest stdout
 persistence true
-persistence_location e:\WorkSpace\secure-smart-home-iot\mosquitto\data\broker2\
-'@ | Out-File -Encoding utf8 "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf"
+persistence_location e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\data\
+'@ | Out-File -Encoding ascii "e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\broker_local.conf"
 ```
 
-### Mở Terminal 2 — chạy Broker 1 (port 1883)
+Nội dung khớp `infra/mosquitto/mosquitto.conf` (bản Docker); đổi `ca.crl` hay `acl` thì khởi động lại broker. Không dùng `allow_anonymous true`: backend và gateway đều phải có chứng chỉ client.
+
+### Mở Terminal 2 — chạy broker (TLS port 8883)
 
 ```powershell
 & "C:\Program Files\mosquitto\mosquitto.exe" `
-    -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf" `
-    -v
-```
-
-Output mong đợi:
-```
-1749383000: mosquitto version 2.x.x starting
-1749383000: Opening ipv4 listen socket on port 1883.
-1749383000: mosquitto version 2.x.x running
-```
-
-### Mở Terminal 3 — chạy Broker 2 (TLS port 8883)
-
-```powershell
-& "C:\Program Files\mosquitto\mosquitto.exe" `
-    -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf" `
+    -c "e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\broker_local.conf" `
     -v
 ```
 
@@ -231,7 +210,7 @@ Output mong đợi:
 
 ## Bước 4 — Cấu hình và chạy Backend
 
-### Mở Terminal 4 — dành riêng cho Backend
+### Mở Terminal 3 — dành riêng cho Backend
 
 ```powershell
 cd e:\WorkSpace\secure-smart-home-iot\backend
@@ -261,10 +240,16 @@ DB_NAME=secure_smart_home_iot
 # JWT (phải >= 32 ký tự)
 JWT_SECRET=local_dev_secret_key_change_in_production_32chars
 
-# MQTT Broker 2 (Gateway → Backend layer) — MQTT over TLS
+# MQTT broker (Gateway → Backend layer) — MQTT over TLS
 MQTT_HOST=localhost
 MQTT_PORT=8883
 MQTT_CA_FILE=../infra/mosquitto/certs/ca.crt
+# Thư mục chứng chỉ client của 4 kết nối MQTT (iot-backend-*.crt/.key, do gen_mqtt_certs.sh sinh) — bắt buộc cả khi chạy ngoài Docker
+MQTT_CLIENT_CERT_DIR=../infra/mosquitto/certs/clients
+
+# Khoá mã hoá secret thiết bị (FR-12.8): 64 ký tự hex — openssl rand -hex 32. Dev để trống = lưu dạng rõ (có cảnh báo);
+# PHẢI trùng DEVICE_SECRET_KEY của .env gốc nếu backend và Docker dùng chung DB
+# DEVICE_SECRET_KEY=
 
 # CORS (3 app web gọi cùng origin qua rewrites nên chủ yếu dùng khi gọi thẳng backend)
 FRONTEND_URL=http://localhost:3001
@@ -289,13 +274,16 @@ Tất cả có mặc định an toàn (mẫu đầy đủ: `backend/.env.example
 | `ACTIVATION_CODE_TTL_DAYS` | `180` | Hạn Activation Code (ngày) |
 | `FIRMWARE_STORAGE_DIR` | `storage/firmware` | Thư mục lưu file firmware upload |
 | `TELEMETRY_RETENTION_DAYS` | `8` | Số ngày giữ `sensor_data` (job dọn mỗi giờ) |
+| `DEVICE_SECRET_KEY` | để trống (dev: dạng rõ + cảnh báo) | Khoá AES-256-GCM mã hoá `devices.secret_key` (`enc1:…`); 64 hex; bắt buộc ở production; mất khoá = đăng ký lại thiết bị. `setup.sh`/`setup.bat` tự sinh vào `.env` gốc |
+| `DEVICE_HMAC_V1` | `false` | `true` = nhận lại chữ ký v1 cũ của telemetry, heartbeat, ack lệnh và sự kiện camera (chỉ để chuyển tiếp; không áp dụng cho Camera ↔ Gateway); mặc định telemetry `401 PROTOCOL_V1_DISABLED`, các loại còn lại bị bỏ |
+| `MQTT_CLIENT_CERT_DIR` | `../infra/mosquitto/certs/clients` | Thư mục chứa `iot-backend-{data,commands,heartbeat,camera}.crt/.key` |
 | `TRUST_PROXY` | `false` | Số hop proxy tin cậy. Đặt `1` khi backend chạy sau nginx để lấy đúng IP client (rate-limit, audit) |
 
 > Không commit `.env`. Production: tắt `DEVICE_SIMULATOR` và `SEED_DEMO_DATA`.
 
-> **Quan trọng:** Khi chạy local, `DB_HOST=localhost` (`DB_PORT=5433` với PostgreSQL trong Docker) và `MQTT_HOST=localhost` với `MQTT_PORT=8883` (Broker 2, TLS). `MQTT_HOST` phải nằm trong SAN của cert broker (`localhost` luôn có sẵn).
-> Khác với Docker: `DB_HOST=postgres`, `DB_PORT=5432`, `MQTT_HOST=mqtt-broker-2`, `MQTT_PORT=8883`, `MQTT_CA_FILE=/certs/mqtt-ca.crt` (compose tự đặt).
-> Thiếu file CA thì backend dừng ngay khi khởi động với lỗi `[startup] Cannot read MQTT CA certificate ...`.
+> **Quan trọng:** Khi chạy local, `DB_HOST=localhost` (`DB_PORT=5433` với PostgreSQL trong Docker) và `MQTT_HOST=localhost` với `MQTT_PORT=8883` (Broker MQTT, TLS). `MQTT_HOST` phải nằm trong SAN của cert broker (`localhost` luôn có sẵn).
+> Khác với Docker: `DB_HOST=postgres`, `DB_PORT=5432`, `MQTT_HOST=mqtt-broker`, `MQTT_PORT=8883`, `MQTT_CA_FILE=/certs/mqtt-ca.crt` (compose tự đặt).
+> Thiếu file CA hoặc chứng chỉ client thì backend dừng ngay khi khởi động với lỗi `[startup] Cannot read … at …` (chạy `gen_mqtt_certs.sh`); chạy ngoài Docker cần `MQTT_CLIENT_CERT_DIR` trỏ đúng thư mục `clients`.
 
 ### Cài dependencies
 
@@ -322,12 +310,11 @@ npm run dev
 Output mong đợi:
 ```
 [ts-node-dev] Starting...
-[mqttTracker] connected, subscribing to $SYS logs
 [mqttData] connected, subscribing to gateway/+/data
 [Server] Listening on port 5000
 ```
 
-> **Lần chạy đầu — đọc log backend:** migration V2 và seed chạy ngay lúc khởi động. Tìm dòng `[migrate] FAILED <tên>: …` — nếu có, migration dừng, server vẫn chạy nhưng **seed bị bỏ qua** (sửa lỗi DB rồi khởi động lại). Seed thành công in các dòng `[seed] created …` (không in secret). Seed chạy một lần (đánh dấu `seed_demo_v2` trong `_migrations`) và idempotent.
+> **Lần chạy đầu — đọc log backend:** migration V2 và seed chạy ngay lúc khởi động. Tìm dòng `[migrate] FAILED <tên>: …` — nếu có, migration dừng, server vẫn chạy nhưng **seed bị bỏ qua** (sửa lỗi DB rồi khởi động lại). Seed thành công in dòng `[seed] created users=…` (không in mật khẩu). Seed chạy một lần (đánh dấu `seed_demo_v3` trong `_migrations`) và idempotent; DB còn dữ liệu của seed cũ (`seed_demo_v2`) được dọn một lần, in `[seed] removed legacy demo data: …`.
 
 Kiểm tra nhanh backend đang chạy:
 ```powershell
@@ -342,7 +329,7 @@ curl http://localhost:5000/api/health
 
 ## Bước 5 — Cấu hình và chạy Frontend (3 app web)
 
-### Mở Terminal 5 — dành riêng cho Frontend
+### Mở Terminal 4 — dành riêng cho Frontend
 
 ```powershell
 cd e:\WorkSpace\secure-smart-home-iot\frontend
@@ -431,20 +418,12 @@ foreach ($p in 3001,3002,3003) {
     }
 }
 
-# Mosquitto Broker 1 (Sensor ↔ Gateway)
-$mqtt1 = Get-NetTCPConnection -LocalPort 1883 -ErrorAction SilentlyContinue
-if ($mqtt1) {
-    Write-Host "[Broker 1]  OK — port 1883 đang mở" -ForegroundColor Green
+# Mosquitto broker (Gateway ↔ Backend)
+$mqtt = Get-NetTCPConnection -LocalPort 8883 -ErrorAction SilentlyContinue
+if ($mqtt) {
+    Write-Host "[Broker MQTT]  OK — port 8883 (TLS) đang mở" -ForegroundColor Green
 } else {
-    Write-Host "[Broker 1]  FAIL — port 1883 chưa mở" -ForegroundColor Red
-}
-
-# Mosquitto Broker 2 (Gateway → Backend)
-$mqtt2 = Get-NetTCPConnection -LocalPort 8883 -ErrorAction SilentlyContinue
-if ($mqtt2) {
-    Write-Host "[Broker 2]  OK — port 8883 (TLS) đang mở" -ForegroundColor Green
-} else {
-    Write-Host "[Broker 2]  FAIL — port 8883 (TLS) chưa mở" -ForegroundColor Red
+    Write-Host "[Broker MQTT]  FAIL — port 8883 (TLS) chưa mở" -ForegroundColor Red
 }
 ```
 
@@ -457,31 +436,25 @@ Mở trình duyệt:
 | **Admin console** | http://localhost:3001 |
 | **Operator console** | http://localhost:3002 |
 | **Cổng khách hàng** | http://localhost:3003 |
+
+(Chạy bằng Docker có nginx: HTTPS tại `https://localhost` (Admin), `https://operator.localhost`, `https://user.localhost`; cổng 80 chỉ chuyển hướng 301 sang https. Chứng chỉ do CA nội bộ ký nên trình duyệt phải tin `infra/mosquitto/certs/ca.crt`: Windows `certutil -addstore -user Root infra\mosquitto\certs\ca.crt` rồi mở lại trình duyệt; Android cài làm chứng chỉ CA. Trình duyệt coi `*.localhost` là bối cảnh an toàn nên micro của Trợ lý dùng được.)
 | **Backend Health** | http://localhost:5000/api/health |
 
 Mỗi app chỉ nhận đúng role của nó; đăng nhập nhầm cổng sẽ được hướng dẫn sang cổng đúng. Cookie phiên tách theo cổng (`sh_admin` / `sh_operator` / `sh_user`) nên đăng nhập 3 app cùng lúc không ghi đè nhau.
 
 ### Dữ liệu demo (seed)
 
-Khi `SEED_DEMO_DATA` bật (mặc định ở môi trường không phải production), backend seed dữ liệu demo — mọi thiết bị trong nhà demo là thiết bị mô phỏng (`is_simulated=1`).
+Khi `SEED_DEMO_DATA` bật (mặc định ở môi trường không phải production), backend chỉ seed **tài khoản** — không có nhà, thiết bị, số đo, firmware hay log giả (từ 2026-11-13). Nhà và thiết bị đến từ phần cứng thật: Admin/Operator đăng ký ở trang **Đăng ký Gateway** của console (`/gateways/register`) cho bất kỳ tài khoản khách nào, hoặc dùng công cụ dev `npm run hw:register` (xem [LEN_SERVER](LEN_SERVER.md)). DB đã chạy seed cũ được tự dọn dữ liệu mô phỏng một lần khi backend khởi động (nhà có gateway thật được giữ nguyên).
 
 | Vai trò | Đăng nhập | Mật khẩu | Cổng |
 |---|---|---|---|
 | Admin | `admin` | `admin123` | 3001 |
 | Operator | `operator01` (và `operator02`) | `operator123` | 3002 |
-| Khách hàng | `user01@smarthome.local` (chủ "Nhà của Đạt") | `user123` | 3003 / Mobile |
-| Khách hàng | `lan@…`, `hoa@…`, `hung@…`, `kimanh@…` (`@smarthome.local`; `kimanh` chưa có nhà) | `user123` | 3003 / Mobile |
+| Khách hàng | `user01@smarthome.local` (chủ nhà có phần cứng demo sau khi đăng ký gateway, xem [LEN_SERVER](LEN_SERVER.md)) | `user123` | 3003 / Mobile |
 
-Activation Code để thử luồng claim (Thêm Smart Home / quét QR):
+Tài khoản khách khác: tự tạo ở cổng khách hàng (http://localhost:3003/register) rồi Admin/Operator đăng ký gateway cho tài khoản đó. Seed không còn tạo mã kích hoạt (Activation Code) — nhà đăng ký từ console đã có chủ ngay.
 
-| Code | Trạng thái |
-|---|---|
-| `7K2M-9QXA-4TPB` | Hợp lệ |
-| `H3VD-8NRW-2CYE` | Hợp lệ |
-| `Q4ZT-6MJK-1PSX` | Đã dùng |
-| `B9FE-3WRA-7GMK` | Hết hạn |
-
-> Mật khẩu/mã trên chỉ là dữ liệu demo local — không dùng ở production.
+> Mật khẩu trên chỉ là dữ liệu demo local — không dùng ở production.
 
 ---
 
@@ -490,17 +463,14 @@ Activation Code để thử luồng claim (Thêm Smart Home / quét QR):
 ```
 Mỗi lần mở máy muốn chạy hệ thống, làm theo thứ tự này:
 
-[Terminal 2] Mosquitto Broker 1 (Sensor ↔ Gateway, port 1883)
-  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker1_local.conf" -v
+[Terminal 2] Mosquitto broker (Gateway ↔ Backend, mTLS port 8883)
+  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\secure-smart-home-iot\infra\mosquitto\broker_local.conf" -v
 
-[Terminal 3] Mosquitto Broker 2 (Gateway → Backend, TLS port 8883)
-  & "C:\Program Files\mosquitto\mosquitto.exe" -c "e:\WorkSpace\secure-smart-home-iot\mosquitto\broker2_local.conf" -v
-
-[Terminal 4] Backend
+[Terminal 3] Backend
   cd e:\WorkSpace\secure-smart-home-iot\backend
   npm run dev
 
-[Terminal 5] Frontend (3 app: 3001 / 3002 / 3003)
+[Terminal 4] Frontend (3 app: 3001 / 3002 / 3003)
   cd e:\WorkSpace\secure-smart-home-iot\frontend
   npm run dev
 
@@ -523,6 +493,52 @@ Chỉ áp dụng cho thiết bị mô phỏng (thiết bị thật → `409 NOT_
 
 ---
 
+## Bước 6c — Trợ lý AI giọng nói/chữ (tuỳ chọn, cần OpenAI key)
+
+Nút mic ở web khách hàng (:3003) gửi câu tiếng Việt tới dịch vụ Python `agent/`, agent gọi backend qua `/api/service/agent/**`. Không có agent thì web báo "Trợ lý đang tạm bận", hẹn giờ thủ công vẫn chạy. Gọi OpenAI **tốn phí**.
+
+**Biến cần đặt** (không commit, không dán vào chat):
+
+| File | Biến | Giá trị |
+|---|---|---|
+| `backend/.env` | `SERVICE_API_TOKEN` | Chuỗi ngẫu nhiên ≥ 32 ký tự |
+| `agent/.env` | `OPENAI_API_KEY` | Key OpenAI |
+| `agent/.env` | `BACKEND_SERVICE_TOKEN` | **Cùng giá trị** với `SERVICE_API_TOKEN` của backend |
+| `agent/.env` | `STT_PROVIDER` | `openai` |
+| `agent/.env` | `STT_OPENAI_MODEL` | `gpt-4o-mini-transcribe` |
+| `agent/.env` | `BACKEND_URL` | `http://localhost:5000` |
+| `agent/.env` | `OPENAI_REASONING_EFFORT` | Mức suy luận của model planner (gpt-5-mini): `low` (mặc định, nhanh), `none`/`minimal`/`medium`/`high`; `default` = không gửi tham số, dùng mặc định của model (chậm hơn). Không đặt thì dùng `low` |
+
+**Hành vi (từ 2026-11-15):** câu nói/gõ **rõ** ("bật đèn phòng khách", "8h tối tắt quạt") thì Trợ lý **làm ngay** hoặc **tự hẹn giờ** rồi báo kết quả, không cần bấm xác nhận; câu chưa rõ (nhà có nhiều đèn mà chỉ nói "bật đèn", thiếu động từ, phủ định "đừng tắt đèn", câu hỏi "bật đèn được không", điều kiện "nếu trời tối thì bật đèn", giờ mơ hồ "8h bật đèn" không nói sáng hay tối) thì Trợ lý hỏi lại hoặc hiện thẻ "Cần xác nhận". Luật chi tiết: [API](../API_DESIGN.md) §5.1 "Trợ lý AI".
+
+**Đo thời gian phản hồi:** mỗi request, agent ghi **một** dòng log INFO có thời gian từng chặng (chỉ số đo, không có nội dung câu nói), dạng `Trợ lý <8 ký tự đầu request_id>: kênh=voice|text context=…ms stt=…ms planner=…ms backend=…ms tổng=…ms kết quả=…` (chặng không chạy tới ghi `-`). Dùng để so sánh các mức `OPENAI_REASONING_EFFORT`: đổi giá trị trong `agent/.env`, restart agent, thử cùng một câu và đọc dòng log.
+
+> Ai đã có `agent/.env` tạo từ mẫu cũ (`setup.sh` chỉ tạo khi chưa có) phải tự đổi `STT_PROVIDER` / `STT_OPENAI_MODEL` theo bảng trên; đối chiếu với `agent/.env.example`. Đổi `SERVICE_API_TOKEN` thì restart backend.
+
+**Chạy local (Windows)** — terminal riêng, venv tạo bằng `make agent-venv` (hoặc xem `agent/README.md`):
+
+```powershell
+cd e:\WorkSpace\secure-smart-home-iot\agent
+.venv\Scripts\python -m uvicorn smarthome_agent.main:app --app-dir src --port 8000
+
+# Terminal khác — 3 cờ phải đều true
+curl http://localhost:8000/health
+# {"status":"ok","llm_configured":true,"stt_ready":true,"backend_configured":true}
+```
+
+Mở web `http://localhost:3003` (dùng `localhost` để trình duyệt cho phép micro; Next rewrite `/api/agent/*` → `localhost:8000`). Đăng nhập tài khoản khách hàng, bấm nút mic ở header, nói hoặc gõ "8h tối bật đèn". Nút mic không chạy được trên `http://<IP-LAN>` vì trình duyệt chỉ cho micro ở HTTPS hoặc `localhost`.
+
+**Chạy bằng Docker:** `docker compose up -d --build` có service `agent`; vào web qua nginx `https://user.localhost` (nginx chuyển `/api/agent/` → `agent:8000`; agent lỗi chỉ làm tính năng này trả 502).
+
+**Đánh giá chất lượng câu lệnh** (cần key, tốn phí, không chạy trong CI):
+
+```powershell
+cd e:\WorkSpace\secure-smart-home-iot\agent
+.venv\Scripts\python eval/run_eval.py
+```
+
+---
+
 ## Bước 7 — Chạy Mobile (Flutter, tuỳ chọn)
 
 ```powershell
@@ -532,14 +548,23 @@ flutter pub get
 # Gọi backend thật — thay <LAN-IP> bằng IP máy chạy backend
 flutter run --dart-define=API_BASE_URL=http://<LAN-IP>:5000
 
-# Hoặc chạy hoàn toàn bằng dữ liệu giả, không cần backend
+# Có Trợ lý AI (Bước 6c) / chạy như production: đi qua nginx HTTPS cổng 443 của Docker — origin không kèm cổng :5000.
+# Cert của nginx do CA nội bộ ký nên app phải nạp CA: API_CA_PEM_BASE64 = base64 của infra/mosquitto/certs/ca.crt
+# (mobile/lib/core/config/trusted_ca_io.dart; không tắt kiểm chứng TLS)
+flutter run --dart-define=API_BASE_URL=https://<LAN-IP> --dart-define=API_CA_PEM_BASE64=<base64 của ca.crt>
+
+# Hoặc chạy hoàn toàn bằng dữ liệu giả, không cần backend (Trợ lý trả lời bằng dữ liệu giả;
+# tài khoản user01@smarthome.local có đúng nhà demo như trên web: "Nhà của Nguyễn Hoàng Đạt" với Phòng khách + Camera)
 flutter run --dart-define=USE_MOCK=true
 ```
 
 - Android emulator: mặc định `API_BASE_URL=http://10.0.2.2:5000` (alias tới localhost của máy host), không cần truyền.
 - Thiết bị thật: điện thoại và máy chạy backend cùng mạng LAN; dùng IP LAN của máy, không dùng `localhost`.
-- Đăng nhập bằng tài khoản khách hàng ở bảng seed (ví dụ `user01@smarthome.local` / `user123`). Realtime qua WebSocket `/api/mobile/ws`.
-- Kiểm tra: `flutter analyze && flutter test`.
+- Đăng nhập bằng **email hoặc mã người dùng** (dạng `ten#1234`) của tài khoản khách hàng ở bảng seed (ví dụ `user01@smarthome.local` / `user123`). Màn "Quên mật khẩu?" giống web (chưa tự đặt lại được). Realtime qua WebSocket `/api/mobile/ws`.
+- **Trợ lý AI** (nút mic giữa thanh điều hướng): Mobile gọi agent tại `AGENT_BASE_URL`, mặc định `<API_BASE_URL>/api/agent`. nginx (cổng 443; cổng 80 chỉ 301 sang https) (`docker compose up`) chỉ chuyển `/api/agent/` sang agent khi request có `Authorization: Bearer …`; gọi thẳng backend `:5000` thì Trợ lý báo "chưa sẵn sàng trên máy chủ này". Muốn dùng Trợ lý khi chạy backend `:5000` + agent trên máy (Bước 6c): máy ảo Android thêm `--dart-define=AGENT_BASE_URL=http://10.0.2.2:8000/v1` (gọi thẳng agent dev). Cần `OPENAI_API_KEY` ở `agent/.env`, nếu không agent báo chưa bật.
+- **Micro:** lần đầu giữ nút mic app xin quyền ghi âm (Android `RECORD_AUDIO`, iOS `NSMicrophoneUsageDescription`). Âm thanh ghi tối đa 30 giây, giữ trong RAM, gửi agent rồi bỏ, không lưu file. Cách dùng: giữ nút mic để nói, thả tay để gửi, kéo ngón tay ra xa rồi thả để huỷ; chạm nhanh chỉ mở Trợ lý. Lần đầu hộp thoại quyền làm tay nhả ra thì giữ lại lần nữa.
+- **Camera xem trực tiếp:** chi tiết thiết bị camera có khung "Xem trực tiếp" (WebSocket `/api/mobile/cameras/:id/live`); cần camera thật đã gán Gateway (camera mô phỏng báo không hỗ trợ). Trang chủ có mục **Camera** (ảnh mới nhất + nút "Xem trực tiếp" mở thẳng và tự phát). Ở chế độ dữ liệu giả (`USE_MOCK=true`) camera là camera giả: có vài ảnh chụp mẫu và "Xem trực tiếp" phát hình mô phỏng (~5 hình/giây), không phải hình từ camera thật.
+- Kiểm tra: `flutter analyze && dart run tool/check_architecture.dart && flutter test` (236 test).
 
 ---
 
@@ -594,18 +619,18 @@ Phải đủ **32 ký tự trở lên**.
 Mosquitto chưa chạy hoặc sai port.
 
 ```powershell
-# Kiểm tra port 1883 (Broker 1) và 8883 (Broker 2, TLS) có mở không
-Get-NetTCPConnection -LocalPort 1883 -ErrorAction SilentlyContinue
+# Kiểm tra port 8883 (broker, TLS) có mở không
 Get-NetTCPConnection -LocalPort 8883 -ErrorAction SilentlyContinue
-# Nếu không thấy gì → Mosquitto chưa chạy → chạy lại Terminal 2 và/hoặc Terminal 3
+# Nếu không thấy gì → Mosquitto chưa chạy → chạy lại Terminal 2
 ```
 
-Port mở nhưng backend log `[mqttData] error: ...` → lỗi TLS. Kiểm tra bằng Git Bash: `bash tests/security/check_mqtt_tls.sh localhost 8883`
+Port mở nhưng backend log `[mqttData] error: ...` → lỗi TLS/chứng chỉ. Kiểm tra bằng Git Bash: `bash tests/security/check_mqtt_tls.sh localhost 8883` (5 phép thử mTLS; cần cert client backend). Kiểm ACL của broker chạy trong Docker: `bash tests/security/check_mqtt_acl.sh <gateway_id>`.
 
 | Lỗi backend | Nguyên nhân | Cách sửa |
 |---|---|---|
 | `self-signed certificate in certificate chain` | `MQTT_CA_FILE` trỏ tới CA khác CA đã ký cert broker | Trỏ về `infra/mosquitto/certs/ca.crt` hiện tại; khởi động lại broker sau khi sinh cert |
 | `Hostname/IP does not match certificate's altnames` | `MQTT_HOST` không có trong SAN của cert | Chạy lại `gen_mqtt_certs.sh` kèm host đó, hoặc dùng `localhost` |
+| `alert certificate required` / `bad certificate` / `Cannot read … clients/…` | Thiếu hoặc sai chứng chỉ client của backend (`MQTT_CLIENT_CERT_DIR`) | Chạy `gen_mqtt_certs.sh <IP>`; đặt `MQTT_CLIENT_CERT_DIR=../infra/mosquitto/certs/clients` |
 | `connect ECONNREFUSED ...:1884` | `.env` cũ còn `MQTT_PORT=1884` (cổng plaintext đã bỏ) | `MQTT_PORT=8883` |
 
 ### Lỗi Frontend: `Failed to fetch` / API trả về 500

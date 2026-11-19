@@ -1,0 +1,20 @@
+{
+  "name": "@shh/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Gọi API backend (cookie + X-Portal), SWR theo kênh, DTO và câu lỗi tiếng Việt. Tách cửa ra theo kênh: /dashboard, /portal.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./dashboard": "./src/dashboard/index.ts",
+    "./portal": "./src/portal/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "swr": "^2.4.1"
+  },
+  "peerDependencies": {
+    "react": "19.2.4"
+  }
+}

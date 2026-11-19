@@ -30,36 +30,26 @@ services:
       timeout: 5s
       retries: 5
 
-  # Broker 1: Sensor Node → Gateway Node (port 1883)
-  mqtt-broker-1:
+  # Broker MQTT: Gateway ↔ Backend — chỉ MQTT over TLS hai chiều (mTLS, port 8883) + ACL theo CN chứng chỉ client.
+  # Node nói với Gateway qua ESP-NOW, không qua MQTT, nên chỉ cần 1 broker.
+  # Chạy infra/pki/gen_mqtt_certs.sh <IP LAN> trước lần up đầu tiên (CA, cert broker/nginx, cert client backend, CRL);
+  # mỗi gateway cần cert client: infra/pki/gen_mqtt_client.sh <gateway_id>. Đổi acl/CRL → docker compose restart mqtt-broker.
+  mqtt-broker:
     image: eclipse-mosquitto:2
-    container_name: iot-mosquitto-1
-    restart: unless-stopped
-    ports:
-      - "1883:1883"
-    volumes:
-      - ./infra/mosquitto/broker1/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - mosquitto1_data:/mosquitto/data
-      - mosquitto1_logs:/mosquitto/log
-    networks:
-      - iot-network
-
-  # Broker 2: Gateway Node → Backend — chỉ MQTT over TLS (port 8883)
-  # Chạy infra/pki/gen_mqtt_certs.sh <IP LAN> trước lần up đầu tiên.
-  mqtt-broker-2:
-    image: eclipse-mosquitto:2
-    container_name: iot-mosquitto-2
+    container_name: iot-mosquitto
     restart: unless-stopped
     ports:
       - "8883:8883"
     volumes:
-      - ./infra/mosquitto/broker2/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/mosquitto/acl:/mosquitto/config/acl:ro
       # ca.key không mount vào container nào
       - ./infra/mosquitto/certs/ca.crt:/mosquitto/certs/ca.crt:ro
+      - ./infra/mosquitto/certs/ca.crl:/mosquitto/certs/ca.crl:ro
       - ./infra/mosquitto/certs/server.crt:/mosquitto/certs/server.crt:ro
       - ./infra/mosquitto/certs/server.key:/mosquitto/certs/server.key:ro
-      - mosquitto2_data:/mosquitto/data
-      - mosquitto2_logs:/mosquitto/log
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
     networks:
       - iot-network
 
@@ -67,14 +57,22 @@ services:
     image: nginx:alpine
     container_name: iot-nginx
     ports:
+      # 80 chỉ chuyển hướng sang 443 (NFR-S1)
       - "80:80"
+      # HTTPS cho web, app Mobile và gateway (ảnh camera, fallback /api/device/data) — web.crt của infra/pki/gen_mqtt_certs.sh
+      - "443:443"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Chỉ cert + khoá web (không mount ca.key, không dùng chung khoá với broker)
+      - ./infra/mosquitto/certs/web.crt:/etc/nginx/certs/web.crt:ro
+      - ./infra/mosquitto/certs/web.key:/etc/nginx/certs/web.key:ro
     depends_on:
       - backend
       - frontend-admin
       - frontend-operator
       - frontend-user
+      # Không phụ thuộc `agent`: nginx phân giải tên agent khi có request (location /api/agent/), agent lỗi chỉ làm
+      # /api/agent/ trả 502, phần còn lại vẫn chạy.
     networks:
       - iot-network
     restart: unless-stopped
@@ -90,8 +88,14 @@ services:
       - ./backend:/app
       - /app/node_modules
       - ./infra/mosquitto/certs/ca.crt:/certs/mqtt-ca.crt:ro
+      # Chứng chỉ client MQTT của 4 kết nối backend (chỉ thư mục clients/, không có cert/khoá của gateway hay CA)
+      - ./infra/mosquitto/certs/clients:/certs/clients:ro
     env_file:
       - ./backend/.env
+    # Backend vừa qua nginx vừa publish :5000 cho dev/attack demo — KHÔNG bật TRUST_PROXY ở dev (gọi thẳng :5000 giả được
+    # X-Forwarded-For để né rate limit). Hệ quả: mọi client qua nginx chung một IP; riêng đường thiết bị (snapshot camera,
+    # telemetry HTTP, uplink camera live) giới hạn lỗi xác thực theo xô `ip|gateway_id` nên gateway thật không bị
+    # ảnh hưởng bởi request rác của gateway_id khác. Prod (compose.prod.yaml) không publish cổng và đặt TRUST_PROXY=1.
     environment:
       # Override host values so Docker always uses service names,
       # regardless of what DB_HOST/MQTT_HOST are set to in .env
@@ -102,21 +106,33 @@ services:
       - DB_USER=${POSTGRES_APP_USER:-secure_smart_home_app}
       - DB_PASS=${POSTGRES_APP_PASSWORD:?Thiếu POSTGRES_APP_PASSWORD trong .env (xem .env.example)}
       - DB_NAME=${POSTGRES_DB:-secure_smart_home_iot}
-      # Backend chỉ kết nối Broker 2 (gateway → backend layer) qua TLS
-      - MQTT_HOST=mqtt-broker-2
+      # Backend kết nối broker MQTT qua mTLS
+      - MQTT_HOST=mqtt-broker
       - MQTT_PORT=8883
       - MQTT_CA_FILE=/certs/mqtt-ca.crt
-      - FRONTEND_URL=http://localhost
+      - MQTT_CLIENT_CERT_DIR=/certs/clients
+      # Khoá mã hoá secret thiết bị khi lưu (FR-12.8, 64 hex) — .env gốc; trống = lưu dạng rõ (dev, có cảnh báo).
+      # MẤT KHOÁ = mọi thiết bị phải đăng ký lại. Chạy backend ngoài Docker thì đặt CÙNG giá trị trong backend/.env.
+      - DEVICE_SECRET_KEY=${DEVICE_SECRET_KEY:-}
+      # true = tạm nhận telemetry chữ ký v1 (phần cứng chưa nạp firmware v2). Mặc định từ chối.
+      - DEVICE_HMAC_V1=${DEVICE_HMAC_V1:-false}
+      # Origin được phép (CORS + kiểm Origin của WebSocket xem camera, chống CSWSH). Dev: 3 app Next mở thẳng ở
+      # :3001/:3002/:3003 — Next dev chuyển tiếp WebSocket /api/* sang backend nhưng đổi Host thành backend:5000, nên
+      # Origin http://localhost:3003 phải có trong danh sách, nếu không backend trả 403 ORIGIN_NOT_ALLOWED. Qua nginx
+      # (http://user.localhost) là cùng origin, không cần khai báo. Prod (compose.prod.yaml) chỉ giữ origin thật.
+      - FRONTEND_URL=${FRONTEND_URL:-https://localhost,http://localhost:3001,http://localhost:3002,http://localhost:3003}
     depends_on:
       postgres:
         condition: service_healthy
-      mqtt-broker-2:
+      mqtt-broker:
         condition: service_started
     networks:
       - iot-network
     restart: unless-stopped
 
-  # Frontend: 3 app Next.js trong frontend/ (npm workspaces), mỗi role một app.
+  # Frontend: 3 app Next.js trong frontend/apps/ (npm workspaces), mỗi role một app. Source bind-mount,
+  # node_modules ở anonymous volume — đổi phụ thuộc thì `docker compose up --build --renew-anon-volumes`
+  # (make dev), nếu không compose giữ node_modules cũ của container trước.
   frontend-admin:
     build:
       context: ./frontend
@@ -129,7 +145,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/admin/.next
+      - /app/apps/admin/.next
     environment:
       - BACKEND_URL=http://backend:5000
       - WATCHPACK_POLLING=true
@@ -152,7 +168,7 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/operator/.next
+      - /app/apps/operator/.next
     environment:
       - BACKEND_URL=http://backend:5000
       - WATCHPACK_POLLING=true
@@ -175,9 +191,11 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      - /app/user/.next
+      - /app/apps/user/.next
     environment:
       - BACKEND_URL=http://backend:5000
+      # Next dev chuyển /api/agent/* sang agent (rewrite đặt trước /api/*) khi mở thẳng :3003; qua nginx thì nginx xử lý.
+      - AGENT_URL=http://agent:8000
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true
     depends_on:
@@ -186,12 +204,39 @@ services:
       - iot-network
     restart: unless-stopped
 
+  # AI Agent (agent/, Python FastAPI) — Trợ lý giọng nói/chữ của app user (STT + LLM điều phối, backend quyết định
+  # quyền/đặt lịch). Lúc khởi động không chờ service nào (chỉ gọi backend khi xử lý câu lệnh) nên chạy riêng được:
+  # `docker compose up --build agent` (khi đó chỉ /health và lỗi AGENT_UNAVAILABLE).
+  # Source bind-mount + --app-dir để import từ /app/src (ưu tiên hơn bản cài trong image) và tự reload.
+  agent:
+    build:
+      context: ./agent
+    container_name: iot-agent
+    command: ["uvicorn", "smarthome_agent.main:app", "--app-dir", "/app/src",
+              "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/src"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./agent/src:/app/src:ro
+      - ./agent/prompts:/app/prompts:ro
+    # Thiếu agent/.env vẫn chạy (OPENAI_API_KEY trống → /health báo llm_configured=false).
+    env_file:
+      - path: ./agent/.env
+        required: false
+    environment:
+      - AGENT_ENV=development
+      - BACKEND_URL=http://backend:5000
+      - AGENT_CORS_ORIGINS=https://localhost,https://user.localhost,http://localhost:3003
+      # Bind mount từ Windows/macOS không phát sự kiện inotify — reload phải poll.
+      - WATCHFILES_FORCE_POLLING=true
+    networks:
+      - iot-network
+    restart: unless-stopped
+
 volumes:
   pg_data:
-  mosquitto1_data:
-  mosquitto1_logs:
-  mosquitto2_data:
-  mosquitto2_logs:
+  mosquitto_data:
+  mosquitto_logs:
 
 networks:
   iot-network:

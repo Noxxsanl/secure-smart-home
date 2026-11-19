@@ -26,7 +26,7 @@ jobs:
       database: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.database == 'true' }}
       frontend: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.frontend == 'true' }}
       mobile: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.mobile == 'true' }}
-      firmware: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.firmware == 'true' }}
+      agent: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.agent == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -39,7 +39,7 @@ jobs:
               - '.github/workflows/ci.yml'
             database:
               - 'infra/postgres/**'
-              - 'backend/src/config/migrate.ts'
+              - 'backend/src/infrastructure/database/migrate.ts'
               - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
@@ -47,10 +47,8 @@ jobs:
             mobile:
               - 'mobile/**'
               - '.github/workflows/ci.yml'
-            firmware:
-              - 'firmware/gateway-node/**'
-              - 'firmware/sensor-node/**'
-              - 'infra/pki/gen_mqtt_certs.sh'
+            agent:
+              - 'agent/**'
               - '.github/workflows/ci.yml'
 
   # Bất biến 3 (CLAUDE.md): không commit credential/khoá, không tắt kiểm chứng TLS.
@@ -65,11 +63,14 @@ jobs:
           bad=$(git ls-files | grep -E \
             -e '(^|/)config_(1|2|gw)\.h$' \
             -e '(^|/)mqtt_ca_cert\.h$' \
+            -e '(^|/)nvs_[^/]*\.(csv|bin)$' \
+            -e '(^|/)nvs_[^/]*\.csv\.' \
+            -e '(^|/)certs/mqtt_client\.(crt|key)$' \
             -e '(^|/)\.env$' \
             -e '(^|/)\.env(\..+)?\.local$' \
             -e '^infra/mosquitto/certs/' \
             -e '\.(key|pem|p12|pfx)$' \
-            | grep -v '^infra/mosquitto/certs/\.gitkeep$' || true)
+            | grep -vE -e '^infra/mosquitto/certs/\.gitkeep$' -e '(^|/)nvs_[^/]*\.csv\.example$' || true)
           if [ -n "$bad" ]; then
             echo "::error::File bí mật bị commit — xoá khỏi git (git rm --cached) và đổi secret:"
             echo "$bad"
@@ -90,7 +91,7 @@ jobs:
           fi
 
   backend:
-    name: Backend (tsc)
+    name: Backend (tsc + kiến trúc + test)
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -106,6 +107,10 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npx tsc --noEmit
+      # Quy tắc module → feature + chủ sở hữu bảng (backend/tools/check-architecture.mjs, giải thích ở src/modules/README.md)
+      - run: npm run check:arch
+      # Test node:test (chữ ký telemetry v2, mã hoá secret, parse envelope) — không cần DB/broker
+      - run: npm test
 
   # Bắt lỗi cú pháp/thứ tự FK của schema PostgreSQL sớm (backend chỉ chạy tsc, không chạm DB).
   # PostgreSQL ở đây là service container dùng-một-lần; mật khẩu chỉ có tác dụng trong job này.
@@ -148,7 +153,7 @@ jobs:
           [ "$tables" -ge 24 ] && [ "$triggers" -ge 4 ]
 
   frontend:
-    name: Frontend (typecheck, lint, build)
+    name: Frontend (typecheck, kiến trúc, lint, build)
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
@@ -166,16 +171,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - uses: actions/cache@v6
         with:
-          path: frontend/*/.next/cache
+          path: frontend/apps/*/.next/cache
           key: next-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-${{ github.sha }}
           restore-keys: next-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
       - run: npm ci
       - run: npm run typecheck
+      # Quy tắc phụ thuộc app → module → ui/api-client/utils (frontend/scripts/check-architecture.mjs, giải thích ở frontend/README.md)
+      - run: npm run check:arch
       - run: npm run lint
       - run: npm run build
 
   mobile:
-    name: Mobile (analyze, test)
+    name: Mobile (analyze, check:arch, test)
     needs: changes
     if: needs.changes.outputs.mobile == 'true'
     runs-on: ubuntu-latest
@@ -191,42 +198,27 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter analyze
+      # Quy tắc module → feature (mobile/tool/check_architecture.dart, giải thích ở mobile/README.md)
+      - run: dart run tool/check_architecture.dart
       - run: flutter test
 
-  firmware:
-    name: Firmware (${{ matrix.node }})
+  agent:
+    name: Agent (ruff, pytest)
     needs: changes
-    if: needs.changes.outputs.firmware == 'true'
+    if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - node: gateway-node
-            config: config_gw
-          - node: sensor-node
-            config: config_1
+    defaults:
+      run:
+        working-directory: agent
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.platformio/.cache
-            ~/.platformio/packages
-            ~/.platformio/platforms
-          key: pio-${{ runner.os }}-${{ hashFiles('firmware/*/platformio.ini') }}
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - run: pip install --upgrade platformio
-
-      # config_*.h thật bị gitignore (chứa WiFi/secret) — CI build bằng file mẫu.
-      - name: Dùng cấu hình mẫu
-        run: cp firmware/${{ matrix.node }}/include/${{ matrix.config }}.example.h firmware/${{ matrix.node }}/include/${{ matrix.config }}.h
-
-      # mqtt_ca_cert.h cũng bị gitignore — sinh CA dùng-một-lần trên runner (không upload đi đâu).
-      - name: Sinh CA tạm cho gateway
-        if: matrix.node == 'gateway-node'
-        run: bash infra/pki/gen_mqtt_certs.sh
-
-      - run: pio run -d firmware/${{ matrix.node }}
+          cache: pip
+          cache-dependency-path: agent/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      # Không có agent/.env trên runner — test tự đặt biến cần thiết, không gọi OpenAI thật.
+      - run: pytest

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  IoT Security – Extended Attack Demo (6 kịch bản nâng cao)
+#  IoT Security – Extended Attack Demo (6 kịch bản nâng cao, telemetry chữ ký v2)
 #
 #  Bổ sung cho attack_demo.sh:
-#  • S2: Sensor HMAC Layer 2 fail
-#  • S4: Replay Attack – timestamp tương lai
-#  • S6: Blocked device với HMAC đúng
-#  • S7: Unregistered device
-#  • S9: Inactive device (cần ADMIN_USER/ADMIN_PASS)
-#  • S10: RBAC REST API violation (cần ADMIN_USER/ADMIN_PASS)
+#  • S5: Gateway bị chiếm (có secret gateway) bịa số đo Node → lớp chữ ký Node độc lập chặn
+#  • S6: Replay – timestamp tương lai
+#  • S7: Thiết bị đã bị khoá (khoá trên Dashboard trước) với chữ ký đúng
+#  • S8: Thiết bị chưa đăng ký
+#  • S9: Thiết bị inactive (cần ADMIN_USER/ADMIN_PASS)
+#  • S10: Vi phạm RBAC REST API (cần ADMIN_USER/ADMIN_PASS)
 #
 #  Yêu cầu: curl, openssl, python3
 #  Cách dùng:
@@ -36,12 +36,10 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-hmac_sha256() {
-    local key="$1" msg="$2"
-    # Backend dùng secret_key hex string trực tiếp làm key — KHÔNG decode sang binary
-    echo -n "$msg" | openssl dgst -sha256 -hmac "$key" -hex 2>/dev/null \
-        | sed 's/^.* //'
-}
+# hmac_sha256, sha256_hex, next_ctr, build_v2, build_v1 (chuỗi ký v2 — API_DESIGN §3)
+# shellcheck source=tests/security/lib_v2.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib_v2.sh"
+DATA_OK='{"temperature":28.5,"humidity":65.0}'
 
 now_ts() { date +%s; }
 
@@ -103,23 +101,7 @@ call_api() {
 }
 
 build_valid_payload() {
-    local gw_ts sn_ts gw_hmac sn_hmac
-    gw_ts=$(now_ts); sn_ts=$(now_ts)
-    gw_hmac=$(hmac_sha256 "$GW_SECRET" "${GW_ID}:${gw_ts}")
-    sn_hmac=$(hmac_sha256 "$SN_SECRET" "${SN_ID}:${sn_ts}")
-    cat <<PAYLOAD
-{
-  "gateway_id":   "$GW_ID",
-  "gw_timestamp": $gw_ts,
-  "gw_hmac":      "$gw_hmac",
-  "sensor_payload": {
-    "sensor_id":    "$SN_ID",
-    "sn_timestamp": $sn_ts,
-    "sn_hmac":      "$sn_hmac",
-    "data":         { "temperature": 28.5, "humidity": 65.0 }
-  }
-}
-PAYLOAD
+    build_v2 "$GW_ID" "$GW_SECRET" "$SN_ID" "$SN_SECRET" "$DATA_OK"
 }
 
 print_header() {
@@ -144,30 +126,19 @@ echo -e "${BLUE}╚════════════════════�
 # ══════════════════════════════════════════════════════════════════════════════
 #  SCENARIO 5: Sensor HMAC fail (Layer 2) – Gateway pass, Sensor fail
 # ══════════════════════════════════════════════════════════════════════════════
-print_header "SCENARIO 5: Sensor HMAC fake – Layer 2 fail (kỳ vọng: 401 SENSOR_AUTH_FAIL)"
-print_note "Gateway HMAC đúng, nhưng sn_hmac bịa đặt → Layer 2 (Sensor) bị từ chối"
-print_note "Bảo vệ: xác thực 2 lớp độc lập — cả 2 HMAC phải đúng trước khi ghi data"
-GW_TS=$(now_ts); SN_TS=$(now_ts)
-GW_HMAC_OK=$(hmac_sha256 "$GW_SECRET" "${GW_ID}:${GW_TS}")
-S2_PAYLOAD=$(cat <<EOF
-{
-  "gateway_id":   "$GW_ID",
-  "gw_timestamp": $GW_TS,
-  "gw_hmac":      "$GW_HMAC_OK",
-  "sensor_payload": {
-    "sensor_id":    "$SN_ID",
-    "sn_timestamp": $SN_TS,
-    "sn_hmac":      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "data":         { "temperature": 99.9, "humidity": 0.0 }
-  }
-}
-EOF
-)
-echo "Payload (gw_hmac đúng | sn_hmac = 'aaa...' — bịa đặt):"
-echo "$S2_PAYLOAD"; echo ""
-echo -e "${RED}→ Gửi request Layer 2 attack...${NC}"
-send_payload "$S2_PAYLOAD"
-print_ok "gw_hmac PASS → sn_hmac FAIL → 401 SENSOR_AUTH_FAIL → audit: SENSOR_AUTH_FAIL"
+print_header "SCENARIO 5: Gateway bị chiếm bịa số đo Node (kỳ vọng: 401 SENSOR_AUTH_FAIL / HMAC_MISMATCH)"
+print_note "Kẻ tấn công có secret GATEWAY (đọc được flash gateway) nhưng KHÔNG có secret Node — Gateway không giữ nó"
+print_note "Bảo vệ: chữ ký Node end-to-end chỉ backend kiểm → lớp 2 độc lập với Gateway"
+TS=$(now_ts); CTR=$(next_ctr)
+FAKE_DATA='{"temperature":99.9,"humidity":0.0}'
+FAKE_SN=$(openssl rand -hex 32)
+GW_SIG=$(hmac_sha256 "$GW_SECRET" "v2|gw|${GW_ID}|${TS}||${SN_ID}|${CTR}|${FAKE_SN}")
+S5_PAYLOAD=$(printf '{"v":2,"gateway_id":"%s","gw_timestamp":%s,"gw_hmac":"%s","sensor_payload":{"sensor_id":"%s","sn_timestamp":%s,"sn_ctr":%s,"sn_hmac":"%s","data_raw":"%s"}}' \
+    "$GW_ID" "$TS" "$GW_SIG" "$SN_ID" "$TS" "$CTR" "$FAKE_SN" "$(printf '%s' "$FAKE_DATA" | sed 's/"/\\"/g')")
+echo "Payload (gw_hmac ĐÚNG — ký bằng secret gateway | sn_hmac bịa):"
+echo "$S5_PAYLOAD"; echo ""
+send_payload "$S5_PAYLOAD"
+print_ok "Lớp gateway PASS → chữ ký Node FAIL → 401 SENSOR_AUTH_FAIL (qua HTTP không tăng fail_count)"
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  SCENARIO 6: Replay Attack – Timestamp tương lai (+700s)
@@ -176,22 +147,7 @@ print_header "SCENARIO 6: Replay Attack – Timestamp tương lai +12 phút (k�
 print_note "Kẻ tấn công pre-sign một request để dùng sau — HMAC đúng nhưng timestamp là tương lai"
 print_note "Bảo vệ: cùng cơ chế với timestamp cũ — |now() − ts| ≤ 300s; cả 2 chiều đều bị từ chối"
 FUTURE_TS=$(($(now_ts) + 700))
-GW_HMAC_FUT=$(hmac_sha256 "$GW_SECRET" "${GW_ID}:${FUTURE_TS}")
-SN_HMAC_FUT=$(hmac_sha256 "$SN_SECRET" "${SN_ID}:${FUTURE_TS}")
-FUTURE_PAYLOAD=$(cat <<EOF
-{
-  "gateway_id":   "$GW_ID",
-  "gw_timestamp": $FUTURE_TS,
-  "gw_hmac":      "$GW_HMAC_FUT",
-  "sensor_payload": {
-    "sensor_id":    "$SN_ID",
-    "sn_timestamp": $FUTURE_TS,
-    "sn_hmac":      "$SN_HMAC_FUT",
-    "data":         { "temperature": 25.0, "humidity": 60.0 }
-  }
-}
-EOF
-)
+FUTURE_PAYLOAD=$(build_v2 "$GW_ID" "$GW_SECRET" "$SN_ID" "$SN_SECRET" "$DATA_OK" "$FUTURE_TS")
 echo "Payload (timestamp = $FUTURE_TS, cách đây +$(( FUTURE_TS - $(now_ts) ))s — HMAC đúng):"
 echo "$FUTURE_PAYLOAD"; echo ""
 echo -e "${RED}→ Gửi request với timestamp tương lai...${NC}"
@@ -202,7 +158,7 @@ print_ok "HMAC đúng nhưng ts − now > 300s → TIMESTAMP_EXPIRED → audit: 
 #  SCENARIO 7: Blocked Device – HMAC đúng nhưng device đang bị block
 # ══════════════════════════════════════════════════════════════════════════════
 print_header "SCENARIO 7: Blocked Device – HMAC hợp lệ nhưng status='blocked' (kỳ vọng: 403 DEVICE_BLOCKED)"
-print_note "Sau Scenario 3 (brute force), Gateway bị block. Bây giờ thử gửi request HMAC đúng."
+print_note "Khoá gateway trên Dashboard (Thiết bị → Khoá) trước — brute force qua HTTP KHÔNG còn tự khoá thiết bị."
 print_note "Kiểm tra thứ tự: status check xảy ra SAU khi 2 lớp HMAC đã pass — fail_count không tăng"
 VALID=$(build_valid_payload)
 echo "Payload (HMAC hoàn toàn đúng, nhưng device status='blocked'):"
@@ -218,22 +174,7 @@ print_header "SCENARIO 8: Unregistered Device – gateway_id không tồn tại 
 print_note "Kẻ tấn công dùng device ID tự tạo — không có trong database, không thể lookup secret_key"
 print_note "Bảo vệ: lookup secret_key thất bại → không thể tính expected HMAC → 401"
 FAKE_ID="ESP32-GW-NOTEXIST"
-FAKE_TS=$(now_ts)
-FAKE_HMAC="1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-S7_PAYLOAD=$(cat <<EOF
-{
-  "gateway_id":   "$FAKE_ID",
-  "gw_timestamp": $FAKE_TS,
-  "gw_hmac":      "$FAKE_HMAC",
-  "sensor_payload": {
-    "sensor_id":    "ESP32-SN-NOTEXIST",
-    "sn_timestamp": $FAKE_TS,
-    "sn_hmac":      "$FAKE_HMAC",
-    "data":         { "temperature": 20.0, "humidity": 50.0 }
-  }
-}
-EOF
-)
+S7_PAYLOAD=$(build_v2 "$FAKE_ID" "$(openssl rand -hex 32)" "ESP32-SN-NOTEXIST" "$(openssl rand -hex 32)" "$DATA_OK")
 echo "Payload (gateway_id = $FAKE_ID — không tồn tại trong DB):"
 echo "$S7_PAYLOAD"; echo ""
 echo -e "${RED}→ Gửi request từ device không đăng ký...${NC}"
@@ -245,7 +186,7 @@ print_ok "Device lookup failed → secret_key không tìm được → 401 GATEW
 # ══════════════════════════════════════════════════════════════════════════════
 print_header "SCENARIO 9: Inactive Device – deactivate qua API rồi thử gửi data (kỳ vọng: 403 DEVICE_NOT_ACTIVE)"
 print_note "Admin deactivate một device hợp lệ, rồi device đó thử gửi data — HMAC đúng nhưng bị từ chối"
-print_note "Bảo vệ: status check sau HMAC — DEVICE_NOT_ACTIVE check trước DEVICE_BLOCKED trong data.routes.ts"
+print_note "Bảo vệ: status check sau HMAC — DEVICE_NOT_ACTIVE check trước DEVICE_BLOCKED trong telemetry/features/ingest-http/ingest-http.handler.ts"
 
 echo -e "${BLUE}  Bước 1: Login admin...${NC}"
 ADMIN_JAR=$(login_user "$ADMIN_USER" "$ADMIN_PASS")

@@ -1,0 +1,9 @@
+{
+  "name": "@shh/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cấu hình dùng chung: tsconfig gốc cho app và package.",
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json"
+  }
+}

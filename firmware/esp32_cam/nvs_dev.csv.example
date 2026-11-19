@@ -1,0 +1,10 @@
+key,type,encoding,value
+identity,namespace,,
+device_uuid,data,string,REPLACE_WITH_CAMERA_DEVICE_ID
+device_secret,data,string,REPLACE_WITH_CAMERA_SECRET
+wifi,namespace,,
+ssid,data,string,REPLACE_WITH_GATEWAY_LOCAL_AP_SSID
+password,data,string,REPLACE_WITH_GATEWAY_LOCAL_AP_PASSWORD
+pairing,namespace,,
+gateway_mac,data,string,AA:BB:CC:DD:EE:FF
+session_key,data,string,00000000000000000000000000000000

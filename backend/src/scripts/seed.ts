@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
-import pool from "../config/db";
-import { runSql } from "../lib/db";
+import pool from "../infrastructure/database/pool";
+import { runSql } from "../infrastructure/database/db";
 
 const MIN_PROD_PASSWORD_LENGTH = 12;
 

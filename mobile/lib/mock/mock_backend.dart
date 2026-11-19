@@ -3,16 +3,11 @@ import 'dart:math' as math;
 
 import '../core/network/api_exception.dart';
 import '../core/realtime/realtime_source.dart';
-import '../features/auth/domain/auth_user.dart';
-import '../features/automation/domain/automation_rule.dart';
-import '../features/claim/domain/claim_code.dart';
-import '../features/claim/domain/claim_repository.dart';
-import '../features/devices/domain/device.dart';
-import '../features/homes/domain/home.dart';
-import '../features/homes/domain/home_role.dart';
-import '../features/homes/domain/overview.dart';
-import '../features/notifications/domain/app_notification.dart';
-import '../features/rooms/domain/room.dart';
+import '../modules/auth/auth.dart';
+import '../modules/automation/automation.dart';
+import '../modules/devices/devices.dart';
+import '../modules/homes/homes.dart';
+import '../modules/notifications/notifications.dart';
 
 /// Demo account (contract §8) plus the staff accounts that must be refused.
 class MockAccount {
@@ -149,6 +144,10 @@ class MockBackend {
 
   /// Artificial delay applied to every call (0 in tests).
   Duration latency;
+
+  /// How long the mock Node "listens to the remote" for a `learn_code` command
+  /// (the real Node waits up to 10 s).
+  Duration learnLatency = const Duration(seconds: 1);
   final DateTime Function() clock;
   DateTime get now => clock();
 
@@ -363,27 +362,77 @@ class MockBackend {
     );
   }
 
-  /// Relay command (FR-5.3). The real server acks within 5 s or answers 504.
-  CommandResult sendCommand(int deviceId, PowerAction action) {
+  /// Device command (FR-5.3) with the semantics of the real backend:
+  /// `turn_on`/`turn_off` any relay (a curtain goes to 100 % / 0 %), `set_pos`
+  /// curtains only, `set_temp` and `learn_code` air conditioners only. The real
+  /// server acks within 5 s or answers 504.
+  CommandResult sendCommand(int deviceId, DeviceCommand command) {
     final found = requireDevice(deviceId);
     final device = found.device;
     final m = found.membership;
     if (m.role == HomeRole.viewer) forbidden();
     if (!device.isRelay) throw _error(ApiErrorCode.notControllable, 400);
     if (!device.canControl) forbidden();
+    final kind = ApplianceKind.of(device);
+    switch (command.action) {
+      case CommandAction.setPos:
+        if (device.appliance != ApplianceKind.curtain) {
+          throw _error(ApiErrorCode.notControllable, 400);
+        }
+      case CommandAction.setTemp || CommandAction.learnCode:
+        if (!device.isAirConditioner) {
+          throw _error(ApiErrorCode.notControllable, 400);
+        }
+      case CommandAction.turnOn || CommandAction.turnOff:
+        break;
+      case CommandAction.unknown:
+        invalidInput();
+    }
     requireWritable(device.homeId);
     if (device.isBlocked) throw _error(ApiErrorCode.deviceBlocked, 409);
     if (!device.online) throw _error(ApiErrorCode.deviceOffline, 409);
 
     final stamp = now;
-    final updated = devices
+    var updated = devices
         .firstWhere((d) => d.id == deviceId)
-        .copyWith(power: action == PowerAction.turnOn, lastSeen: stamp);
+        .copyWith(lastSeen: stamp);
+    switch (command.action) {
+      case CommandAction.turnOn || CommandAction.turnOff:
+        final on = command.action == CommandAction.turnOn;
+        updated = updated.copyWith(
+          power: on,
+          curtainPos: kind == ApplianceKind.curtain ? (on ? 100 : 0) : null,
+        );
+      case CommandAction.setPos:
+        final position = command.position;
+        if (position == null || position < 0 || position > 100) invalidInput();
+        updated = updated.copyWith(power: position > 0, curtainPos: position);
+      case CommandAction.setTemp:
+        final temperature = command.temperature;
+        if (temperature == null ||
+            temperature < acSetpointMin ||
+            temperature > acSetpointMax) {
+          invalidInput();
+        }
+        // The Node refuses a temperature whose IR code it has not learned.
+        if (isSlotLearned(updated.acCodes, AcSlot.temp(temperature)) == false) {
+          throw _error('COMMAND_FAILED', 502);
+        }
+        updated = updated.copyWith(power: true, acSetpoint: temperature);
+      case CommandAction.learnCode:
+        final slot = command.slot;
+        if (slot == null) invalidInput();
+        updated = updated.copyWith(
+          acCodes: (updated.acCodes ?? 0) | (1 << slot.bit),
+        );
+      case CommandAction.unknown:
+        invalidInput();
+    }
     _replaceDevice(updated);
     _emitDeviceState(updated);
     return CommandResult(
       id: nextId('command'),
-      action: action,
+      action: command.action,
       status: 'acked',
       issuedAt: stamp,
       ackedAt: stamp,
@@ -431,7 +480,10 @@ class MockBackend {
           humidity: double.parse(
             (base.humidity -
                     6 * wave +
-                    _noise(deviceId + 91, time.millisecondsSinceEpoch ~/ bucketMs) *
+                    _noise(
+                          deviceId + 91,
+                          time.millisecondsSinceEpoch ~/ bucketMs,
+                        ) *
                         3)
                 .toStringAsFixed(1),
           ),
@@ -536,6 +588,9 @@ class MockBackend {
           'last_seen': d.lastSeen?.toUtc().toIso8601String(),
           'power': d.power,
           'status': d.status.name,
+          'ac_setpoint': d.acSetpoint,
+          'ac_codes': d.acCodes,
+          'curtain_pos': d.curtainPos,
         },
       }),
     ),
@@ -600,42 +655,19 @@ class MockBackend {
     }
   }
 
-  /// A door-open event: updates the door sensor and warns every member.
-  void simulateDoorOpened(int homeId) {
-    final index = devices.indexWhere(
-      (d) => d.homeId == homeId && d.isDoorContact && d.online,
-    );
-    if (index < 0) return;
-    final stamp = now;
-    final updated = devices[index].copyWith(
-      latest: Reading(doorOpen: true, receivedAt: stamp),
-      lastSeen: stamp,
-    );
-    devices[index] = updated;
-    _emit(
-      MockEvent(
-        homeId: homeId,
-        message: RealtimeMessage('telemetry', {
-          'type': 'telemetry',
-          'home_id': homeId,
-          'room_id': updated.roomId,
-          'device_id': updated.id,
-          'reading': {
-            'temperature': null,
-            'humidity': null,
-            'door_open': true,
-            'received_at': stamp.toUtc().toIso8601String(),
-          },
-        }),
-      ),
-    );
+  /// A motion event of an online camera: warns every member.
+  void simulateCameraMotion(int homeId) {
+    final camera = devices
+        .where((d) => d.homeId == homeId && d.isCamera && d.online)
+        .firstOrNull;
+    if (camera == null) return;
     for (final userId in memberIds(homeId)) {
       addNotification(
         userId: userId,
         homeId: homeId,
-        type: 'DOOR_OPENED',
-        title: 'Cửa chính vừa được mở',
-        message: 'Cảm biến cửa chính ghi nhận cửa đang mở.',
+        type: 'CAMERA_MOTION',
+        title: 'Camera phát hiện chuyển động',
+        message: '${camera.name} ghi nhận chuyển động trong nhà.',
         severity: Severity.warning,
       );
     }
@@ -801,15 +833,19 @@ class MockBackend {
     account(12, 6, 'minh@smarthome.local', 'Lê Quang Minh', 'minh#6073');
 
     // Homes 1–5 (contract §8).
+    // User 01's only home has exactly the layout the web shows for
+    // `npm run hw:register` (Gateway S3, living room with sensor / lamp / fan /
+    // curtain / air conditioner, and a camera room).
     final home1 = _addHome(
-      'Nhà của Đạt',
-      'KIT_A',
+      'Nhà của Nguyễn Hoàng Đạt',
+      'KIT_B',
       HomeStatus.active,
       owner: accounts.firstWhere((a) => a.id == 7),
       address: '25 Nguyễn Văn Linh, Quận 7, TP. Hồ Chí Minh',
       gatewayOnline: true,
       seen: ago(const Duration(seconds: 12)),
       claimedAt: ago(const Duration(days: 30)),
+      hardwareDemo: true,
     );
     final home2 = _addHome(
       'Nhà Quận 7',
@@ -839,6 +875,8 @@ class MockBackend {
       HomeStatus.unclaimed,
       gatewayOnline: false,
     );
+    // The curtain of the demo home starts open, so closing it can be tried.
+    _openCurtain(home1);
 
     codes.addAll([
       MockActivationCode(
@@ -864,7 +902,8 @@ class MockBackend {
       ),
     ]);
 
-    // Memberships of "Nhà của Đạt": Lan CONTROLLER, Hoa VIEWER, pending GUEST.
+    // Memberships of "Nhà của Nguyễn Hoàng Đạt": Lan CONTROLLER, Hoa VIEWER, pending GUEST
+    // (invited to the living-room lamp only).
     MockMembership member(
       int homeId,
       int? userId,
@@ -913,28 +952,25 @@ class MockBackend {
     );
     member(home2, 10, HomeRole.owner, 'Lê Văn Hùng');
 
-    // Live-looking state of "Nhà của Đạt".
+    // Live-looking state of "Nhà của Nguyễn Hoàng Đạt".
     _replaceDevice(livingLight.copyWith(power: true));
 
-    // Automation rules (contract §8).
-    final bedroom = rooms.firstWhere(
-      (r) => r.homeId == home1 && r.roomType == 'bedroom',
+    // Automation rules (contract §8), on the living-room devices.
+    final living = rooms.firstWhere(
+      (r) => r.homeId == home1 && r.roomType == 'living_room',
     );
     final fan = devices.firstWhere(
-      (d) => d.homeId == home1 && d.name == 'Quạt phòng ngủ',
-    );
-    final kitchenLight = devices.firstWhere(
-      (d) => d.homeId == home1 && d.name == 'Đèn nhà bếp',
+      (d) => d.homeId == home1 && d.name == 'Quạt phòng khách',
     );
     final hotRoom = AutomationRule(
       id: nextId('rule'),
       homeId: home1,
-      homeName: 'Nhà của Đạt',
-      name: 'Phòng ngủ nóng → bật quạt',
+      homeName: 'Nhà của Nguyễn Hoàng Đạt',
+      name: 'Phòng khách nóng → bật quạt',
       enabled: true,
       triggerType: TriggerType.sensorThreshold,
-      triggerRoomId: bedroom.id,
-      triggerRoomName: bedroom.name,
+      triggerRoomId: living.id,
+      triggerRoomName: living.name,
       triggerMetric: TriggerMetric.temperature,
       triggerOperator: TriggerOperator.greater,
       triggerThreshold: 30,
@@ -949,17 +985,17 @@ class MockBackend {
       canEdit: true,
       canDelete: true,
     );
-    final kitchenOff = AutomationRule(
+    final lightOff = AutomationRule(
       id: nextId('rule'),
       homeId: home1,
-      homeName: 'Nhà của Đạt',
-      name: 'Tắt đèn bếp lúc 23:30',
+      homeName: 'Nhà của Nguyễn Hoàng Đạt',
+      name: 'Tắt đèn phòng khách lúc 23:30',
       enabled: true,
       triggerType: TriggerType.schedule,
       scheduleTime: '23:30',
       scheduleDays: const [1, 2, 3, 4, 5, 6, 7],
-      actionDeviceId: kitchenLight.id,
-      actionDeviceName: kitchenLight.name,
+      actionDeviceId: livingLight.id,
+      actionDeviceName: livingLight.name,
       actionCommand: RuleAction.turnOff,
       origin: RuleOrigin.user,
       createdByUserId: 7,
@@ -969,13 +1005,15 @@ class MockBackend {
       canEdit: true,
       canDelete: true,
     );
-    rules.addAll([hotRoom, kitchenOff]);
+    rules.addAll([hotRoom, lightOff]);
     ruleRuns[hotRoom.id] = [
       RuleRun(
         id: nextId('run'),
         triggeredAt: ago(const Duration(hours: 5)),
         result: RunResult.success,
-        details: const {'message': 'Nhiệt độ Phòng ngủ 30,6°C — đã bật Quạt phòng ngủ.'},
+        details: const {
+          'message': 'Nhiệt độ Phòng khách 30,6°C — đã bật Quạt phòng khách.',
+        },
       ),
       RuleRun(
         id: nextId('run'),
@@ -989,7 +1027,7 @@ class MockBackend {
         details: const {'message': 'Thiết bị đang ngoại tuyến.'},
       ),
     ];
-    ruleRuns[kitchenOff.id] = [
+    ruleRuns[lightOff.id] = [
       RuleRun(
         id: nextId('run'),
         triggeredAt: ago(const Duration(hours: 18)),
@@ -1027,7 +1065,7 @@ class MockBackend {
         homeId: home1,
         type: 'GATEWAY_ONLINE',
         title: 'Gateway đã kết nối lại',
-        message: 'Gateway của Nhà của Đạt đã online trở lại.',
+        message: 'Gateway của Nhà của Nguyễn Hoàng Đạt đã online trở lại.',
         severity: Severity.success,
         isRead: true,
         createdAt: ago(const Duration(hours: 6)),
@@ -1038,7 +1076,8 @@ class MockBackend {
         homeId: home1,
         type: 'AUTOMATION_RUN',
         title: 'Quy tắc đã chạy',
-        message: 'Quy tắc “Phòng ngủ nóng → bật quạt” đã chạy: Bật Quạt phòng ngủ.',
+        message:
+            'Quy tắc “Phòng khách nóng → bật quạt” đã chạy: Bật Quạt phòng khách.',
         severity: Severity.info,
         isRead: userId != 7,
         createdAt: ago(const Duration(hours: 5)),
@@ -1047,9 +1086,9 @@ class MockBackend {
       addNotification(
         userId: userId,
         homeId: home1,
-        type: 'DOOR_OPENED',
-        title: 'Cửa chính vừa được mở',
-        message: 'Cảm biến cửa chính ghi nhận cửa mở lúc 07:58.',
+        type: 'CAMERA_MOTION',
+        title: 'Camera phát hiện chuyển động',
+        message: 'Camera ghi nhận chuyển động trong nhà lúc 07:58.',
         severity: Severity.warning,
         createdAt: ago(const Duration(minutes: 35)),
         emit: false,
@@ -1059,9 +1098,23 @@ class MockBackend {
       addNotification(
         userId: userId,
         homeId: home1,
+        type: 'SENSOR_THRESHOLD',
+        title: 'Phòng khách đang nóng',
+        message: 'Nhiệt độ Phòng khách lên 30,6°C.',
+        severity: Severity.warning,
+        isRead: true,
+        createdAt: ago(const Duration(hours: 5, minutes: 2)),
+        emit: false,
+      );
+    }
+    for (final userId in [7, 8]) {
+      addNotification(
+        userId: userId,
+        homeId: home1,
         type: 'SUGGESTION_NEW',
         title: 'Gợi ý mới từ AI',
-        message: 'Bạn thường tắt Đèn phòng khách lúc 23:00. Tạo quy tắc tự động?',
+        message:
+            'Bạn thường tắt Đèn phòng khách lúc 23:00. Tạo quy tắc tự động?',
         severity: Severity.info,
         createdAt: ago(const Duration(days: 2)),
         emit: false,
@@ -1072,7 +1125,8 @@ class MockBackend {
       homeId: home2,
       type: 'GATEWAY_OFFLINE',
       title: 'Gateway mất kết nối',
-      message: 'Gateway của Nhà Quận 7 không phản hồi. Kiểm tra nguồn điện và WiFi.',
+      message:
+          'Gateway của Nhà Quận 7 không phản hồi. Kiểm tra nguồn điện và WiFi.',
       severity: Severity.critical,
       createdAt: ago(const Duration(hours: 3)),
       emit: false,
@@ -1088,6 +1142,7 @@ class MockBackend {
     required bool gatewayOnline,
     DateTime? seen,
     DateTime? claimedAt,
+    bool hardwareDemo = false,
   }) {
     final homeId = nextId('home');
     final gatewayDeviceId = nextId('device');
@@ -1135,6 +1190,9 @@ class MockBackend {
       ({double temperature, double humidity})? climate,
     }) {
       final id = nextId('device');
+      final appliance = category == DeviceCategory.relay
+          ? _classify(deviceName)
+          : null;
       Reading? latest;
       if (category == DeviceCategory.sensor && climate != null) {
         _climateBase[id] = climate;
@@ -1161,12 +1219,45 @@ class MockBackend {
           lastSeen: lastSeen,
           power: category == DeviceCategory.relay ? false : null,
           latest: latest,
+          appliance: appliance,
+          curtainPos: appliance == ApplianceKind.curtain ? 0 : null,
+          acSetpoint: appliance == ApplianceKind.airConditioner ? 26 : null,
+          acCodes: appliance == ApplianceKind.airConditioner
+              ? _demoAcCodes
+              : null,
         ),
       );
     }
 
+    if (hardwareDemo) {
+      final living = addRoom('Phòng khách', 'living_room', 0);
+      addDevice(
+        living,
+        'Phòng khách',
+        'Cảm biến nhiệt/ẩm phòng khách',
+        DeviceCategory.sensor,
+        climate: (temperature: 28.4, humidity: 70.0),
+      );
+      for (final name in const [
+        'Đèn phòng khách',
+        'Quạt phòng khách',
+        'Rèm cửa phòng khách',
+        'Điều hòa phòng khách',
+      ]) {
+        addDevice(living, 'Phòng khách', name, DeviceCategory.relay);
+      }
+      final camera = addRoom('Camera', 'camera', 1);
+      addDevice(camera, 'Camera', 'Camera', DeviceCategory.camera);
+      return homeId;
+    }
+
     final door = addRoom('Cửa chính', 'door', 0);
-    addDevice(door, 'Cửa chính', 'Cảm biến cửa chính', DeviceCategory.doorContact);
+    addDevice(
+      door,
+      'Cửa chính',
+      'Cảm biến cửa chính',
+      DeviceCategory.doorContact,
+    );
     if (package == 'KIT_B') {
       addDevice(door, 'Cửa chính', 'Camera cửa chính', DeviceCategory.camera);
     }
@@ -1206,9 +1297,35 @@ class MockBackend {
         DeviceCategory.sensor,
         climate: (temperature: 28.7, humidity: 58.0),
       );
-      addDevice(office, 'Phòng làm việc', 'Đèn phòng làm việc', DeviceCategory.relay);
+      addDevice(
+        office,
+        'Phòng làm việc',
+        'Đèn phòng làm việc',
+        DeviceCategory.relay,
+      );
     }
     return homeId;
+  }
+
+  /// IR codes the demo air conditioner has learned: OFF and 24 … 28 °C.
+  static final _demoAcCodes = acCodesMask([
+    AcSlot.off,
+    for (var t = 24; t <= 28; t++) AcSlot.temp(t),
+  ]);
+
+  /// What the backend would store as `appliance`: lamp / fan / curtain / ac by
+  /// the name the kit gives, `null` (not assigned) for anything else.
+  ApplianceKind? _classify(String name) {
+    final kind = ApplianceKind.guessFromName(name);
+    return kind.isSchedulable ? kind : null;
+  }
+
+  void _openCurtain(int homeId) {
+    final index = devices.indexWhere(
+      (d) => d.homeId == homeId && d.appliance == ApplianceKind.curtain,
+    );
+    if (index < 0) return;
+    devices[index] = devices[index].copyWith(power: true, curtainPos: 100);
   }
 
   String _prefix(DeviceCategory category) => switch (category) {

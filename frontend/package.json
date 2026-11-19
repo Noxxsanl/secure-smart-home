@@ -3,20 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "packages/shared",
-    "packages/console",
-    "admin",
-    "operator",
-    "user"
+    "apps/*",
+    "packages/*",
+    "packages/modules/*"
   ],
   "scripts": {
     "dev": "node scripts/dev-all.mjs",
-    "dev:admin": "npm run dev -w @smarthome/admin",
-    "dev:operator": "npm run dev -w @smarthome/operator",
-    "dev:user": "npm run dev -w @smarthome/user",
-    "build": "npm run build -w @smarthome/admin -w @smarthome/operator -w @smarthome/user",
+    "dev:admin": "npm run dev -w @shh/admin",
+    "dev:operator": "npm run dev -w @shh/operator",
+    "dev:user": "npm run dev -w @shh/user",
+    "build": "npm run build -w @shh/admin -w @shh/operator -w @shh/user",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "check:arch": "node scripts/check-architecture.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

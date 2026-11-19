@@ -135,7 +135,7 @@ flowchart TB
         CAM <-->|"WiFi (Local AP riêng)"| GWAP
     end
 
-    GWSTA -->|"Internet"| BK2["MQTT Broker 2\n(Gateway ↔ Backend)"]
+    GWSTA -->|"Internet"| BK2["MQTT broker\n(Gateway ↔ Backend)"]
     BK2 --> BACKEND["Backend API\n(scoped theo home_id)"]
     BACKEND --> CLOUD[("Cloud DB / Storage")]
 ```
@@ -605,4 +605,4 @@ sequenceDiagram
 8. **Đừng bỏ qua trường hợp khách đổi router thường xuyên** — đây là tình huống thực tế xảy ra thường xuyên hơn "thay Gateway hỏng", phải có luồng UX mượt mà, không bắt phải pair lại từ đầu.
 9. **Đừng hard-code danh sách loại phòng/thiết bị** — mọi mở rộng (Garage, Garden, Office...) phải là thêm dữ liệu, không phải sửa code/schema (nhắc lại nguyên tắc 2 ở `DATABASE_REFACTOR_SMARTHOME.md` mục 3).
 10. **Đừng bỏ qua log điều tra bảo mật cho tầng provisioning** — đây là nơi hacker thực tế hay nhắm tới nhất trong vòng đời sản phẩm IoT (giai đoạn onboarding thường có nhiều giả định lỏng lẻo hơn giai đoạn vận hành ổn định).
-11. **Đừng triển khai MQTT không TLS ở bản production thương mại** — cấu hình `allow_anonymous true` không TLS hiện tại chỉ chấp nhận được ở giai đoạn phát triển/demo, phải bật TLS + ACL theo `home_id` trước khi bán ra thị trường thật (chi tiết ở `SECURITY_ARCHITECTURE.md` mục 4).
+11. **Đừng triển khai MQTT không TLS ở bản production thương mại** — cấu hình `allow_anonymous true` không TLS (Prototype) chỉ chấp nhận được ở giai đoạn phát triển/demo — *đã xử lý 2026-11-16: broker mTLS + ACL theo CN chứng chỉ; còn thiếu ACL theo `home_id`* — phải có đủ trước khi bán ra thị trường thật (chi tiết ở `SECURITY_ARCHITECTURE.md` mục 4).

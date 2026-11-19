@@ -1,0 +1,13 @@
+menu "Gateway S3: ui"
+
+    config GW_UI_JPEG_TJPGD
+        bool "[Dự phòng] Giải nén JPEG bằng TJpgDec trong ROM thay vì esp_new_jpeg"
+        default n
+        help
+            Mặc định hình camera trên LCD được giải nén bằng espressif/esp_new_jpeg (nhanh hơn nhiều, có tối ưu cho
+            ESP32-S3). Bật tuỳ chọn này nếu thư viện đó có vấn đề trên phần cứng: quay về TJpgDec trong ROM (VGA ≈ 3,3
+            khung/giây). Lưu ý: idf_component.yml vẫn khai báo espressif/esp_new_jpeg (component manager không điều
+            kiện theo Kconfig được) nên thư viện vẫn phải có sẵn trong components/ (hoặc tải được) khi dựng; tuỳ
+            chọn này chỉ bỏ nó khỏi PRIV_REQUIRES của component ui và đổi bộ giải nén.
+
+endmenu

@@ -1,12 +1,12 @@
 # Frontend — 3 app web theo role
 
-npm workspaces gồm 3 app Next.js 16 độc lập (mỗi role hệ thống một app) và 2 gói code dùng chung. Các app gọi **API thật** của backend: Admin/Operator qua `/api/dashboard/**`, cổng khách hàng qua `/api/portal/**`. Chỉ còn vài màn hình dùng mock — xem [Còn là mock](#còn-là-mock).
+Monorepo npm workspaces theo kiểu micro-frontend: 3 app Next.js 16 mỏng (mỗi role hệ thống một app, chỉ có route + layout + config) ghép từ các **module nghiệp vụ** đóng gói thành package riêng (`@shh/devices`, `@shh/homes`, …) trên nền `@shh/ui`, `@shh/api-client`, `@shh/utils`. Các app gọi **API thật** của backend: Admin/Operator qua `/api/dashboard/**`, cổng khách hàng qua `/api/portal/**`. Không còn màn hình mock nào trên Admin/Operator — xem [Còn là mock](#còn-là-mock).
 
-| App | Thư mục | Cổng dev | Role | Cookie phiên | Kênh API | Tài khoản demo |
-|---|---|---|---|---|---|---|
-| Admin console | `admin/` | http://localhost:3001 | `ADMIN` | `sh_admin` | `/api/dashboard/**` | `admin / admin123` |
-| Operator console | `operator/` | http://localhost:3002 | `OPERATOR` | `sh_operator` | `/api/dashboard/**` | `operator01 / operator123` |
-| Cổng khách hàng | `user/` | http://localhost:3003 | `USER` | `sh_user` | `/api/portal/**` | `user01@smarthome.local / user123` |
+| App | Thư mục | Package | Cổng dev | Role | Cookie phiên | Kênh API | Tài khoản demo |
+|---|---|---|---|---|---|---|---|
+| Admin console | `apps/admin/` | `@shh/admin` | http://localhost:3001 | `ADMIN` | `sh_admin` | `/api/dashboard/**` | `admin / admin123` |
+| Operator console | `apps/operator/` | `@shh/operator` | http://localhost:3002 | `OPERATOR` | `sh_operator` | `/api/dashboard/**` | `operator01 / operator123` |
+| Cổng khách hàng | `apps/user/` | `@shh/user` | http://localhost:3003 | `USER` | `sh_user` | `/api/portal/**` | `user01@smarthome.local / user123` |
 
 Mỗi app chỉ nhận phiên đúng role của mình: đăng nhập nhầm cổng bị từ chối, kèm hướng dẫn sang đúng cổng. Tài khoản khách hàng không đăng nhập được Admin/Operator (backend trả `USE_MOBILE_APP`, FR-1.4) — họ dùng cổng khách hàng hoặc app di động.
 
@@ -14,36 +14,100 @@ Mỗi app chỉ nhận phiên đúng role của mình: đăng nhập nhầm cổ
 
 ```
 frontend/
-├── package.json            workspaces + script chung
-├── tsconfig.base.json      compilerOptions dùng chung
-├── eslint.config.mjs       lint toàn workspace
-├── packages/
-│   ├── shared/             @smarthome/shared — dùng cho cả 3 app
-│   │   ├── api/            http.ts (api(), apiFetcher, apiErrorCode — gắn X-Portal) + errors.ts (FetchError)
-│   │   ├── app-shell/      ShellFrame, Sidebar, Header, NotificationBell, AppProviders, trang lỗi/404
-│   │   ├── auth/           AuthProvider, AuthGuard/GuestGuard, Login, Đăng ký (khách), Quên mật khẩu,
-│   │   │                   session.ts (tên cookie, ?reauth=), proxy.ts (helper cho src/proxy.ts), demoAccounts.ts
-│   │   ├── mock/           types, seed, store, ai — chỉ còn cho phần còn là mock (xem bên dưới)
-│   │   ├── styles/theme.css  design token (light/dark)
-│   │   └── ui/             Button, Dialog, Switch, StatusBadge, TelemetryChart, InlineEdit, ...
-│   └── console/            @smarthome/console — tính năng dùng chung Admin + Operator (gọi /api/dashboard/**)
-│       ├── shell/ConsoleShell.tsx   khung + badge + chuông thông báo staff
-│       ├── auth/usePermissions.ts   quyền theo role của console
-│       └── smart-homes, customers, gateways, devices, ota, automation, logs, notifications, ai
-├── admin/                  route + dashboard Admin + Team/Operator Access/Settings (chỉ Admin)
-├── operator/               route + dashboard Operator (không có Team/Settings, chỉ 5 loại log)
-└── user/                   cổng khách hàng: Tổng quan, Phòng, Thiết bị, Tự động hoá, Thông báo, Thành viên, Thêm Smart Home, Hồ sơ
-    └── src/lib/api/        lớp gọi /api/portal/** (types.ts = DTO, client.ts = SWR + polling, mỗi nhóm endpoint một file)
+├── package.json                workspaces: apps/*, packages/*, packages/modules/* + script chung
+├── eslint.config.mjs           lint toàn workspace
+├── scripts/
+│   ├── dev-all.mjs             chạy cả 3 app
+│   └── check-architecture.mjs  kiểm quy tắc phụ thuộc (npm run check:arch)
+├── apps/                       chỉ route, layout, config — không gọi API, không chứa logic nghiệp vụ
+│   ├── admin/                  Dashboard, Customers, Smart Homes, Đăng ký Gateway, Gateways, Devices, OTA & Firmware,
+│   │                           AI Usage, Notification Center, Logs, Team / Operator Access (chỉ Admin)
+│   ├── operator/               như Admin nhưng không có Team/Operator Access, chỉ 5 loại log
+│   └── user/                   cổng khách hàng: Tổng quan, Phòng, Thiết bị, Hẹn giờ, Tự động hoá, Thông báo, Thành viên, …
+└── packages/
+    ├── config/                 @shh/config      tsconfig.base.json
+    ├── utils/                  @shh/utils       cn, định dạng ngày/giờ/nhiệt độ, hook nhỏ (debounce, now), parseRouteId
+    ├── api-client/             @shh/api-client  http.ts (api() — cookie, X-Portal, 401) + FetchError
+    │   └── src/{dashboard,portal}/  cửa ra theo kênh "@shh/api-client/dashboard" | "/portal":
+    │                           client SWR, DTO, câu lỗi tiếng Việt, nhãn enum, khoá/tra cứu dùng chung
+    ├── ui/                     @shh/ui          design system + khung giao diện (ShellFrame, NotificationBell,
+    │                                            PageStates…) + styles/theme.css (design token)
+    └── modules/                mỗi thư mục là một package @shh/<tên>
+        ├── auth/               đăng nhập, phiên, guard, quyền console; nhà đang chọn + role trong nhà; hồ sơ
+        ├── homes/              Smart Home (console: danh sách, chi tiết, đăng ký gateway thật) · tổng quan, phòng,
+        │                       thành viên, lời mời, kích hoạt (khách)
+        ├── devices/            thiết bị, gateway, bộ mô phỏng · danh sách, chi tiết, điều khiển (khách)
+        ├── telemetry/          biểu đồ/bảng số đo cảm biến
+        ├── automation/         quy tắc tự động hoá + gợi ý thói quen · hẹn giờ một lần (khách: trang /schedules +
+        │                       mục "Hẹn giờ" ở chi tiết thiết bị)
+        ├── notifications/      trung tâm thông báo (console), thông báo theo nhà (khách) + popup trình duyệt khi tab ẩn
+        ├── audit/              log theo loại + tab Log của Smart Home
+        ├── ota/                firmware + triển khai OTA (tab OTA & Firmware của Admin/Operator)
+        ├── users/              khách hàng, Team, quyền truy cập nhà của Operator
+        ├── ai/                 AI Usage (console): chi phí/token/độ trễ/lỗi của LLM mà AI Agent dùng, bảng giá model,
+        │                       ngân sách ngày, tỷ giá VNĐ (số liệu thật, không mock) · Trợ lý AI giọng nói/chữ
+        │                       (khách: nút micro ở header app user, feature `assistant`)
+        └── stats/              Dashboard Admin/Operator + huy hiệu sidebar
 ```
 
-Mỗi app có `src/config/portal.ts` (role, tên, trang chủ), `src/config/nav.ts` (menu sidebar) và `src/proxy.ts`. Route file chỉ re-export page:
+### Bên trong một module
 
-```ts
-export { default } from "@smarthome/console/devices/pages/DevicesPage"; // tính năng dùng chung
-export { default } from "@/features/dashboard/pages/AdminDashboardPage"; // tính năng riêng của app
+```
+packages/modules/devices/
+├── package.json        "name": "@shh/devices", "exports": { ".": "./src/index.ts" }
+└── src/
+    ├── index.ts        cửa ra duy nhất: feature + kiểu công khai
+    ├── api/            nơi duy nhất gọi API của module: khoá SWR, hàm gọi, hook (useDeviceDetail, useDevicePower, …)
+    ├── model/          kiểu, chuyển dữ liệu API → UI, câu lỗi riêng của module
+    ├── ui/             component nhận props và hiển thị, không gọi API (DeviceCard, SimulatorControls, …)
+    └── features/       mỗi thư mục = một ca sử dụng hoàn chỉnh, có index.ts riêng
+        ├── device-list/       (console) danh sách thiết bị
+        ├── device-detail/     (console) chi tiết — nhận slot renderTelemetry
+        ├── gateway-detail/    (console) chi tiết gateway — nhận slot renderLogs
+        ├── home-device-list/  (khách) thiết bị theo phòng của nhà đang chọn
+        └── device-grid/       (khách) lưới thẻ có công tắc — trang Tổng quan/Phòng của homes ghép vào
 ```
 
-Import gói dùng chung theo tên package (`@smarthome/shared/...`, `@smarthome/console/...`); `@/` chỉ trỏ vào `src/` của chính app đó. `user/` không phụ thuộc `@smarthome/console`.
+Feature của console và của cổng khách cùng domain nằm chung module; feature của khách đặt tiền tố `home-` (`home-device-list`, `home-automation`, …). Mỗi app có `src/config/portal.ts` (role, tên, trang chủ), `src/config/nav.ts` (menu sidebar, nhãn breadcrumb), `src/widgets/PortalShell.tsx` (ghép khung + chuông + huy hiệu) và `src/proxy.ts`. `@/` chỉ trỏ vào `src/` của chính app; trong package dùng đường dẫn tương đối, sang package khác dùng tên package (`@shh/devices`) — không đi sâu vào `src/` của package khác.
+
+### Quy tắc phụ thuộc
+
+Kiểm tự động bằng `npm run check:arch` ([scripts/check-architecture.mjs](scripts/check-architecture.mjs), chạy trong CI):
+
+| Mã | Quy tắc |
+|---|---|
+| R1 | App chỉ import package qua cửa ra công khai; không import `@shh/api-client` hay `swr` — app không gọi API trực tiếp, không chứa logic nghiệp vụ. |
+| R2 | Trong module: `features/` dùng `api/`, `model/`, `ui/` của chính module; `api/` → `api/`, `model/`; `ui/` → `ui/`, `model/` (ui không gọi API); `model/` → `model/`. Ngoài module được dùng `@shh/ui`, `@shh/api-client`, `@shh/utils`. |
+| R3 | `features/<a>` không import `features/<b>`, kể cả trong cùng module — cần ghép thì ghép ở trang của app. |
+| R4 | Module không import module khác, trừ `@shh/auth` (người dùng hiện tại, nhà đang chọn, role-gate). |
+| R5 | `@shh/ui` không import `modules/`; `@shh/api-client` chỉ dùng `@shh/utils`; `@shh/utils` không dùng `@shh/*`. |
+| R6 | Sang package khác chỉ qua cửa ra trong `"exports"`; import tương đối không thoát khỏi package. |
+
+Ẩn feature theo vai trò (`usePermissions`, `permissionsFor`) chỉ để giao diện gọn — quyền thật luôn do backend kiểm tra.
+
+**Ghép ở trang của app (slot).** Feature cần phần của module khác thì nhận prop `render*`, trang của app nối hai bên:
+
+```tsx
+// apps/admin/src/app/(private)/devices/[id]/page.tsx
+"use client";
+import { DeviceDetailPage } from "@shh/devices";
+import { DeviceTelemetryPanel } from "@shh/telemetry";
+
+export default function Page() {
+  return <DeviceDetailPage renderTelemetry={(p) => <DeviceTelemetryPanel {...p} />} />;
+}
+```
+
+Các slot hiện có: thiết bị ← số đo (`renderTelemetry`, console + khách); chi tiết thiết bị của khách ← camera (`renderCamera`: `HomeCameraLive` xem trực tiếp + `HomeCameraSnapshots` ảnh chụp) và ← hẹn giờ (`renderSchedule`: `DeviceSchedule` của `@shh/automation`, chỉ relay đèn/quạt/rèm/điều hoà mà tài khoản điều khiển được); gateway ← bảng log và Smart Home ← tab Log (`renderLogs`); Tổng quan/Phòng của khách ← `DeviceGrid` (`renderDevices`); Thành viên ← lời mời của tôi (`invitationsSlot`); màn hình "chưa có nhà" của `HomeGate` ← lời mời (`CurrentHomeProvider noHomeSlot`, ở `apps/user/src/app/(private)/layout.tsx`). Trang không cần ghép thì chỉ re-export: `export { DevicesPage as default } from "@shh/devices";`.
+
+**Lựa chọn có chủ đích** (để giữ R3/R4 mà không chép code):
+
+- *Nhà đang chọn* (`CurrentHomeProvider`, `HomeGate`, `useCurrentOverview`) và ma trận quyền theo role trong nhà (`permissionsFor`) nằm ở `@shh/auth` — đây là role-gate tầng 2 mà mọi module của cổng khách cần.
+- Thứ thuộc **hợp đồng API** mà nhiều module cùng cần nằm ở `@shh/api-client` (đóng vai client sinh từ OpenAPI): DTO, nhãn tiếng Việt của enum (`CATEGORY_LABELS`, `logCategoryLabel`, …), tra cứu dùng chung (`useHomeOptions`, `useHomeRooms`, `useCustomerSearch`, `useHomeOverview`) và khoá SWR của tài nguyên mà module khác phải làm mới (`homesKey`, `overviewKey`, `roomsPrefix`, …). Khoá trùng với module sở hữu nên dùng chung cache.
+- `@shh/ui` dùng `@shh/api-client` chỉ để đổi lỗi API thành câu tiếng Việt (`PageError`, `ConfirmModal`, `ErrorPanel`).
+- Widget có trạng thái dùng ở nhiều feature của cùng module tách thành hook ở `api/` + view ở `ui/`: `useAssignOwner` + `AssignOwnerModal` (3 feature của homes), `useSimulatorControls` + `SimulatorControls` (thiết bị + gateway).
+
+**Khác với kiến trúc tham khảo** (chưa làm, có thể làm dần từng module): dữ liệu vẫn dùng SWR (chưa chuyển TanStack Query), chưa có schema zod; `@shh/api-client` viết tay vì `contracts/openapi.json` còn là bản tạm; chưa có `@shh/realtime` vì web chưa dùng WebSocket (polling); chạy script bằng npm workspaces, không dùng turbo; tên file giữ quy ước cũ (Component PascalCase, hook camelCase).
 
 ## Lệnh
 
@@ -51,12 +115,13 @@ Import gói dùng chung theo tên package (`@smarthome/shared/...`, `@smarthome/
 npm install                 # chạy ở frontend/ — cài chung cho mọi workspace
 npm run dev                 # chạy cả 3 app (Ctrl+C dừng tất cả)
 npm run dev:admin           # hoặc dev:operator / dev:user
-npm run typecheck           # tsc cho 5 workspace
+npm run typecheck           # tsc cho mọi workspace (3 app + 14 package)
+npm run check:arch          # quy tắc phụ thuộc R1–R6 (tuỳ chọn: -- --package devices)
 npm run lint                # eslint toàn bộ
 npm run build               # next build cả 3 app
 ```
 
-Tailwind v4 chỉ tự quét code trong app, nên `src/app/globals.css` của mỗi app khai báo thêm `@source` cho `packages/*`. Khi thêm gói mới, nhớ thêm `@source` tương ứng.
+**Thêm module mới:** tạo `packages/modules/<tên>/` (chép `package.json` + `tsconfig.json` của một module có sẵn, đổi `name`), viết `src/index.ts`, thêm `"@shh/<tên>": "*"` vào `dependencies` của app dùng nó rồi `npm install`. `next.config.ts` tự transpile mọi `@shh/*` theo đồ thị `dependencies`; `globals.css` đã `@source "../../../../packages"` nên Tailwind quét được class trong package mới.
 
 ## Chạy với backend thật
 
@@ -68,62 +133,76 @@ Tailwind v4 chỉ tự quét code trong app, nên `src/app/globals.css` của m�
 
 ### Web nói chuyện với backend thế nào
 
-- **Một origin.** Trình duyệt chỉ gọi `/api/*` cùng origin. `next.config.ts` của mỗi app có `rewrites` `/api/:path*` → `${BACKEND_URL ?? "http://localhost:5000"}/api/:path*`, nên không cần CORS và cookie đi kèm tự động.
+- **Một origin.** Trình duyệt chỉ gọi `/api/*` cùng origin. `next.config.ts` của mỗi app có `rewrites` `/api/:path*` → `${BACKEND_URL ?? "http://localhost:5000"}/api/:path*`, nên không cần CORS và cookie đi kèm tự động. App `user` có thêm rewrite `/api/agent/:path*` → `${AGENT_URL ?? "http://localhost:8000"}/v1/:path*` (AI Agent — Trợ lý giọng nói/chữ), **đặt trước** rewrite `/api/:path*`; `AGENT_URL` cũng được đọc lúc `next dev` / `next build` (Dockerfile có build arg `AGENT_URL`, mặc định `http://agent:8000`), trong Docker nginx route `/api/agent/` thẳng tới agent.
 - **Cookie phiên HttpOnly theo cổng:** `sh_admin`, `sh_operator`, `sh_user`. 3 app dev chạy chung host `localhost` (khác cổng) nên mỗi role một tên cookie để không ghi đè phiên của nhau. JS phía client không đọc được token.
-- **Header `X-Portal: admin|operator|user`** do `packages/shared/api/http.ts` gắn vào MỌI request. Backend dùng nó để chọn cookie của đúng cổng, đồng thời coi đó là lớp chống CSRF: request ghi (POST/PUT/PATCH/DELETE) thiếu header bị từ chối `403 CSRF_CHECK_FAILED`.
-- **Lỗi** ném `FetchError(status, body)`, `body.error` là mã lỗi backend. UI luôn đổi sang câu hướng dẫn tiếng Việt (`user/src/lib/errors.ts`, `packages/shared/auth/errors.ts`), không hiện mã thô. `401` ở request thường → `AuthProvider` kết thúc phiên và đưa về `/login?reauth=expired`.
-- **`src/proxy.ts`** (Next 16 `proxy`, dùng `packages/shared/auth/proxy.ts`) là cổng UX: chưa có cookie phiên mà vào trang riêng tư → chuyển `/login`; đã có cookie mà vào `/login` (hoặc `/register` ở cổng khách) → chuyển trang chủ; bỏ qua `/api`, `/_next` và file tĩnh. Proxy **không xác thực** — backend kiểm tra JWT ở mọi request `/api/**`; cookie giả/hết hạn vẫn nhận 401 và bị đưa về trang đăng nhập (`?reauth=` chặn vòng lặp chuyển hướng).
-- **Không có WebSocket trên web.** Dữ liệu cập nhật bằng polling SWR: tổng quan nhà / thiết bị 5 s, thông báo 15 s, log 30 s, danh sách console 10 s. Mobile mới dùng WebSocket.
-- Cổng khách: cache SWR riêng cho mỗi lần đăng nhập (`user/src/lib/api/PortalSwrProvider.tsx`) để tài khoản đăng nhập sau không thấy dữ liệu của tài khoản trước.
+- **Header `X-Portal: admin|operator|user`** do `packages/api-client/src/http.ts` gắn vào MỌI request. Backend dùng nó để chọn cookie của đúng cổng, đồng thời coi đó là lớp chống CSRF: request ghi (POST/PUT/PATCH/DELETE) thiếu header bị từ chối `403 CSRF_CHECK_FAILED`.
+- **Lỗi** ném `FetchError(status, body)`, `body.error` là mã lỗi backend. UI luôn đổi sang câu hướng dẫn tiếng Việt (`errorMessage` / `portalErrorMessage` của `@shh/api-client/dashboard|portal`, lỗi đăng nhập ở `packages/modules/auth/src/model/errors.ts`), không hiện mã thô. `401` ở request thường → `AuthProvider` kết thúc phiên và đưa về `/login?reauth=expired`.
+- **`src/proxy.ts`** (Next 16 `proxy`, dùng `createSessionProxy` từ `@shh/auth/proxy`) là cổng UX: chưa có cookie phiên mà vào trang riêng tư → chuyển `/login`; đã có cookie mà vào `/login` (hoặc `/register` ở cổng khách) → chuyển trang chủ; bỏ qua `/api`, `/_next` và file tĩnh. Proxy **không xác thực** — backend kiểm tra JWT ở mọi request `/api/**`; cookie giả/hết hạn vẫn nhận 401 và bị đưa về trang đăng nhập (`?reauth=` chặn vòng lặp chuyển hướng).
+- **WebSocket chỉ dùng cho xem trực tiếp camera** (`@shh/devices` → `HomeCameraLive`, WS `/api/portal/cameras/:deviceId/live`, khung JPEG vẽ lên canvas, chỉ mở khi người dùng bấm; dev có thể đặt `NEXT_PUBLIC_LIVE_WS_ORIGIN=ws://localhost:5000` vì Next rewrites có thể không chuyển tiếp WS; khi đặt như vậy phải thêm origin của web (vd `http://localhost:3003`) vào `FRONTEND_URL` của backend, nếu không backend trả 403 Origin; lỗi 401/403/429 trước upgrade trình duyệt chỉ thấy mã 1006 nên web hiện "Không kết nối được máy chủ. Hãy tải lại trang hoặc đăng nhập lại." sau 3 lần thử lại). Còn lại cập nhật bằng polling SWR: tổng quan nhà / thiết bị 2 s, thông báo 15 s, log 30 s, danh sách console 10 s. Mobile dùng WebSocket cho sự kiện realtime.
+- Cổng khách: cache SWR riêng cho mỗi lần đăng nhập (`PortalSwrProvider` của `@shh/auth`) để tài khoản đăng nhập sau không thấy dữ liệu của tài khoản trước.
 
-### Tài khoản demo và mã kích hoạt (backend seed — `CONTRACT_V2 §8`)
+### Tài khoản demo (backend seed)
+
+Seed chỉ tạo tài khoản — không có nhà, thiết bị mô phỏng, firmware, thông báo hay log giả (từ 2026-11-13; DB còn dữ liệu của seed cũ được backend tự dọn một lần khi khởi động, nhà có gateway thật được giữ).
 
 | Cổng | Tài khoản | Mật khẩu |
 |---|---|---|
 | Admin | `admin` | `admin123` |
 | Operator | `operator01`, `operator02` | `operator123` |
 | Khách hàng | `user01@smarthome.local` (Nguyễn Hoàng Đạt, `dat#4821`) | `user123` |
-| Khách hàng | `lan@smarthome.local` (Trần Thị Lan — CONTROLLER nhà của Đạt) | `user123` |
-| Khách hàng | `hoa@smarthome.local` (Phạm Thị Hoa — VIEWER nhà của Đạt) | `user123` |
-| Khách hàng | `hung@smarthome.local` (Lê Văn Hùng — chủ "Nhà Quận 7") | `user123` |
-| Khách hàng | `kimanh@smarthome.local` (Ngô Kim Anh, `kimanh#1560` — chưa có nhà, dùng để thử claim / operator gán nhà) | `user123` |
 
-Activation Code để thử trang **Thêm Smart Home** (nhập chữ thường, thiếu dấu gạch đều được):
+Tài khoản khách khác: tạo ở cổng khách hàng (`/register`) hoặc ứng dụng di động.
 
-| Mã | Kết quả |
-|---|---|
-| `7K2M-9QXA-4TPB` | hợp lệ — "Kit KIT_A #0003" |
-| `H3VD-8NRW-2CYE` | hợp lệ — "Kit KIT_B #0004" |
-| `Q4ZT-6MJK-1PSX` | đã dùng (Nhà Quận 7) → "Mã này đã được dùng…" |
-| `B9FE-3WRA-7GMK` | hết hạn → "Mã kích hoạt đã hết hạn…" |
-| mã bất kỳ khác | không tồn tại; nhập sai ≥ 5 lần / 15 phút bị khoá tạm (`RATE_LIMITED`) |
+### Đăng ký gateway thật cho khách (Admin + Operator)
 
-Muốn thử lời mời Khách: đăng nhập `user01`, vào **Thành viên** — nhà demo đã có sẵn lời mời `minh@smarthome.local` (GUEST, chỉ Đèn phòng khách).
+Trang **Đăng ký Gateway** (`/gateways/register`, `@shh/homes` → `GatewayRegistrationPage`) gắn phần cứng đã nạp NVS vào **bất kỳ tài khoản khách hàng nào**: chọn khách → tên nhà (trùng tên nhà khách đang có thì thêm/cập nhật vào nhà đó, tên mới thì tạo nhà mới đã có chủ) → Device ID + Secret của gateway và từng node/camera (nút **Điền từ file NVS (.csv)** đọc `nvs_dev.csv` ngay trên trình duyệt, chỉ lấy `identity`/`nodes`). Backend `POST /api/dashboard/smart-homes/register-gateway` tạo nhà + phòng + thiết bị trong một transaction, cùng mô hình với `npm run hw:register`: mỗi node cảm biến có cảm biến nhiệt/ẩm, Điều hòa (IR thật) và Đèn/Quạt/Rèm (mô phỏng). Secret ô nhập dạng password, không hiển thị lại, xoá khỏi state sau khi gửi.
+
+- Thiết bị đang thuộc nhà khác → Admin được hỏi xác nhận **chuyển** (thiết bị — chuyển gateway thì cả nhóm thiết bị nối qua nó — bị xoá khỏi nhà cũ cùng số đo/ảnh/lịch sử rồi đăng ký vào nhà mới; chủ nhà cũ được báo); Operator chỉ nhận hướng dẫn liên hệ Admin, không thấy tên nhà kia.
+- Operator thêm thiết bị vào nhà khách **đã có** cần quyền truy cập nhà đó (grant, FR-9.6); tạo nhà mới thì không cần.
+- Xong: ghi `cloud/home_id` hiển thị trên trang vào NVS gateway (heartbeat, sự kiện camera) — xem [LEN_SERVER](../docs/guides/LEN_SERVER.md) §5.
+
+### Tab AI Usage (Admin + Operator xem; Admin sửa giá, ngân sách, tỷ giá)
+
+`/ai-usage` (`@shh/ai` → `AiUsagePage`) đọc `/api/dashboard/ai-usage/**`. Số liệu đến từ AI Agent qua `POST /api/service/ai-usage` (backend `SERVICE_API_TOKEN` = agent `BACKEND_SERVICE_TOKEN`); chưa có lượt gọi nào thì tab hiện hướng dẫn kết nối, không có dữ liệu mẫu. Gồm: thẻ KPI (chi phí USD + VNĐ, lượt gọi/yêu cầu, tỉ lệ lỗi, token vào/ra/cache, độ trễ TB/p50/p95/token đầu, chi phí mỗi yêu cầu), thanh ngân sách hôm nay, 3 biểu đồ một trục (chi phí, token vào/ra, p95 — cặp màu đã kiểm CVD), bảng theo model/mục đích/nhà, 50 lượt gọi gần nhất, bảng giá model. Giá mặc định tra ngày 2026-11-13 trên trang giá chính thức OpenAI/Anthropic (có link nguồn); nút **Đồng bộ giá** (xem trước danh sách thay đổi rồi mới áp dụng) lấy từ kho giá LiteLLM, giữ giá Admin nhập tay.
+
+### Hẹn giờ một lần + popup thông báo (app `user`)
+
+- **Hẹn giờ** (`/schedules`, `@shh/automation` → `SchedulesPage`; mục "Hẹn giờ" ở chi tiết thiết bị = `DeviceSchedule`): hẹn bật/tắt đèn/quạt, mở/đóng rèm (0/50/100%), bật/tắt/đặt nhiệt độ điều hoà (16–30 °C) **một lần**, "Lúc HH:MM" (lần tới / ngày mai / chọn ngày) hoặc "Sau N phút" (1–10080, tối đa 7 ngày). Khác "Tự động hoá" (quy tắc lặp hằng tuần / theo ngưỡng cảm biến). API: `GET/POST /api/portal/homes/:id/schedules?scope=upcoming|history`, `POST /api/portal/schedules/:id/cancel` (hợp đồng ở `docs/API_DESIGN.md`); SWR "sắp chạy" 10 s, "đã chạy" 30 s. Giờ hiển thị và xem trước theo múi giờ của nhà (`Schedule.timezone`), không theo trình duyệt; backend mới là nơi quy đổi `run_at`. VIEWER chỉ xem; thiết bị phải có `appliance` do backend gán (không đoán theo tên). Lịch do Trợ lý AI tạo (`origin = ai_agent`) có huy hiệu riêng. Hộp thoại tạo (`ui/CreateScheduleDialog`) nhận `onSubmit` từ feature nên dùng chung cho cả hai nơi mà không vi phạm R3.
+- **Popup thông báo** (`@shh/notifications`): `useHomeNotifications` (chuông + trang Thông báo) nhớ id thông báo đã thấy; thông báo chưa đọc mới xuất hiện sau lần tải đầu → tab ẩn: `new Notification(...)` của hệ điều hành (cần người dùng đã cấp quyền), tab đang xem: toast. Quyền chỉ được xin khi bấm **Bật thông báo trên trình duyệt** ở `/notifications` (`BrowserNotificationToggle`; hiện hướng dẫn khi không hỗ trợ / không phải HTTPS hoặc localhost / đã chặn). Popup hoạt động cả khi tab ẩn nhờ poll 15 s của danh sách thông báo nhà (`refreshWhenHidden: true` ở `useNotificationList`, chỉ riêng danh sách này; mỗi id chỉ báo 1 lần, không báo lại backlog). Điều kiện: tab vẫn còn mở (không có Service Worker / Web Push nên đóng tab hoặc trình duyệt thì không có popup; trình duyệt có thể làm chậm timer của tab nền) và trang chạy trên HTTPS hoặc localhost.
+
+### Trợ lý AI giọng nói/chữ (app `user`)
+
+Nút **micro** ở header (`@shh/ai` → `AssistantLauncher`, ghép trong `apps/user/src/widgets/PortalShell.tsx`, ẩn khi chưa có nhà) mở ngăn kéo hội thoại cho **nhà đang chọn**; đổi nhà thì hội thoại mới. Hội thoại (bong bóng, thẻ chờ xác nhận) giữ trong bộ nhớ trình duyệt, không lưu câu nói hay âm thanh ở đâu cả; đóng/mở ngăn kéo không mất, tải lại trang thì mất (lịch đã hẹn vẫn ở `/schedules`).
+
+- **Nhập**: ô ghi âm lớn (bấm để nói / bấm để dừng, đồng hồ giây, tự dừng ở 30 s) hoặc gõ chữ (≤ 500 ký tự). Ghi âm bằng `MediaRecorder` (`api/useVoiceRecorder.ts`), chọn định dạng đầu tiên trình duyệt hỗ trợ trong `audio/webm;codecs=opus`, `audio/webm`, `audio/mp4`, `audio/ogg;codecs=opus`; chỉ xin quyền micro khi bấm nút, tắt track micro ngay sau khi dừng; không phải HTTPS/localhost, bị chặn quyền, không có micro, thiếu `MediaRecorder` → câu hướng dẫn tiếng Việt (gợi ý gõ chữ). Lần mở đầu tiên có dòng "Giọng nói, câu bạn gõ và tên phòng/thiết bị được gửi tới OpenAI để xử lý. Ứng dụng không lưu giọng nói hay câu nói của bạn." (cờ `assistant:openai_notice_seen_v2` trong localStorage, bọc try/catch; đổi câu thì tăng hậu tố để người đã xem thấy lại).
+- **API** (`api/assistant.api.ts`): `POST /api/agent/homes/:homeId/voice?conversation_id=` (body = audio thô, header `Content-Type` = mime của recorder + `X-Audio-Duration-Ms`) và `POST /api/agent/homes/:homeId/messages` `{text, conversation_id?}` → `AgentReply`; `POST /api/portal/agent/requests/:id/confirm|reject` (xác nhận gửi `request_hash` nguyên văn + `step_indexes`); `POST /api/portal/schedules/:id/cancel` để huỷ lịch Trợ lý đã hẹn. `api()` tự gắn `X-Portal: user`, cookie `sh_user` đi kèm; 401 → luồng đăng nhập chung. DTO (`AgentReply`, `AgentPending`, `AgentPendingStep`, `AgentRequestDetail`, `AgentConfirmResult`…) ở `@shh/api-client/portal` types. Sau khi hẹn/xác nhận/huỷ làm mới SWR: lịch (`schedulesPrefix(homeId)`, khoá chung ở `@shh/api-client`, `@shh/automation` dùng lại), tổng quan, thiết bị, phòng, thông báo.
+- **Hiển thị theo `AgentReply.type`**: `reply` là bong bóng Trợ lý; `clarification.options` → chip (bấm = gửi chữ đó trong cùng `conversation_id`); `executed` (type `done`, lệnh nói/gõ rõ ràng mà backend đã chạy ngay, không cần xác nhận) → thẻ **Đã thực hiện** (`ui/ExecutedList.tsx` + `ui/StepResults.tsx`, dùng chung với kết quả sau khi xác nhận: icon/nhãn/lý do theo `Schedule.status` + `error_code`; có `executed` thì làm mới lịch, tổng quan, thiết bị, phòng, thông báo); `scheduled` → khối **Đã hẹn** (giờ theo múi giờ của lịch, nhãn do backend sinh, nút Huỷ, link "Xem lịch hẹn" → `/schedules`); `pending` → thẻ **Cần xác nhận**, chỉ còn cho lệnh chưa rõ (checkbox từng bước mặc định chọn hết, đếm ngược tới `expires_at`, Huỷ/Xác nhận; sau đó tiêu đề đổi theo kết cục: "Đã thực hiện" kèm kết quả từng bước, "Đã huỷ", "Không còn hiệu lực"; hết hạn → khoá nút + "Yêu cầu đã hết hạn, bạn nói lại giúp mình nhé."); `rejected` → danh sách câu giải thích. Lỗi agent (`EMPTY_AUDIO`, `AUDIO_TOO_LARGE`, `UNSUPPORTED_AUDIO`, `RATE_LIMITED`, `LLM_DISABLED`, `STT_DISABLED`, `AGENT_UNAVAILABLE`, `HOME_NOT_FOUND`, 5xx không rõ) và lỗi xác nhận (`REQUEST_NOT_PENDING|EXPIRED|CHANGED`) đều đổi sang câu tiếng Việt (`model/assistant.ts`); agent tắt/thiếu key → "Trợ lý đang tạm bận. Bạn vẫn có thể bật/tắt hoặc hẹn giờ thủ công."
+- Quyền và luật ("lệnh rõ → làm ngay hoặc tự hẹn giờ; lệnh chưa rõ → hỏi lại / chờ xác nhận", GUEST/VIEWER) do **backend + agent** quyết định; web chỉ hiển thị kết quả. Chưa kiểm với agent/backend thật (hai tầng được viết song song theo hợp đồng giai đoạn 2).
 
 ## Còn là mock
 
-Dữ liệu các phần này vẫn lấy từ `packages/shared/mock/` (trong bộ nhớ từng app, tải lại trang là về seed):
-
-- **AI dashboard** (`packages/console/ai`, `packages/shared/mock/ai.ts`) — chưa có API; doc [Backend](../docs/architecture/BACKEND_REFACTOR_SMARTHOME.md) §18.
-- **Cài đặt hệ thống của Admin** (`admin/src/features/settings`) — chưa có API.
-
-`packages/shared/mock/portal.ts` (API giả kênh khách hàng cũ) không còn được import ở đâu nữa — có thể xoá khi dọn mock.
+Không còn trên Admin/Operator: đã gỡ AI Dashboard mock (tên package `@shh/ai` nay dùng cho tab AI Usage số liệu thật) và Admin Settings (`@shh/settings`) cùng các trang không thuộc bản cơ bản (Provisioning KIT mô phỏng, Automation Rules của console). Backend vẫn giữ các API tương ứng (`POST /smart-homes` tạo KIT, `/automation`). Tab **OTA & Firmware** được giữ (API thật, chỉ còn dữ liệu thật — firmware giả của seed cũ đã bị dọn) để phát triển OTA sau này. Thiết bị **mô phỏng** còn lại duy nhất là đèn/quạt/rèm của node phòng khách (chưa có phần cứng nhận lệnh) — có nhãn "Mô phỏng" trên danh sách thiết bị.
 
 ## Việc còn lại
 
 Chuyển từ nhật ký tiến độ cũ (`docs/06_FRONTEND_REFACTOR_PROGRESS.md`, đã gỡ — còn trong lịch sử git). Thiết kế đích ở [Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md).
 
 - **Responsive mobile** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §16.2, Phase 8): Sidebar mới chỉ collapse icon-only, chưa có chế độ hamburger + overlay trên màn hẹp; bảng mật độ cao (Logs, Gateways) chưa chuyển sang dạng card.
-- **Trang đăng nhập console** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.15): chưa có dòng "Cổng quản trị nội bộ — khách hàng dùng Mobile App". Tài khoản khách đăng nhập nhầm cổng vẫn nhận hướng dẫn (`packages/shared/auth/errors.ts`).
-- **Gán thiết bị đã có vào phòng** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.5): tab Rooms của Smart Home Detail chỉ xem thiết bị theo phòng; thiết bị mới chỉ tạo được qua Provisioning Wizard.
-- **Biểu đồ theo `sensor_type`** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.6): `packages/shared/ui/TelemetryChart.tsx` vẫn chỉ vẽ 2 trường cố định `temperature`/`humidity`.
+- **Trang đăng nhập console** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.15): chưa có dòng "Cổng quản trị nội bộ — khách hàng dùng Mobile App". Tài khoản khách đăng nhập nhầm cổng vẫn nhận hướng dẫn (`packages/modules/auth/src/model/errors.ts`).
+- **Gán thiết bị đã có vào phòng** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.5): tab Rooms của Smart Home Detail chỉ xem thiết bị theo phòng; thiết bị mới chỉ tạo được qua trang Đăng ký Gateway (phòng theo tên nhập cho từng node).
+- **Biểu đồ theo `sensor_type`** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.6): `packages/modules/telemetry/src/ui/TelemetryChart.tsx` vẫn chỉ vẽ 2 trường cố định `temperature`/`humidity`.
 - **Automation kéo-thả** ([Frontend](../docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md) §9.12, Phase 9): chưa làm, đúng khuyến nghị — chỉ đầu tư khi tập trigger/action đã phong phú hơn form IF/THEN.
+- **Điều hòa** (app `user`, `@shh/devices`, chỉ khi `device.appliance === "ac"`): thẻ thiết bị có nhiệt độ đặt 16–30°C (nút −/+, debounce 600 ms, optimistic, `{action:"set_temp"}`). Trang chi tiết có bảng `ui/AcControlPanel.tsx` giống màn TFT của Node: BẬT/TẮT riêng, nhiệt độ cỡ lớn, lưới 16 ô mã IR (TẮT, 16–30°C; ô đã học theo bitmask `ac_codes` bấm để phát mã) và chế độ "Học mã" (`{action:"learn_code", slot}`, đếm ngược 10 s, timeout client riêng 20 s `LEARN_TIMEOUT_MS`, khoá điều khiển khác trong lúc học — hook `api/useAcLearn.ts`). Trạng thái là "lệnh Node đã phát" (IR một chiều). Chưa có chế độ lạnh/quạt, chưa có "giữ lâu để phát thử" (bấm ô đã học là phát luôn). Phụ thuộc backend: lệnh `set_temp`/`learn_code` và các trường `appliance`, `ac_setpoint`, `ac_codes` trong `CustomerDevice`.
 
-**Lệch PRD:** app `user/` (cổng web khách hàng) nằm ngoài phạm vi PRD V2 — `docs/PRD_SMART_HOME.md` §2.2 và FR-1.4 quy định khách hàng chỉ dùng Mobile. App được làm theo yêu cầu trực tiếp; nếu giữ hướng này cần cập nhật PRD và `docs/SMART_HOME_PRODUCT_ARCHITECTURE.md`, `docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md`.
+- **Trợ lý AI** (app `user`): chưa chạy thử với agent/backend thật; chưa có Trợ lý ở Mobile (agent nhận Bearer sẵn); hội thoại không lưu qua lần tải lại trang; chưa có nhận dạng giọng nói cục bộ (STT chỉ qua OpenAI); trang `/schedules` đã hiện huy hiệu "Trợ lý AI" cho lịch `origin = ai_agent`. Hàm thời gian (`formatRunAt`, nhãn/lý do lịch) được chép nhỏ ở `@shh/ai/model/scheduleView.ts` vì module không import nhau — có thể gom về `@shh/utils`/`@shh/api-client` nếu cần thêm nơi dùng.
+
+**Lệch PRD:** app `apps/user/` (cổng web khách hàng) nằm ngoài phạm vi PRD V2 — `docs/PRD_SMART_HOME.md` §2.2 và FR-1.4 quy định khách hàng chỉ dùng Mobile. App được làm theo yêu cầu trực tiếp; nếu giữ hướng này cần cập nhật PRD và `docs/SMART_HOME_PRODUCT_ARCHITECTURE.md`, `docs/architecture/FRONTEND_REFACTOR_SMARTHOME.md`.
 
 ## Docker
 
-`Dockerfile` / `Dockerfile.dev` dùng chung cho cả 3 app, chọn app bằng `--build-arg APP=admin|operator|user`. Trong `compose.yaml` có 3 service `frontend-admin`, `frontend-operator`, `frontend-user` (host port 3001/3002/3003). Nginx route theo subdomain: `localhost` / `admin.localhost` → Admin, `operator.localhost` → Operator, `user.localhost` → khách hàng; `/api/` → backend.
+`Dockerfile` / `Dockerfile.dev` dùng chung cho cả 3 app, chọn app bằng `--build-arg APP=admin|operator|user` (build `apps/<APP>`; stage `manifests` chỉ gom `package.json` của mọi workspace nên layer `npm ci` không chạy lại khi chỉ sửa code). Trong `compose.yaml` có 3 service `frontend-admin`, `frontend-operator`, `frontend-user` (host port 3001/3002/3003). Nginx route theo subdomain: `localhost` / `admin.localhost` → Admin, `operator.localhost` → Operator, `user.localhost` → khách hàng; `/api/` → backend.
+
+Compose dev bind-mount `frontend/` và giữ `node_modules` trong anonymous volume: sau khi đổi phụ thuộc (thêm module, đổi `package.json`) chạy `docker compose up --build --renew-anon-volumes` (hoặc `make dev`), nếu không container vẫn dùng `node_modules` cũ và báo thiếu `@shh/*`. Image production chạy bằng user `node`, chỉ chứa output standalone (`apps/<APP>/server.js`); `BACKEND_URL` cho rewrites là build arg (mặc định `http://backend:5000`).
 
 ## Lưu ý
 

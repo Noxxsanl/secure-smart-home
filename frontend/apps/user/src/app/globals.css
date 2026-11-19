@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "../../../../packages/ui/styles/theme.css";
+
+/* Tailwind v4 chỉ tự quét code trong app — quét thêm mọi package dùng chung (ui + modules). */
+@source "../../../../packages";

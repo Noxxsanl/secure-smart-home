@@ -1,0 +1,7 @@
+key,type,encoding,value
+identity,namespace,,
+device_uuid,data,string,REPLACE_WITH_NODE_DEVICE_ID
+device_secret,data,string,REPLACE_WITH_NODE_SECRET
+pairing,namespace,,
+gateway_mac,data,string,AA:BB:CC:DD:EE:FF
+session_key,data,string,00000000000000000000000000000000

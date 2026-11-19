@@ -1,0 +1,80 @@
+import '../../devices/devices.dart';
+import '../../notifications/notifications.dart';
+
+/// Typed server push (contract §4.3). Only homes where the user is an
+/// effective member are ever delivered.
+sealed class RealtimeEvent {
+  const RealtimeEvent(this.homeId);
+
+  final int homeId;
+}
+
+/// `{"type":"device_state","home_id","device":{id,room_id,online,last_seen,
+/// power,status,ac_setpoint,ac_codes,curtain_pos}}`. The last three are
+/// applied as sent, `null` included (the Node no longer knows the value); the
+/// frame has no `appliance`.
+class DeviceStateEvent extends RealtimeEvent {
+  const DeviceStateEvent({
+    required int homeId,
+    required this.deviceId,
+    this.roomId,
+    this.online,
+    this.lastSeen,
+    this.power,
+    this.status,
+    this.acSetpoint,
+    this.acCodes,
+    this.curtainPos,
+  }) : super(homeId);
+
+  final int deviceId;
+  final int? roomId;
+  final bool? online;
+  final DateTime? lastSeen;
+  final bool? power;
+  final DeviceStatus? status;
+  final int? acSetpoint;
+  final int? acCodes;
+  final int? curtainPos;
+}
+
+/// `{"type":"telemetry","home_id","room_id","device_id","reading":{…}}`
+class TelemetryEvent extends RealtimeEvent {
+  const TelemetryEvent({
+    required int homeId,
+    required this.deviceId,
+    required this.reading,
+    this.roomId,
+  }) : super(homeId);
+
+  final int deviceId;
+  final int? roomId;
+  final Reading reading;
+}
+
+/// `{"type":"notification","home_id","notification":{…}}`
+class NotificationEvent extends RealtimeEvent {
+  const NotificationEvent({required int homeId, required this.notification})
+    : super(homeId);
+
+  final AppNotification notification;
+}
+
+/// `{"type":"camera_snapshot","home_id","device_id","snapshot":{id,trigger,size_bytes,captured_at}}`
+/// — a new camera picture; the camera page reloads its list.
+class CameraSnapshotEvent extends RealtimeEvent {
+  const CameraSnapshotEvent({
+    required int homeId,
+    required this.deviceId,
+    required this.snapshot,
+  }) : super(homeId);
+
+  final int deviceId;
+  final CameraSnapshot snapshot;
+}
+
+/// `{"type":"home_changed","home_id"}` — membership/role/rename/rooms/claim:
+/// refetch homes and the overview.
+class HomeChangedEvent extends RealtimeEvent {
+  const HomeChangedEvent({required int homeId}) : super(homeId);
+}

@@ -433,7 +433,7 @@ Dashboard (Admin/Operator) chỉ xuất hiện ở khâu CHUẨN BỊ (trước 
 │ │ System Health              │ │ Top Errors (7 ngày)                   ││
 │ │ ─────────────────────────  │ │ ───────────────────────────────────── ││
 │ │ MQTT Broker 1   ● Healthy  │ │ 1. GATEWAY_AUTH_FAIL        42 lần    ││
-│ │ MQTT Broker 2   ● Healthy  │ │ 2. WIFI_PROV_FAILED         31 lần    ││
+│ │ MQTT broker   ● Healthy  │ │ 2. WIFI_PROV_FAILED         31 lần    ││
 │ │ PostgreSQL      ● Healthy  │ │ 3. NODE_PAIR_TIMEOUT        19 lần    ││
 │ │ API Latency p95  128ms     │ │ 4. OTA_FAILED                8 lần    ││
 │ │ Redis           ● Healthy  │ │                          [Xem tất cả] ││

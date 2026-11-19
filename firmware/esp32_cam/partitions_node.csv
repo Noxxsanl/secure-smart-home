@@ -1,0 +1,8 @@
+# Flash 4 MB, không có factory — docs/guides/ESP_IDF_BUILD.md §4, Firmware §15.2
+# Name,    Type, SubType, Offset, Size
+nvs,       data, nvs,     ,       16K
+otadata,   data, ota,     ,       8K
+phy_init,  data, phy,     ,       4K
+ota_0,     app,  ota_0,   ,       1920K
+ota_1,     app,  ota_1,   ,       1920K
+log,       0x40, 0x00,    ,       64K

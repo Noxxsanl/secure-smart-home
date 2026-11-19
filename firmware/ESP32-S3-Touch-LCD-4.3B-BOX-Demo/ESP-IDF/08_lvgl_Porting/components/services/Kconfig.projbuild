@@ -1,0 +1,120 @@
+# Chỉ tuỳ chọn KHÔNG bí mật. device_id, secret, WiFi, Local AP, danh sách node nằm trong NVS (README).
+menu "Gateway S3: services"
+
+    config GW_MQTT_URI_DEFAULT
+        string "MQTT broker mặc định (NVS cloud/mqtt_uri ghi đè)"
+        default "mqtts://192.168.1.100:8883"
+        help
+            Host phải nằm trong SAN của chứng chỉ broker (infra/pki/gen_mqtt_certs.sh, docs/guides/MQTT_TLS.md).
+
+    config GW_API_URL_DEFAULT
+        string "Địa chỉ Backend mặc định (NVS cloud/api_url ghi đè)"
+        default "https://192.168.1.100"
+        help
+            Dùng cho POST /api/device/data (đường dự phòng khi MQTT mất kết nối) và gửi ảnh camera.
+
+    config GW_SNTP_SERVER
+        string "Máy chủ NTP"
+        default "pool.ntp.org"
+
+    config GW_LOCAL_AP_CHANNEL
+        int "Kênh Local AP khi chưa nối router"
+        range 1 13
+        default 1
+        help
+            Khi đã nối router, Local AP và ESP-NOW tự chuyển sang kênh của router (1 radio dùng chung).
+
+    config GW_LOCAL_AP_MAX_CONN
+        int "Số camera tối đa trên Local AP"
+        range 1 4
+        default 2
+
+    config GW_HEARTBEAT_INTERVAL_S
+        int "Chu kỳ heartbeat Gateway → Server (giây)"
+        range 10 300
+        default 30
+
+    config GW_NODE_ACK_TIMEOUT_MS
+        int "Thời gian chờ CMD_ACK của node (ms)"
+        range 500 4500
+        default 3000
+        help
+            IOT_NODE_NETWORK §6.3: node im lặng 3 giây thì Gateway trả ack error. Backend chờ ack 5 giây.
+
+    config GW_NODE_OFFLINE_S
+        int "Coi node mất kết nối sau bao nhiêu giây không thấy gói"
+        range 30 600
+        default 90
+
+    config GW_MOTION_SNAPSHOT_WAIT_S
+        int "Chờ ảnh sau sự kiện chuyển động (giây)"
+        range 1 30
+        default 5
+        help
+            Hết thời gian mà camera chưa gửi ảnh thì publish camera/event không kèm snapshot_id.
+
+    choice GW_CAMERA_LIVE_FRAMESIZE
+        prompt "Độ phân giải luồng camera trên màn hình"
+        default GW_CAMERA_LIVE_FS_VGA
+        help
+            IOT_NODE_NETWORK §5.4. ESP32-S3 không có bộ giải mã JPEG phần cứng: Gateway giải nén bằng phần mềm
+            (esp_new_jpeg, có tối ưu cho ESP32-S3), nên số khung/giây phụ thuộc chủ yếu vào độ phân giải.
+
+        config GW_CAMERA_LIVE_FS_VGA
+            bool "VGA 640x480 (nét, ít khung/giây hơn)"
+        config GW_CAMERA_LIVE_FS_QVGA
+            bool "QVGA 320x240, phóng lên khung 448x336 (mượt hơn, kém nét)"
+    endchoice
+
+    config GW_CAMERA_LIVE_QUALITY
+        int "Chất lượng JPEG của luồng (10-30, nhỏ hơn = đẹp hơn, khung nặng hơn)"
+        range 10 30
+        default 12
+
+    config GW_CAMERA_RELAY_MAX_FPS
+        int "Tốc độ tối đa gửi khung camera lên Server khi có người xem từ xa (khung/giây)"
+        range 1 25
+        default 15
+        help
+            Gateway chuyển tiếp khung JPEG nguyên vẹn của camera lên Server (WebSocket TLS, gw_camera_relay) khi Server gửi
+            lệnh live_start. Quá giới hạn này thì bỏ khung thừa (luôn giữ khung mới nhất). Server chấp nhận tối đa
+            25 khung/giây. VGA q=12 mỗi khung ~15-40 KB → 15 khung/giây ≈ 0,2-0,6 MB/s lên mạng nhà.
+
+    choice GW_UI_START_PAGE
+        prompt "Trang hiện khi khởi động"
+        default GW_UI_START_PAGE_CAMERA
+        help
+            Màn hình có thanh nav 3 mục (Camera, Phòng khách, Thiết bị). Luồng camera chỉ chạy khi đang ở trang
+            Camera (IOT_NODE_NETWORK §5.4: chỉ kéo luồng khi có người xem).
+
+        config GW_UI_START_PAGE_CAMERA
+            bool "Camera (xem trực tiếp)"
+        config GW_UI_START_PAGE_ROOM
+            bool "Phòng khách"
+        config GW_UI_START_PAGE_DEVICES
+            bool "Danh sách thiết bị"
+    endchoice
+
+    config GW_CAMERA_LIVE_ON_MOTION_S
+        int "Chuyển sang trang Camera khi có chuyển động, quay lại trang cũ sau (giây, 0 = không chuyển)"
+        range 0 300
+        default 30
+        help
+            Camera cửa báo EVENT motion qua ESP-NOW → màn hình tự chuyển sang trang Camera (bật luồng trực tiếp).
+            Còn chuyển động thì gia hạn; hết thời gian mà không ai chạm màn hình thì về trang đang xem trước đó.
+            Chạm vào nav thì huỷ việc tự quay lại.
+
+    config GW_ESPNOW_ALLOW_UNENCRYPTED
+        bool "[DEV] Cho peer ESP-NOW không mã hoá khi NVS thiếu LMK"
+        default n
+        help
+            Chỉ dùng khi node/camera cũng bật tuỳ chọn [DEV] tương ứng. Bản demo/production phải tắt.
+
+    config GW_DEV_ALLOW_PLAINTEXT
+        bool "[DEV] Cho kết nối Server không TLS (mqtt://, http://)"
+        default n
+        help
+            Hạ tầng hiện tại: Broker MQTT chỉ nhận TLS (8883) nhưng nginx chỉ có cổng 80 (http). Bật để dùng đường
+            dự phòng POST http://.../api/device/data khi dev. Không bao giờ tắt kiểm chứng chứng chỉ khi dùng TLS.
+
+endmenu

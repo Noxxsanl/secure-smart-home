@@ -62,6 +62,16 @@ else
     ok ".env (PostgreSQL) đã tồn tại."
 fi
 
+# Khoá mã hoá secret thiết bị trong DB (FR-12.8) — sinh 1 lần; MẤT KHOÁ = phải đăng ký lại thiết bị
+if ! grep -q '^DEVICE_SECRET_KEY=[0-9a-fA-F]\{64\}' .env 2>/dev/null; then
+    key=$(openssl rand -hex 32 2>/dev/null || tr -dc 'a-f0-9' </dev/urandom | head -c 64)
+    sed -i '/^DEVICE_SECRET_KEY=/d' .env 2>/dev/null || true
+    { echo ""; echo "DEVICE_SECRET_KEY=$key"; } >> .env
+    ok "Đã tạo DEVICE_SECRET_KEY trong .env (giữ bản sao an toàn — mất khoá thì phải đăng ký lại thiết bị)."
+else
+    ok "DEVICE_SECRET_KEY đã có trong .env."
+fi
+
 # Setup backend .env
 if [ ! -f "backend/.env" ]; then
     if [ -f "backend/.env.example" ]; then
@@ -74,12 +84,30 @@ else
     ok "backend/.env đã tồn tại."
 fi
 
-# Chứng chỉ TLS cho MQTT Broker 2 — tham số của setup.sh (IP LAN) được chuyển tiếp
-if [ ! -f "infra/mosquitto/certs/server.crt" ]; then
-    info "Chưa có chứng chỉ MQTT TLS — đang sinh..."
-    bash infra/pki/gen_mqtt_certs.sh "$@"
+# Setup agent .env (OPENAI_API_KEY để trống — agent vẫn chạy, chỉ báo llm_configured=false)
+if [ ! -f "agent/.env" ]; then
+    cp "agent/.env.example" "agent/.env"
+    ok "Đã tạo agent/.env từ .env.example — điền OPENAI_API_KEY để dùng trợ lý AI."
 else
-    ok "Chứng chỉ MQTT TLS đã có (sinh lại: bash infra/pki/gen_mqtt_certs.sh <IP LAN>)."
+    ok "agent/.env đã tồn tại."
+fi
+
+# Chứng chỉ: CA, broker (mTLS), nginx HTTPS, client MQTT của backend, CRL — tham số của setup.sh (IP LAN) được chuyển tiếp
+CERTS=infra/mosquitto/certs
+if [ ! -f "$CERTS/server.crt" ]; then
+    info "Chưa có chứng chỉ TLS — đang sinh..."
+    bash infra/pki/gen_mqtt_certs.sh "$@"
+elif [ ! -f "$CERTS/web.crt" ] || [ ! -f "$CERTS/ca.crl" ] || [ ! -f "$CERTS/clients/iot-backend-data.crt" ]; then
+    # Bản cũ (TLS 1 chiều) chưa có cert web/client/CRL. Sinh lại server cert mà không truyền IP sẽ mất SAN IP LAN
+    # (gateway không xác thực được broker) — nên chỉ tự chạy khi có IP.
+    if [ $# -gt 0 ]; then
+        info "Bổ sung chứng chỉ web/client/CRL (mTLS + HTTPS)..."
+        bash infra/pki/gen_mqtt_certs.sh "$@"
+    else
+        warn "Thiếu chứng chỉ web/client/CRL (mTLS + HTTPS). Chạy: bash infra/pki/gen_mqtt_certs.sh <IP LAN> (CA giữ nguyên)."
+    fi
+else
+    ok "Chứng chỉ TLS đã có (sinh lại: bash infra/pki/gen_mqtt_certs.sh <IP LAN>)."
 fi
 
 # Build and start

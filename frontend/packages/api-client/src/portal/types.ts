@@ -1,0 +1,442 @@
+// ---------------------------------------------------------------------------
+// DTO của API khách hàng kênh web `/api/portal/**` (CONTRACT_V2 §3, §4).
+// Tên trường snake_case giống hệt JSON backend trả về; thời gian là chuỗi ISO UTC.
+// ---------------------------------------------------------------------------
+
+export type HomeStatus = "unclaimed" | "active" | "suspended";
+export type MemberRole = "OWNER" | "CONTROLLER" | "VIEWER" | "GUEST";
+export type AssignableRole = Exclude<MemberRole, "OWNER">;
+export type DeviceCategory = "gateway" | "sensor" | "relay" | "camera" | "door_contact";
+export type DeviceStatus = "active" | "inactive" | "blocked";
+export type Severity = "critical" | "warning" | "info" | "success";
+export type PackageCode = "KIT_A" | "KIT_B";
+// Backend kiểm tra room_type trong tập này; giữ kiểu string để không vỡ khi có loại mới.
+export type RoomType =
+  | "living_room" | "bedroom" | "kitchen" | "bathroom" | "office" | "garage" | "garden" | "door" | "camera";
+
+export type Home = {
+  id: number;
+  name: string;
+  address: string | null;
+  package: PackageCode;
+  status: HomeStatus;
+  timezone: string;
+  owner_customer_id: number | null;
+  gateway_id: number | null;
+  activated_at: string | null;
+  created_at: string;
+};
+
+export type RoomSummary = {
+  id: number;
+  home_id: number;
+  name: string;
+  room_type: RoomType | string;
+  sort_order: number;
+  // Số đo mới nhất của cảm biến trong phòng; null khi chưa có.
+  temperature: number | null;
+  humidity: number | null;
+  has_climate_data: boolean;
+  climate_updated_at: string | null;
+  // Không tính gateway.
+  device_count: number;
+  online_count: number;
+  on_count: number;
+};
+
+export type Reading = {
+  temperature: number | null;
+  humidity: number | null;
+  door_open: boolean | null;
+  received_at: string;
+};
+
+export type CustomerDevice = {
+  id: number;
+  device_uid: string;
+  device_name: string;
+  category: DeviceCategory;
+  home_id: number;
+  room_id: number | null;
+  room_name: string | null;
+  status: DeviceStatus;
+  online: boolean;
+  last_seen: string | null;
+  // Chỉ relay có giá trị; thiết bị khác là null.
+  power: boolean | null;
+  latest: Reading | null;
+  // relay && role cho phép (GUEST: thiết bị được chỉ định, chưa hết hạn). Không phụ thuộc online.
+  can_control: boolean;
+  // Loại đồ vật do backend gán cho relay; null / thiếu (dữ liệu cũ) = chưa biết.
+  appliance?: DeviceAppliance | null;
+  // Nhiệt độ đặt của điều hòa (16..30); null / thiếu = chưa biết. Chỉ có ý nghĩa khi appliance === "ac".
+  ac_setpoint?: number | null;
+  // Bitmask mã IR điều hòa đã học: bit 0 = mã TẮT, bit (t − 15) = mã t°C (t = 16..30). null / thiếu = Node chưa báo.
+  ac_codes?: number | null;
+  // Vị trí rèm 0..100 % (0 = đóng hẳn); null / thiếu = chưa biết. Chỉ có ý nghĩa khi appliance === "curtain".
+  curtain_pos?: number | null;
+};
+
+export type DeviceAppliance = "lamp" | "fan" | "curtain" | "ac";
+
+export type MyHome = {
+  home: Home;
+  role: MemberRole;
+  device_count: number;
+  online_count: number;
+  // Hạn truy cập của GUEST; null với role khác.
+  expires_at: string | null;
+};
+
+export type GatewaySummary = {
+  id: number;
+  uid: string;
+  status: "online" | "offline";
+  last_seen: string | null;
+};
+
+export type HomeOverview = {
+  home: Home;
+  role: MemberRole;
+  gateway: GatewaySummary | null;
+  rooms: RoomSummary[];
+  devices: CustomerDevice[];
+  // Thông báo warning + critical chưa đọc.
+  open_alerts: number;
+  pending_suggestions: number;
+  unread_notifications: number;
+};
+
+export type RoomDetail = {
+  room: RoomSummary;
+  home: Home;
+  role: MemberRole;
+  devices: CustomerDevice[];
+};
+
+export type DeviceDetail = {
+  device: CustomerDevice;
+  room: RoomSummary | null;
+  home: Home;
+  role: MemberRole;
+};
+
+export type DeviceAction = "turn_on" | "turn_off";
+
+/** Thân POST /devices/:id/commands. `set_temp` chỉ dành cho điều hòa (appliance === "ac"), `set_pos` chỉ cho rèm. */
+export type DeviceCommandBody =
+  | { action: DeviceAction }
+  | { action: "set_temp"; temperature: number }
+  // Rèm: vị trí nguyên 0..100 (0 = đóng hẳn).
+  | { action: "set_pos"; position: number }
+  // Học mã IR: Node chờ người dùng bấm remote tối đa 10 s (server chờ ≤ 15 s) — dùng timeout riêng ≥ 20 s.
+  | { action: "learn_code"; slot: "off" | number };
+
+export type DeviceCommandResult = {
+  command: {
+    id: number;
+    action: DeviceAction | "set_temp" | "set_pos" | "learn_code";
+    status: "acked";
+    issued_at: string;
+    acked_at: string | null;
+  };
+  device: CustomerDevice;
+};
+
+export type TelemetryRange = "24h" | "7d";
+
+export type TelemetryPoint = {
+  t: string;
+  temperature: number | null;
+  humidity: number | null;
+};
+
+export type Telemetry = {
+  device_id: number;
+  range: TelemetryRange;
+  // 300 (24h) hoặc 3600 (7d).
+  bucket_seconds: number;
+  points: TelemetryPoint[];
+  latest: Reading | null;
+};
+
+export type CameraSnapshotTrigger = "motion" | "request";
+
+/** Một ảnh chụp của camera (GET /devices/:id/snapshots); ảnh JPEG lấy qua `snapshotImageUrl`. */
+export type CameraSnapshot = {
+  id: number;
+  trigger: CameraSnapshotTrigger;
+  size_bytes: number;
+  captured_at: string;
+};
+
+export type CameraSnapshotList = {
+  device_id: number;
+  /** Mới nhất trước. */
+  items: CameraSnapshot[];
+};
+
+export type CustomerNotification = {
+  id: number;
+  home_id: number | null;
+  home_name: string | null;
+  type: string;
+  title: string;
+  message: string;
+  severity: Severity;
+  is_read: boolean;
+  created_at: string;
+};
+
+export type NotificationList = {
+  notifications: CustomerNotification[];
+  unread_count: number;
+};
+
+export type PortalMember = {
+  id: number;
+  home_id: number;
+  user_id: number | null;
+  name: string;
+  initials: string;
+  // Chỉ có khi người gọi là OWNER.
+  email: string | null;
+  role: MemberRole;
+  is_me: boolean;
+  // Lời mời chưa được chấp nhận (chỉ OWNER thấy).
+  pending: boolean;
+  invite_expires_at: string | null;
+  // Hạn truy cập của GUEST.
+  expires_at: string | null;
+  guest_device_ids: number[];
+  joined_at: string | null;
+};
+
+export type InviteMemberInput = {
+  email: string;
+  name: string;
+  role: AssignableRole;
+  // Bắt buộc với GUEST: trong tương lai, tối đa 30 ngày.
+  expires_at?: string;
+  // Bắt buộc với GUEST: thiết bị của nhà này.
+  device_ids?: number[];
+};
+
+export type UpdateMemberInput = {
+  role?: AssignableRole;
+  expires_at?: string;
+  device_ids?: number[];
+};
+
+export type Invitation = {
+  id: number;
+  home: { id: number; name: string; address: string | null };
+  role: MemberRole;
+  invited_by_name: string | null;
+  invite_expires_at: string;
+  expires_at: string | null;
+};
+
+export type TriggerType = "sensor_threshold" | "schedule";
+export type TriggerMetric = "temperature" | "humidity";
+export type TriggerOperator = ">" | "<" | "=";
+
+export type AutomationRule = {
+  id: number;
+  home_id: number;
+  home_name: string;
+  name: string;
+  enabled: boolean;
+  trigger_type: TriggerType;
+  trigger_room_id: number | null;
+  trigger_room_name: string | null;
+  trigger_metric: TriggerMetric | null;
+  trigger_operator: TriggerOperator | null;
+  trigger_threshold: number | null;
+  // "HH:MM" theo múi giờ của nhà.
+  schedule_time: string | null;
+  // ISO weekday 1 = Thứ 2 … 7 = Chủ nhật.
+  schedule_days: number[] | null;
+  action_device_id: number | null;
+  action_device_name: string | null;
+  action_command: DeviceAction;
+  origin: "user" | "ai_suggested";
+  created_by_user_id: number | null;
+  created_by_name: string | null;
+  last_triggered_at: string | null;
+  created_at: string;
+  can_edit: boolean;
+  can_delete: boolean;
+};
+
+export type CreateAutomationInput = {
+  name: string;
+  trigger_type: TriggerType;
+  trigger_room_id?: number;
+  trigger_metric?: TriggerMetric;
+  trigger_operator?: TriggerOperator;
+  trigger_threshold?: number;
+  schedule_time?: string;
+  schedule_days?: number[];
+  action_device_id: number;
+  action_command: DeviceAction;
+};
+
+export type UpdateAutomationInput = Partial<CreateAutomationInput> & { enabled?: boolean };
+
+export type AutomationHistoryEntry = {
+  id: number;
+  triggered_at: string;
+  result: "success" | "failed" | "skipped";
+  details: Record<string, unknown> | null;
+};
+
+export type HabitSuggestion = {
+  id: number;
+  home_id: number;
+  device_id: number;
+  device_name: string;
+  room_name: string | null;
+  action: DeviceAction;
+  time_of_day: string;
+  days_matched: number;
+  window_days: number;
+  status: "pending" | "accepted" | "dismissed";
+  created_at: string;
+  responded_at: string | null;
+  rule_id: number | null;
+};
+
+export type AcceptSuggestionResult = { suggestion: HabitSuggestion; rule: AutomationRule };
+export type DismissSuggestionResult = { suggestion: HabitSuggestion };
+
+// --- Hẹn giờ một lần: GET/POST /homes/:id/schedules, POST /schedules/:id/cancel ---
+export type ScheduleAction = "turn_on" | "turn_off" | "set_temp" | "set_pos";
+export type ScheduleStatus = "scheduled" | "running" | "done" | "skipped" | "failed" | "cancelled" | "missed";
+export type ScheduleScope = "upcoming" | "history";
+
+export type Schedule = {
+  id: number;
+  home_id: number;
+  // Múi giờ IANA của nhà — giờ hiển thị phải theo múi giờ này, không theo trình duyệt.
+  timezone: string;
+  // null khi thiết bị đã bị xoá.
+  device_id: number | null;
+  device_name: string | null;
+  room_name: string | null;
+  appliance: DeviceAppliance | null;
+  action: ScheduleAction;
+  temperature: number | null;
+  position: number | null;
+  // Backend sinh sẵn, VD "Đặt điều hoà 26°C" (không chứa tên phòng).
+  action_label: string;
+  run_at: string;
+  status: ScheduleStatus;
+  origin: "user" | "ai_agent";
+  channel: "web" | "mobile";
+  created_by_user_id: number | null;
+  created_by_name: string | null;
+  // DEVICE_OFFLINE | TIMEOUT | COMMAND_FAILED | DEVICE_BLOCKED | HOME_SUSPENDED | NOT_CONTROLLABLE | NO_DEVICE |
+  // ACCESS_REVOKED | ALREADY_IN_STATE | INTERRUPTED | UNKNOWN | null
+  error_code: string | null;
+  executed_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  can_cancel: boolean;
+};
+
+/** `when`: đúng MỘT trong hai dạng — giờ trong ngày (kèm ngày tuỳ chọn) hoặc sau N phút. */
+export type ScheduleWhen = { at: string; date?: string } | { after_minutes: number };
+
+export type ScheduleInput = {
+  device_id: number;
+  action: ScheduleAction;
+  temperature?: number;
+  position?: number;
+  when: ScheduleWhen;
+};
+
+export type ScheduleList = { items: Schedule[] };
+
+// --- Trợ lý AI (giọng nói/chữ): AI Agent `/api/agent/**` + `/api/portal/agent/requests/**` ---
+// Hợp đồng: agent trả `AgentReply`; xác nhận/từ chối đi qua backend (`/api/portal/agent/requests/:id/...`).
+export type AgentReplyType = "answer" | "done" | "scheduled" | "confirm" | "mixed" | "clarify" | "refuse";
+export type AgentRequestStatus = "pending" | "confirmed" | "rejected" | "expired" | "completed";
+
+/** Một bước chờ xác nhận. `action_label` do backend sinh ("Bật đèn phòng khách"); `run_at = null` nghĩa là chạy ngay khi xác nhận. */
+export type AgentPendingStep = {
+  index: number;
+  device_id: number;
+  device_name: string;
+  room_name: string | null;
+  action_label: string;
+  run_at: string | null;
+  reason: string;
+};
+
+export type AgentPending = {
+  request_id: number;
+  /** SHA-256 hex của các bước chờ — gửi lại nguyên văn khi xác nhận (backend phát hiện bước bị đổi). */
+  request_hash: string;
+  expires_at: string;
+  steps: AgentPendingStep[];
+};
+
+export type AgentRejectedStep = {
+  index: number;
+  // NOT_FOUND | FORBIDDEN | HOME_SUSPENDED | NOT_CONTROLLABLE | INVALID_WHEN | SCHEDULE_LIMIT | …
+  code: string;
+  /** Câu tiếng Việt do agent soạn (backend trả thẳng thì không có). */
+  message?: string;
+};
+
+export type AgentClarification = { question: string; options: string[] };
+
+export type AgentReply = {
+  conversation_id: string;
+  type: AgentReplyType;
+  reply: string;
+  /** Chữ nhận dạng được từ giọng nói; null khi người dùng gõ chữ. */
+  transcript: string | null;
+  clarification: AgentClarification | null;
+  /** Bước lệnh rõ mà backend đã chạy ngay, kèm kết quả (status done/skipped/failed…, `error_code`). */
+  executed: Schedule[];
+  scheduled: Schedule[];
+  pending: AgentPending | null;
+  rejected: AgentRejectedStep[];
+};
+
+/** GET /agent/requests/:id — chỉ người tạo xem được. */
+export type AgentRequestDetail = {
+  id: number;
+  status: AgentRequestStatus;
+  summary: string;
+  input_kind: "voice" | "text";
+  created_at: string;
+  expires_at: string | null;
+  pending: AgentPending | null;
+  schedules: Schedule[];
+};
+
+/** POST /agent/requests/:id/confirm — `results` là lịch của từng bước đã chọn (đã chạy / chờ chạy / không chạy được). */
+export type AgentConfirmResult = { request_id: number; status: "completed"; results: Schedule[] };
+export type AgentRejectResult = { request_id: number; status: "rejected" };
+
+export type ClaimResult = { home: Home; role: "OWNER" };
+
+export type CustomerProfile = {
+  customer_id: number;
+  user_id: number;
+  full_name: string;
+  email: string;
+  phone: string | null;
+  address: string | null;
+  user_tag: string;
+  joined_at: string;
+};
+
+export type UpdateProfileInput = {
+  full_name?: string;
+  phone?: string | null;
+  address?: string | null;
+};

@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:smart_home_mobile/features/automation/domain/automation_rule.dart';
-import 'package:smart_home_mobile/features/automation/domain/rule_description.dart';
+import 'package:smart_home_mobile/modules/automation/automation.dart';
 
 AutomationRule _rule({
   TriggerType type = TriggerType.schedule,

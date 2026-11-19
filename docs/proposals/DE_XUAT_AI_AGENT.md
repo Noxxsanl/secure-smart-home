@@ -12,6 +12,17 @@
 | **Cập nhật** | 2026-09-30 |
 | **Ảnh hưởng** | [PRD](../PRD_SMART_HOME.md) (E7, §2.2, §8, §11.2, §12 Q1, §13 M5), [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) §18, [Database](../architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.12, [Mobile](../architecture/MOBILE_APP_ARCHITECTURE.md) §14, [Bảo mật](../SECURITY_ARCHITECTURE.md), bất biến số 8 trong `CLAUDE.md` |
 
+> **Trạng thái hiện thực (2026-11-14) — đọc trước.** Một phần đề xuất đã được làm thử ở bản "Trợ lý AI giọng nói/chữ" trên **web app user** (người dùng đã duyệt kế hoạch hiện thực; đề xuất tổng thể vẫn chờ giảng viên). Chi tiết hợp đồng: [API](../API_DESIGN.md) §5.1 "Trợ lý AI", [Database](../architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8 (`agent_requests`), [Bảo mật](../SECURITY_ARCHITECTURE.md) (mô hình đe doạ Trợ lý), [PRD](../PRD_SMART_HOME.md) E7 (đánh dấu FR-7.x).
+>
+> **Đã hiện thực:** hiểu câu tiếng Việt bằng giọng nói (STT OpenAI) hoặc chữ; LLM (OpenAI Responses API, 2 công cụ `ask_clarification` và `propose_plan`) đề xuất kế hoạch tối đa 10 bước; hỏi lại tối đa 2 lần; guard phía agent + **luật tất định phía backend** quyết định từng bước; thẻ xác nhận có `request_hash` (xác nhận đúng phiên bản thẻ đã hiển thị; các bước chờ không bao giờ bị sửa sau khi tạo), hết hạn 5 phút; lệnh đi qua `scheduled_actions` + `sendDeviceCommand` với `source = ai_agent`; bảng `agent_requests`, audit `AGENT_REQUEST_*`, thông báo `AGENT_SCHEDULED`; LLM chỉ nhận mã tạm, không nhận ID thật/PII; đo chi phí qua tab AI Usage.
+>
+> **3 điểm khác đề xuất:**
+> 1. **Dịch vụ Python `agent/`** (FastAPI) điều phối STT + LLM, không đặt trong `backend/src/modules/agent/` (module này của backend chỉ giữ luật, lưu trữ và xác nhận). Backend ↔ agent nói chuyện qua kênh `/api/service/agent/**` (Bearer `SERVICE_API_TOKEN` + cookie người dùng chuyển tiếp).
+> 2. **Client là web user**, không phải Mobile (Mobile để sau; API kênh Bearer đã có sẵn).
+> 3. **Luật "lệnh rõ" thay cho phân loại R0–R4** (cập nhật 2026-11-15 theo quyết định của người dùng): lệnh người dùng nói/gõ **rõ** — backend kiểm từ câu gốc bằng `evidence_span` trích nguyên văn: có động từ đúng hướng + từ loại thiết bị, đúng một thiết bị, không phủ định / điều kiện / câu hỏi, giờ hẹn khớp giờ trong câu ([API](../API_DESIGN.md) §5.1, điều kiện R1–R5 và C1–C5) — thì Trợ lý **làm ngay** hoặc **tự hẹn giờ** và báo kết quả (lịch huỷ được tới lúc chạy); lệnh chưa rõ hoặc AI tự suy ra thì hỏi lại hoặc thẻ xác nhận. Không còn ngưỡng ≥ 2 phút, không giới hạn số bước tự làm, không dùng ngưỡng độ tin cậy STT, không có nút hoàn tác (người dùng chốt). Trước 2026-11-15 luật là: chỉ lệnh hẹn giờ nói rõ còn ≥ 2 phút (tối đa 3 lịch/yêu cầu) mới tự đặt lịch, mọi lệnh chạy ngay đều phải xác nhận. Rủi ro còn lại (STT nghe sai mà vẫn thành lệnh rõ thì vẫn chạy): [Bảo mật](../SECURITY_ARCHITECTURE.md) §9.2. Các mục 7 và 8 bên dưới là **đề xuất gốc**, chưa đồng bộ với luật này.
+>
+> **Chưa làm:** Mobile; Policy Engine R0–R4 đầy đủ, hoàn tác, xác thực lại cho lệnh nhạy cảm (R3); công cụ chỉ-đọc nhiều bước (`get_*`); lưu kế hoạch thành Scene/Automation (FR-7.16); sở thích ghi nhớ (FR-7.17); luật dự phòng khi LLM lỗi (FR-7.18); STT cục bộ (`whisper_local`); chạy đầu-cuối với OpenAI và phần cứng thật.
+
 ---
 
 ## MỤC LỤC
@@ -70,10 +81,10 @@
 
 | Hạng mục | Hiện trạng | Bằng chứng |
 |---|---|---|
-| API điều khiển thiết bị (lệnh relay) | **Chưa có.** Backend chỉ ingest telemetry, không có route gửi lệnh | `backend/src/routes/` (không có route command/relay) |
+| API điều khiển thiết bị (lệnh relay) | **Đã có ở backend** (2026-10): `POST /api/{mobile,portal}/devices/:deviceId/commands` gửi lệnh MQTT có HMAC tới gateway và chờ ack ≤ 5 s; thiết bị `is_simulated` do simulator trả lời. Firmware chưa nhận lệnh (dòng dưới) | `backend/src/modules/control/features/send-device-command/`, `command-ack/` |
 | Firmware relay | **Chưa có.** Node chỉ đọc DHT22, `digitalWrite` chỉ dùng cho LED báo gửi | `firmware/sensor-node/src/main.cpp`, `firmware/gateway-node/src/main.cpp` |
-| WebSocket realtime | Chưa dùng (gói `ws` đã có) | `backend/package.json` |
-| Bảng Automation, Scene, Behavior log | Chỉ có trong thiết kế | [Database](../architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8, §7.12 |
+| WebSocket realtime | **Đã có**: `/api/mobile/ws` đẩy `telemetry`, `device_state`, `notification`, `home_changed` cho Mobile | `backend/src/modules/realtime/features/mobile-ws/` |
+| Bảng Automation, Scene, Behavior log | `automation_rules`, `automation_history`, `user_behavior_logs`, `recommendation_history` **đã có** (luật IF/THEN + gợi ý thói quen); Scene vẫn chỉ trong thiết kế | `infra/postgres/migrations/001_schema.sql`, `backend/src/modules/{automation,recommendations}/`; [Database](../architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8, §7.12 |
 | Mobile | 100% UI mockup, chưa có màn hình AI | `mobile/lib/features/` |
 
 **Hệ quả:** module AI kiểu nào cũng phụ thuộc pipeline điều khiển thiết bị (FR-5.3, FR-5.9). Đề xuất này **không thêm phụ thuộc phần cứng mới**. Agent chỉ gọi vào Device Command Service mà mốc M3 phải làm.
@@ -207,7 +218,7 @@ flowchart LR
 
     LLM[("Nhà cung cấp LLM")]
     DB[("PostgreSQL\nagent_* · device_commands\n· audit/log")]
-    MQTT["Broker 2 (TLS)"] --> GW["Gateway"] --> NODE["Node relay"]
+    MQTT["Broker MQTT (TLS)"] --> GW["Gateway"] --> NODE["Node relay"]
 
     CHAT -->|"HTTPS"| API --> ORCH
     ORCH <--> ADP <--> LLM
@@ -496,7 +507,7 @@ Xác nhận kế hoạch có tạo Scene/Automation phải ghi **trong 1 transac
 ### 10.4. Vị trí code dự kiến
 
 - Backend: `backend/src/modules/agent/` gồm controller, orchestrator, `llm/` (adapter), `tools/`, `policy/` (catalog lệnh + luật rủi ro), repository, executor, fallback parser. Phân lớp theo [Backend](../architecture/BACKEND_REFACTOR_SMARTHOME.md) (NFR-M1).
-- Mobile: `mobile/lib/features/assistant/` gồm màn chat, thẻ kế hoạch, sheet xác thực lại. Theo Riverpod + Clean Architecture ([Mobile](../architecture/MOBILE_APP_ARCHITECTURE.md)).
+- Mobile: module `mobile/lib/modules/assistant/` gồm màn chat, thẻ kế hoạch, sheet xác thực lại (bố cục `mobile/README.md`). Theo Riverpod + Clean Architecture ([Mobile](../architecture/MOBILE_APP_ARCHITECTURE.md)).
 - Thêm dependency (SDK của nhà cung cấp LLM, gói HTTP/Riverpod cho Mobile) **khi kế hoạch được duyệt**.
 
 ---

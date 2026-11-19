@@ -1,89 +1,123 @@
-# backend/src/modules — bản đồ module V2
+# backend/src — bản đồ module → feature
 
-Nền tảng do BE-A dựng (CONTRACT_V2). BE-B/C/D xây trên đây; chỉ THÊM hàm vào module dùng chung khi bắt buộc,
-đọc lại file ngay trước khi sửa và ghi vào báo cáo.
+Backend là **modular monolith** trên Express 5 (không NestJS, không DI container — xem `docs/DESIGN_PATTERNS.md` §7).
+Mỗi domain là một module; trong module, mỗi use case là một feature. Quy tắc phụ thuộc được kiểm tự động bằng
+`npm run check:arch` (`backend/tools/check-architecture.mjs`, chạy trong CI cùng `tsc`).
 
-## 1. Bản đồ
+## 1. Bố cục
 
-| Module | Nội dung | Chủ |
-|---|---|---|
-| `auth/` | login/register/refresh/logout/me 3 kênh, middleware, JWT, cookie, `req.auth` | BE-A |
-| `access/` | quyền theo nhà, grant của Operator | BE-A |
-| `homes/` | Home/Room DTO, KIT, mã kích hoạt, `assignOwner`, timeline | BE-A |
-| `devices/` | read model + DTO, telemetry hook, lệnh thiết bị + ack MQTT, behaviour log | BE-A |
-| `notifications/` | tạo thông báo khách/nhân viên + mapper | BE-A |
-| `logs/` | `logEvent` + danh mục event | BE-A |
-| `customer/` | `createCustomerRouter(channel)` — **stub** | BE-B |
-| `dashboard/` | `createDashboardRouter()` — **stub** | BE-C |
-| `automation/ ai/ simulator/ maintenance/ seed/ realtime/` + `devices/deviceMonitor.ts` | **stub** `start…()` | BE-D |
+```
+backend/src/
+├── main.ts              # bootstrap: migrate → demo seed → listen → createUpgradeRouter → attachWsHub + attachCameraLive → worker của mọi module
+├── app.ts               # helmet/cors/json/log → rate limit → /api (app.module) → 404 → error filter
+├── app.module.ts        # APP_MODULES + gắn module vào các kênh API; không chứa nghiệp vụ
+├── config/env.ts        # nạp .env, kiểm biến bắt buộc lúc boot
+├── core/                # cross-cutting, không phụ thuộc module
+│   ├── auth/            # auth-context.ts (AuthContext, getAuth, req.auth), roles.ts (requireAdmin)
+│   ├── http/            # request-meta.ts (IP, user agent), rate-limit.ts, request-logger.ts
+│   ├── ws/              # upgrade-router.ts — MỘT listener `upgrade`; module đăng ký route WebSocket theo pathname, path lạ → destroy
+│   ├── filters/         # error.filter.ts — HttpError → { error, detail?, …extra }; lỗi lạ → 500
+│   └── health/
+├── shared/              # shared kernel: errors/http-error.ts, validation/validate.ts, types/domain.ts, crypto.ts,
+│                        # time.ts, privacy.ts, events/{event-bus, event-payloads}.ts, module.ts (interface AppModule)
+├── infrastructure/      # database/{pool, db, migrate, like-pattern}.ts, mqtt/broker.ts, storage/ (port SnapshotStore + adapter đĩa)
+├── modules/<m>/         # xem §2
+├── seed/                # demo-seed.ts (chỉ tài khoản demo) + legacy-demo-cleanup.ts (dọn 1 lần dữ liệu mô phỏng của seed cũ)
+└── scripts/             # seed.ts (npm run seed), register-hardware.ts (npm run hw:register — đăng ký phần cứng thật, dev;
+                         # trên console: trang Đăng ký Gateway = homes/features/register-gateway)
+```
 
-Mount (`routes/index.ts`): `/api/dashboard/auth` (không phiên) → `requireDashboard("admin","operator")` → `/ai`, `/simulator`, `createDashboardRouter()`;
-`/api/portal/auth` → `requirePortalUser` → `createCustomerRouter("web")`; `/api/mobile/auth` → `requireMobileUser` → `createCustomerRouter("mobile")`.
-Router của kênh đã được bảo vệ: **không** tự gắn lại middleware auth, chỉ `getAuth(req)`.
+Một module:
 
-## 2. Quy ước
+```
+modules/<m>/
+├── index.ts             # cửa ra DUY NHẤT — <m>Module + hàm facade + type công khai (danh sách tường minh)
+├── <m>.module.ts        # bảng route theo kênh + worker (AppModule)
+├── <m>.facade.ts        # hàm module khác được gọi
+├── domain/              # kiểu, DTO, mapper, policy, logic dùng chung giữa các feature của module
+├── infrastructure/      # *.repository.ts — SQL trên bảng của mình; *.read-model.ts — truy vấn chỉ-đọc JOIN bảng module khác
+└── features/<feature>/  # một use case: <f>.controller.ts (HTTP) · <f>.handler.ts (nghiệp vụ) · <f>.dto.ts
+                         #   · <f>.consumer.ts (MQTT) · <f>.job.ts (timer / listener eventBus)
+```
 
-- **Lỗi**: `throw new HttpError(status, "UPPER_SNAKE", detail?, extra?)` (`lib/http`); `notFound()` = 404, `forbidden()` = 403. Error middleware ở `app.ts` đổi thành `{error, detail?, ...extra}`; lỗi lạ → 500 `INTERNAL_ERROR` + audit `UNHANDLED_ERROR`. Express 5 tự bắt lỗi async.
-- **Input**: `lib/validate` (`requireString/Int/Enum/Id/IdList/Email/IsoDate`, `parseIdParam` → 404 khi id rác, `parseLimit`, `parsePage`, `queryString`). Thiếu → 400 `MISSING_FIELDS`, sai → 400 `INVALID_INPUT`.
-- **Auth**: `getAuth(req): AuthContext` (`auth/authContext`) = `{userId, role, customerId, username, email, displayName, channel, userTag}`. Không `(req as any)`. Augmentation `Express.Request.auth` nằm trong `auth/auth.types.ts`.
-- **Tenant (invariant 6)**: nhà không thuộc quyền → 404; đúng thành viên nhưng thiếu quyền → 403. Luôn đi qua `requireHomeMember` / `requireDeviceAccess` / `requireRoomAccess`. Nhà `suspended` đọc được, ghi/điều khiển → `assertHomeWritable(home)` (409 `HOME_SUSPENDED`).
-- **SQL**: chỉ trong repository/read-model; luôn viết placeholder `?` — helper `lib/db` tự đổi sang `$1..$n` của PostgreSQL (driver `pg`); INSERT cần id thì thêm `RETURNING id`; cột boolean so `= TRUE/FALSE` (không `= 1`); username/email so qua `LOWER(col) = LOWER(?)`. Helper `lib/db`: `queryRows/queryOne/runSql/withTransaction/placeholders/toBool/toIso/toCount/isDuplicateKeyError` (trùng khoá = SQLSTATE `23505`, tên ràng buộc ở `err.constraint`). Session PostgreSQL ép UTC (`config/db.ts`) nên `NOW()` khớp `Date` của Node.
-- **Transaction (invariant 9)**: ghi ≥ 2 bảng → `withTransaction(conn => …)`; truyền `conn` xuống các hàm nhận `Queryable`. Ném `HttpError` trong transaction = rollback.
-- **Secret (invariant 1, 2)**: không trả/log secret, hash, token, mã kích hoạt bản rõ (trừ response tạo mã). `secret_key` chỉ đọc trong `hmacService` và `loadGatewaySecret` (deviceCommand.service). `logEvent` che khoá nhạy cảm trong `details` nhưng đừng dựa vào đó.
-- **Giờ**: `lib/time` — `ONLINE_WINDOW_SECONDS = 90`, `isOnline(lastSeen)`, `homeLocalParts(date, tz)`, `parseHhmm`.
+`AppModule` (`shared/module.ts`) có các móc theo kênh: `device` (`/api/device/**`, HMAC), `dashboard`
+(`/api/dashboard/**`, sau `requireDashboard("admin","operator")`), `customer` (`/api/portal/**` + `/api/mobile/**`,
+cùng handler, tham số `channel`), `service` (`/api/service/**`, dịch vụ nội bộ — AI Agent — sau `requireServiceToken` của `core/auth/service-token.ts`, Bearer `SERVICE_API_TOKEN`), `api` (chỉ legacy), `workers`. Router `/auth` của 3 kênh do identity export và
+`app.module.ts` mount TRƯỚC guard của kênh. Module không bao giờ `router.use(mw)` không kèm path trên router của kênh.
+
+## 2. Module
+
+| Module | Bảng sở hữu | Feature | Worker |
+|---|---|---|---|
+| `identity` | users, customers, refresh_tokens | login, register, logout, refresh-session, get-me, get-profile, update-profile, change-password, list/create/update/delete-staff, search-customers, get-customer-detail · `guards/` (requireDashboard, requirePortalUser, requireMobileUser, csrfGuard, requireActingUser — kênh `/api/service`: người dùng mà Trợ lý AI thay mặt, cookie `sh_user` chuyển tiếp hoặc `X-User-Authorization: Bearer`) | refreshTokenRetention |
+| `homes` | smart_homes, rooms, smart_home_members, member_device_access, operator_home_access, activation_tokens, activation_logs | list-my-homes, get-home-overview, update-home, get-room, rename-room, list/invite/update/remove-member, leave-home, list/accept/decline-invitation, claim-home · list/create/get/update-smart-home, register-gateway (phần cứng thật → tài khoản khách), assign-owner, issue-activation-code, revoke-activation-codes, request-home-access, list/grant/revoke-operator-grant | — |
+| `devices` | devices, device_tokens | get-device-detail, rename-device, list-console-devices, get-console-device-detail, set-device-status, update-device, remove-device, list-gateways, get-gateway-detail, list-gateway-sensors, presence-monitor, track-device-ip, gateway-heartbeat (MQTT `home/+/gateway/+/heartbeat`) | deviceMonitor, gatewayHeartbeat, mqttTracker |
+| `telemetry` | sensor_data, telemetry_history | ingest-http, ingest-mqtt, get-device-telemetry, purge-old-telemetry, rollup-telemetry (nhiệt độ/độ ẩm theo giờ → `telemetry_history`) · facade `getRoomClimate` (khí hậu phòng cho dòng hành vi) | mqttDataService, retentionJob, telemetryRollup |
+| `camera` | camera_snapshots | ingest-snapshot (`POST /api/device/camera/snapshot`), list-camera-snapshots, get-snapshot-image, camera-event (MQTT `…/camera/event` → thông báo `CAMERA_MOTION`), purge-old-snapshots, live-relay (WebSocket: uplink gateway `/api/device/camera/live` + viewer web `/api/portal/cameras/:deviceId/live`, phiên trong RAM; `attachCameraLive` gọi từ main.ts) | cameraEventConsumer, snapshotRetention |
+| `control` | device_commands, user_behavior_logs | send-device-command, send-gateway-command, publish-ota-command, publish-session-command (lệnh phiên camera live_start/live_stop, không ack), command-ack, record-behavior (nghe sự kiện `appliance_changed` từ `devices/domain/appliance-sync.ts` → ghi `user_behavior_logs`) | commandAckListener, behaviorRecorder |
+| `automation` | automation_rules, automation_history | list/create/update/delete-automation, get-automation-history, list-console-automations, toggle-automation, run-automation-engine | automationEngine |
+| `schedules` | scheduled_actions | list-schedules, create-schedule, cancel-schedule (`/homes/:homeId/schedules`, `/schedules/:id/cancel` — hẹn giờ MỘT LẦN: bật/tắt, đặt nhiệt độ điều hoà, mở rèm; tối đa 7 ngày, 50 lịch chờ/nhà) · run-schedules (runner thực thi qua `sendDeviceCommand` source `schedule`/`ai_agent`) · facade `resolveWhen`/`parseWhen` (đổi "20:00"/"sau N phút"/`day_offset` 0..6 thành `run_at` theo múi giờ nhà), `isActionAllowed`/`SCHEDULABLE_APPLIANCES`/`actionLabel`, `insertAgentSchedules` (tạo lịch origin `ai_agent` trong transaction của người gọi, trần 50 lịch/nhà), `executeScheduleNow(id, { notify })` (chạy NGAY một lịch — cùng hàm với worker, `domain/execute-schedule.ts`), `getSchedulesByIds`/`listSchedulesByAgentRequest` (DTO) — module agent dùng | scheduleRunner (tick 5 s) |
+| `recommendations` | recommendation_history, user_feedback | list-suggestions, accept-suggestion, dismiss-suggestion, run-habit-suggestions | habitSuggestionJob |
+| `notifications` | notifications | list-notifications, mark-notifications-read, list-staff-notifications, mark-staff-notifications-read | — |
+| `ota` | firmware, ota_jobs, ota_history | list-firmware, upload-firmware, update-firmware, list-deployments, create-deployment, rollback-deployment | — |
+| `audit` | audit_log | list-logs, delete-logs · `logEvent` cho mọi module | — |
+| `stats` | — | get-badges, get-operator-stats, get-admin-stats | — |
+| `ai-usage` | ai_usage_logs, ai_model_prices, ai_usage_settings | ingest-usage (`POST /api/service/ai-usage`), get-usage-summary, list-usage-calls, list-model-prices, save-model-price, delete-model-price, sync-model-prices (kho giá LiteLLM), update-usage-settings · facade `recordAiUsage` (Agent chạy trong backend) | — |
+| `agent` | agent_requests | get-agent-context (`GET /api/service/agent/homes/:homeId/context`), create-agent-request (`POST /api/service/agent/homes/:homeId/requests`; cả hai sau `requireServiceToken` + `requireActingUser`) · get-agent-request, confirm-agent-request, reject-agent-request (`/agent/requests/:id[/confirm|/reject]` trên portal + mobile, chỉ NGƯỜI TẠO). Trợ lý AI giọng nói/chữ (giai đoạn 2): dịch vụ Python `agent/` lo STT + LLM, backend giữ luật tất định — quyền (`requireDeviceAccess`), loại thiết bị/thao tác, giờ hợp lệ (30 s – 7 ngày); lệnh người dùng nói rõ (`domain/explicit-step.ts` + `utterance-tokens.ts` + `spoken-numbers.ts`, hàm thuần kiểm từ câu gốc: C1 evidence khớp trọn từ sau chuẩn hoá `domain/text-normalize.ts`, C2 nhắc đúng loại tải, C3 động từ/giá trị đúng hướng của bước, C5 chỉ đúng MỘT thiết bị cùng loại theo "vùng đối tượng" của động từ; loại câu điều kiện R1, câu hỏi/kể lại R2, phủ định/quá khứ/ý định R3 (không vượt dấu câu); R4 bước chạy ngay mà câu có giờ hoặc dấu hiệu hoãn (tối nay, ngày mai, lát nữa…) → hỏi lại, dấu hiệu lặp (mỗi, hàng ngày) → hỏi lại cả bước có giờ; R5 bước có giờ phải khớp giá trị giờ đã nói, "8h" trần là mơ hồ, "sau N phút" không nhận "lúc 2 giờ"; đoạn trạng ngữ liền trước không có động từ được gộp vào phạm vi của động từ) → làm ngay (không có giờ) hoặc tự hẹn giờ (có giờ, `scheduled_actions` origin `ai_agent`, huỷ được tới lúc chạy), không giới hạn số bước (bước giống hệt được khử trùng); còn lại (AI tự suy ra, mơ hồ thiết bị, thiếu động từ…) chờ xác nhận 5 phút (`request_hash`). Bước chạy ngay (lúc tạo hoặc sau xác nhận) chèn thẳng `running` trong transaction (`insertAgentSchedules` cờ `startRunning`, không tính trần 50) rồi SAU commit `executeSchedulesNow` (song song giữa thiết bị, tuần tự trên cùng thiết bị; `notify: false`, kết quả nằm trong response `executed`/`results`; lúc tạo chỉ chờ tối đa 6 s vì agent gọi backend với timeout 10 s — quá hạn thì trả trạng thái hiện tại, lệnh chạy tiếp ở nền); mọi lệnh đi qua `scheduled_actions` + `sendDeviceCommand` (source `ai_agent`). Không lưu câu nói/transcript/audio. Thông báo `AGENT_SCHEDULED`, audit `AGENT_REQUEST_*` | — |
+| `realtime` | — | mobile-ws (`attachWsHub`, WebSocket `/api/mobile/ws`, đăng ký vào upgrade router, gọi từ main.ts) | — |
+| `simulator` | — (miễn T1/T2) | get-simulator-status, simulate-device-power, simulate-door, simulator-engine | simulator |
+| `legacy` | — (miễn T1/T2) | route Prototype `/api/{auth,devices,audit-log,users,notifications}` giữ cho `tests/security/attack_demo*.sh`; không tách feature, không phát triển thêm | — |
+
+Camera: ảnh chụp (snapshot) đã có ở module `camera` + port lưu ảnh `infrastructure/storage` (`docs/DESIGN_PATTERNS.md` §3.2c;
+thư mục `SNAPSHOT_STORAGE_DIR`); xem trực tiếp (live) = feature `live-relay` (relay khung JPEG gateway → backend → web, chỉ RAM, không ghi đĩa; `domain/live-session.ts` là sổ phiên, `domain/gateway-auth.ts` là xác thực gateway dùng chung với ingest-snapshot). `recommendations` là gợi ý thói quen thống kê, KHÔNG phải AI agent của
+`docs/proposals/DE_XUAT_AI_AGENT.md` (draft).
+
+## 3. Quy tắc phụ thuộc (`npm run check:arch`)
+
+| Mã | Quy tắc |
+|---|---|
+| L1 | Tầng: config → (không) · shared → shared · infrastructure → config, shared · core → config, shared, infrastructure · modules → các tầng trên + index module khác. Không ai import composition root. |
+| L2 | Module khác chỉ qua `index.ts` (`import { x } from "../../devices"`). |
+| L3 | Feature không import feature khác, không import index/facade/module của chính module. domain/, infrastructure/, guards/ không import features/. Logic nhiều feature cần → `domain/`; module khác cần → facade. |
+| L4 | Không còn `_staging/`. |
+| T1 | Chỉ module chủ được INSERT/UPDATE/DELETE bảng của mình; module khác gọi facade (hàm nhận `db?: Queryable` để chạy trong transaction của người gọi — bất biến 9). |
+| T2 | FROM/JOIN bảng module khác chỉ trong `*.read-model.ts` (chỉ đọc). Ngoại lệ có lý do: `// arch-allow T2: …` (hiện dùng ở `audit/infrastructure/{log-event,legacy-audit-logger}.ts` — INSERT … SELECT home_id nguyên tử). |
+| T3 | Không import hằng `*_SQL` từ module khác. |
+| C1 | Giá trị import từ module khác chỉ dùng trong thân hàm. Vòng import giữa module (vd homes ↔ devices) là hợp lệ nhờ live binding của CommonJS, nhưng ở top-level giá trị có thể còn `undefined`. |
+
+Phản ứng chéo module không đồng bộ đi qua `eventBus` (`shared/events/event-bus.ts`): `telemetry`, `device_state`,
+`notification`, `home_changed`, `camera_snapshot`; payload định nghĩa ở `shared/events/event-payloads.ts`. Listener lỗi bị bọc.
+Gọi đồng bộ (kiểm quyền, ghi audit, gửi thông báo) đi qua facade.
+
+So với mẫu tham khảo NestJS: `app.module.ts` thay `@Module`, `AppModule` thay provider/controller decorator,
+`eventBus` thay `@nestjs/event-emitter`, `check-architecture.mjs` thay dependency-cruiser; guard nằm trong
+`identity/guards` (không ở `core/auth`) vì guard nạp lại user từ bảng `users` ở mỗi request.
+
+## 4. Quy ước
+
+- **Lỗi**: `throw new HttpError(status, "UPPER_SNAKE", detail?, extra?)` (`shared/errors/http-error`); `notFound()` = 404, `forbidden()` = 403. Error filter đổi thành `{error, detail?, ...extra}`; lỗi lạ → 500 `INTERNAL_ERROR` + audit `UNHANDLED_ERROR`. Express 5 tự bắt lỗi async.
+- **Input**: `shared/validation/validate` (`requireString/Int/Enum/Id/IdList/Email/IsoDate`, `parseIdParam` → 404 khi id rác, `parseLimit`, `parsePage`, `queryString`). Thiếu → 400 `MISSING_FIELDS`, sai → 400 `INVALID_INPUT`.
+- **Auth**: `getAuth(req): AuthContext` (`core/auth/auth-context`) = `{userId, role, customerId, username, email, displayName, channel, userTag}`. Không `(req as any)`. Router của kênh đã được bảo vệ: không tự gắn lại guard, trừ hạn chế role theo route (vd `requireDashboard("admin")`, `requireAdmin(auth)`).
+- **Tenant (bất biến 6)**: nhà không thuộc quyền → 404; đúng thành viên nhưng thiếu quyền → 403. Luôn đi qua `requireHomeMember` / `requireRoomAccess` (homes) / `requireDeviceAccess` (devices). Nhà `suspended` đọc được, ghi/điều khiển → `assertHomeWritable(home)` (409 `HOME_SUSPENDED`). Operator trên nhà đã claim cần grant (`requireOperatorHomeAccess`, `loadStaffScope`).
+- **SQL**: chỉ trong `infrastructure/`; placeholder `?` — `infrastructure/database/db` tự đổi sang `$1..$n`; INSERT cần id thì `RETURNING id`; boolean so `= TRUE/FALSE`; username/email so `LOWER(col) = LOWER(?)`. Helper: `queryRows/queryOne/runSql/withTransaction/placeholders/toBool/toIso/toCount/isDuplicateKeyError` (SQLSTATE `23505`). Session PostgreSQL ép UTC (`infrastructure/database/pool.ts`).
+- **Transaction (bất biến 9)**: ghi ≥ 2 bảng → `withTransaction(conn => …)`, truyền `conn` xuống mọi hàm (kể cả facade module khác). Ném `HttpError` trong transaction = rollback. Log thất bại của claim ghi bằng kết nối riêng để rollback không xoá.
+- **Secret (bất biến 1, 2)**: không trả/log secret, hash, token, mã kích hoạt bản rõ (trừ response tạo mã). `secret_key` chỉ được SELECT trong module devices (`infrastructure/device-secret.repository.ts`); module khác ký/kiểm HMAC bằng secret gateway qua `getGatewaySigner` (devices/domain/gateway-signer.ts) — chỉ nhận hàm `sign`/`verify`, không nhận secret. `logEvent` che khoá nhạy cảm trong `details` nhưng đừng dựa vào đó.
+- **Bất biến 4**: HTTP `telemetry/features/ingest-http/` (`validate-device.middleware.ts` → controller/handler) và MQTT `telemetry/features/ingest-mqtt/` (consumer/handler) cùng gọi `verifyGatewayHMAC`/`verifyDeviceHMAC`/`registerAuthFailure` của devices và `telemetry/domain/ingest-common.ts` (`authFailureEventType`: timestamp quá hạn → `REPLAY_ATTACK` ở cả hai đường). Đổi logic xác thực phải sửa ở đó, cả hai đường cùng hưởng.
+- **Giờ**: `shared/time` — `ONLINE_WINDOW_SECONDS = 90`, `isOnline(lastSeen)`, `homeLocalParts(date, tz)`, `parseHhmm`.
 - Văn bản cho người dùng (thông báo, `message` audit, nhãn timeline) bằng tiếng Việt; `detail` lỗi bằng tiếng Anh.
 
-## 3. API dùng chung (chữ ký)
+## 5. Thêm một feature
 
-### auth (`modules/auth`)
-- `requireDashboard(...roles: StaffRole[]): RequestHandler`, `requirePortalUser`, `requireMobileUser`, `csrfGuard(portals)` (`auth.middleware`).
-- `getAuth(req)`, `authToMeUser(auth)`, `toMeUser(row)`, `toAuthContext(row, channel)` (`authContext`).
-- `authenticateAccessToken(token): Promise<{auth, expiresAt}>` — cho WS hub (khung `auth`; đóng 4401 khi `expiresAt`).
-- `revokeAllRefreshTokens(userId): Promise<number>` — gọi khi `POST /me/password` (BE-B). Đổi mật khẩu khác: bcrypt cost 12.
-- `registerCustomer`, `loginCustomer`… đã nối sẵn trong `auth.routes`; BE-B không cần gọi.
-- `PATCH /me/profile`: đổi tên phải cập nhật **cả** `customers.full_name` và `users.full_name` (đọc ưu tiên customers).
+1. Tạo `modules/<m>/features/<dong-tu-danh-tu>/` với controller + handler (+ dto).
+2. Khai báo route trong `<m>.module.ts` ở đúng kênh; route có rate limit riêng thì thêm vào `core/http/rate-limit.ts`.
+3. Cần dữ liệu module khác: gọi hàm trong `index.ts` của nó; chỉ cần đọc để hiển thị → `infrastructure/<x>.read-model.ts`.
+4. Module khác cần dùng logic này → đưa vào `domain/`, export qua `<m>.facade.ts` + `index.ts`.
+5. `npx tsc --noEmit && npm run check:arch`.
 
-### access (`modules/access`)
-- `requireHomeMember(auth, homeId, permission?): Promise<{home: HomeRow, member, role, permissions, guestDeviceIds: number[]|null}>`
-- `Permission = "view"|"control_device"|"rename"|"view_automation"|"create_automation"|"manage_any_rule"|"manage_members"|"leave"`; ma trận ở `permissions.ts` (`ROLE_PERMISSIONS`).
-- `hasPermission(access, p)`, `assertPermission(access, p)`, `assertHomeWritable(home)`, `canViewDevice(access, id)`, `canControlDevice(access, {id,category})` (→ `can_control`), `canEditRule(access, ruleCreatedBy, userId)`.
-- `listEffectiveMemberUserIds(homeId, roles?)`, `listEffectiveHomeIds(userId)`, `getEffectiveMemberAccess(userId, homeId)` (không ném lỗi; cho WS).
-- Operator: `getActiveGrant(operatorId, homeId)`, `resolveOperatorAccess(auth, home): {restricted, grant}` (không ném), `requireOperatorHomeAccess(auth, home)` (403 `ACCESS_GRANT_REQUIRED`), `auditOperatorHomeViewed(auth, home, grant, "thành viên"|…, requestMeta(req))` — tự bỏ qua ADMIN/nhà chưa claim, giới hạn 1 dòng/5 phút/(operator, nhà, view).
-- `requireDeviceAccess(auth, deviceId, permission?)` (`devices/deviceAccess`) → `{device: DeviceRow, access}`; GUEST không được phép → 404. `requireRoomAccess(auth, roomId, permission?)` (`homes/roomAccess`) → `{room, access}`.
-- Thành viên hiệu lực = `user_id` set và (`expires_at` null hoặc > NOW()); lời mời đang chờ = `user_id` NULL.
+## 6. Schema & migration
 
-### homes (`modules/homes`)
-- `getHomeRow(id, db?)`, `HOME_SELECT_SQL` (alias `h`, `oc`), `toHome(row): Home`, `getRoomRow(id)`.
-- `listRoomSummaries(homeId, {withClimate, roomId?, deviceIds?}, db?): RoomSummary[]` — `withClimate:false` cho Operator chưa có grant; `deviceIds` cho GUEST.
-- `createKitHome(conn, {name, packageCode, address?, expectedOwnerName?, createdBy, simulated}): {home: HomeRow, rooms: RoomSummary[], gateway: DeviceRow, devices: DeviceRow[], nodes}` — KHÔNG secret; thiết bị `status='active'`; simulated → `provision_status='provisioned'`, `last_seen=now`.
-- `issueActivationCode(conn, {homeId, createdBy, ttlDays?}): {code, qr_payload, expires_at}` — khoá nhà, thu hồi mã cũ chưa dùng; nhà đã claim → 409 `ALREADY_CLAIMED`.
-- `revokeActivationCodes(conn, homeId, revokedBy): number`.
-- `assignOwner(conn, {homeId, userId, tokenId?, actorUserId?, conflictCode?}): HomeRow` — race-safe (§4.2); claim dùng `conflictCode` mặc định `ALREADY_USED`, Operator gán dùng `"ALREADY_CLAIMED"`.
-- `KIT_TEMPLATES`, `timelineLabel(eventType)`, `TIMELINE_CATEGORIES` (provision, activity, gateway).
-- Các hàm trên **không ghi audit/activation_logs/notification**: endpoint tự ghi `HOME_CREATED`, `ACTIVATION_CODE_CREATED/REVOKED`, `ACTIVATION_SUCCESS|FAILED` + `activation_logs` (ghi bằng kết nối riêng để rollback không xoá log thất bại), `OWNER_ASSIGNED`; claim thành công: `notifyUser` HOME_CLAIMED + `notifyStaff("all")` + bus `home_changed`.
-
-### devices (`modules/devices`)
-- Read model: `DEVICE_SELECT_SQL` (alias `d,h,r,gw`; không có secret), `getDeviceRow`, `getDeviceRowByUid`, `listDeviceRowsByIds`, `listHomeDeviceRows(homeId, {includeGateway?})`, `latestReadings(ids): Map<id, Reading>`, `getTelemetrySeries(id, "24h"|"7d")`, `getGatewayCounts(ids)`, `buildReading(data, at)`.
-- Mapper: `toCustomerDevice(row, {canControl, latest})`, `toConsoleDevice(row)`, `toGateway(row, counts)`, `toDeviceStateSnapshot(row)`, `toDeviceStateEvent(row)`.
-- `onTelemetryIngested({sensorDbId, gatewayDbId, data, receivedAt})` — đã nối vào MQTT + HTTP ingest (gọi sau INSERT, trước khi cập nhật `last_seen`). Simulator gọi cùng hàm sau khi tự INSERT `sensor_data` (và tự cập nhật `last_seen`).
-- `sendDeviceCommand({deviceId, action, issuedBy, source, channel, behaviorSource?, meta?}): {command, device: DeviceRow}` — lỗi: 404, 400 `NOT_CONTROLLABLE`, 409 `DEVICE_BLOCKED|HOME_SUSPENDED|DEVICE_OFFLINE`, 504 `TIMEOUT`, 502 `COMMAND_FAILED`. **Không kiểm quyền người dùng** — gọi `requireDeviceAccess(auth,id,"control_device")` trước. Tự ghi `device_commands`, `power_state`, bus `device_state`, behaviour log, audit `DEVICE_COMMAND`/`DEVICE_COMMAND_FAILED` (đừng ghi lại).
-- `sendGatewayCommand({gatewayId, action, issuedBy, meta?}): {commandId, rowId}` — tự ghi audit `GATEWAY_RESTART|GATEWAY_FACTORY_RESET`; gateway chưa gán nhà → 409 `GATEWAY_NOT_ASSIGNED`. Trả `202 {command_id: commandId}`. Quyền grant của Operator do BE-C kiểm.
-- `publishOtaCommand({gatewayId, jobId, version, targetType, checksumSha256}): Promise<boolean>`.
-- Simulator: `registerSimulatedCommandHandler(async (cmd: SimulatedCommand) => ({status:"ok", power?}))`, `cmd.kind` = `"device"|"gateway"`; handler tự chờ 300–900 ms. Lệnh cho `is_simulated=1` mà chưa có handler → đi MQTT (TIMEOUT).
-- `logBehavior({homeId, timezone, userId, roomId, deviceId, deviceCategory, action:"TURN_ON"|"TURN_OFF", previousState, newState, source, at?})`.
-- `startCommandAckListener()` đã gọi trong `server.ts`.
-
-### notifications / logs / bus
-- `notifyHomeMembers({homeId, roles?, type, title, message, severity, excludeUserId?, relatedDeviceId?}): number`, `notifyUser({userId, homeId?, …})`, `notifyStaff({targetRole:"admin"|"operator"|"all", type, title, message, severity, homeId?, relatedDeviceId?, actor?})`. Không bao giờ ném lỗi. `notifyHomeMembers/notifyUser` phát bus `notification`. Mapper `toCustomerNotification`, `toStaffNotification`, `NOTIFICATION_SELECT_SQL`.
-- `logEvent({eventType, category?, severity?, message?, homeId?, deviceId?, actorUserId?, ip?, userAgent?, details?}, db?)` — không ném lỗi; mặc định từ `logs/eventCatalog` (thêm `HOME_STATUS_CHANGED`, `UNHANDLED_ERROR`); event lạ → `error/critical`. `home_id` tự suy từ `deviceId` nếu bỏ trống. `requestMeta(req)` (`lib/clientIp`) cho ip/userAgent. `services/auditLogger.log()` cũ đi qua cùng hàm.
-- `eventBus` (`lib/eventBus`): `on(event, listener): unsubscribe`, `emit`. Sự kiện: `telemetry`, `device_state`, `notification`, `home_changed` (BE-B/C phát `home_changed` khi đổi thành viên/vai trò/tên/phòng/claim/trạng thái nhà). Listener lỗi bị bọc.
-
-## 4. Stub & chủ sở hữu (mỗi file có `// TODO(BE-x)`)
-`customer/customer.routes.ts` `createCustomerRouter(channel)` (BE-B) · `dashboard/dashboard.routes.ts` `createDashboardRouter()` (BE-C) ·
-`ai/ai.routes.ts` `createAiRouter()`, `simulator/simulator.routes.ts` `createSimulatorRouter()`, `seed/demoSeed.ts` `runDemoSeed()`, `realtime/wsHub.ts` `attachWsHub(server)`,
-`devices/deviceMonitor.ts` `startDeviceMonitor()` (hiện gọi heartbeat cũ), `automation/automationEngine.ts` `startAutomationEngine()`, `ai/habitSuggestion.job.ts` `startHabitSuggestionJob()`,
-`simulator/simulator.ts` `startSimulator()`, `maintenance/retention.job.ts` `startRetentionJob()` (BE-D).
-Lưu ý: đã bỏ prune "150 dòng/sensor" ở 2 đường ingest → **retention job là thứ duy nhất giới hạn `sensor_data`**.
-
-## 5. Schema & migration
-`infra/postgres/migrations/001_schema.sql` là baseline PostgreSQL đầy đủ (đã gộp toàn bộ migration MySQL cũ); mảng `migrations` trong `config/migrate.ts` bắt đầu rỗng — thay đổi schema mới thêm entry cuối (append-only, 1 câu/entry, theo dõi qua bảng `_migrations`) **và** cập nhật baseline cho DB mới — hai nơi phải khớp. `runMigrations()` coi lỗi "đã tồn tại" (SQLSTATE `42P07`/`42701`/`42710`) là đã áp dụng, lỗi khác → log `[migrate] FAILED <name>: …` và dừng (trả `false`, server vẫn chạy, seed bị bỏ qua). Cột FK phải cùng kiểu với khoá được tham chiếu (`users.id`/`devices.id`; PostgreSQL không có UNSIGNED).
+`infra/postgres/migrations/001_schema.sql` là baseline PostgreSQL đầy đủ; mảng `migrations` trong
+`infrastructure/database/migrate.ts` bắt đầu rỗng — thay đổi schema mới thêm entry cuối (append-only, 1 câu/entry,
+bảng `_migrations`) **và** cập nhật baseline — hai nơi phải khớp. Bảng mới phải có chủ sở hữu trong `TABLE_OWNERS`
+của `tools/check-architecture.mjs` (checker báo lỗi nếu thiếu). `runMigrations()` coi lỗi "đã tồn tại" (SQLSTATE
+`42P07`/`42701`/`42710`) là đã áp dụng; lỗi khác → `[migrate] FAILED <name>: …`, server vẫn chạy, seed bị bỏ qua.

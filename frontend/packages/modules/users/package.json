@@ -1,0 +1,25 @@
+{
+  "name": "@shh/users",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Khách hàng, đội vận hành (Team) và quyền truy cập nhà của Operator.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@shh/api-client": "*",
+    "@shh/auth": "*",
+    "@shh/ui": "*",
+    "@shh/utils": "*",
+    "lucide-react": "^1.16.0",
+    "swr": "^2.4.1"
+  },
+  "peerDependencies": {
+    "next": "16.2.5",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}

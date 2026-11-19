@@ -307,8 +307,9 @@ Quy ước: **FR-x.y**, ưu tiên **M**/**S**/**C** (Must/Should/Could). Tiêu c
 | FR-5.5 | Thiết bị offline hiển thị rõ trạng thái và thời điểm online cuối. Nút điều khiển bị vô hiệu | M |
 | FR-5.6 | Mobile nhận cập nhật realtime qua WebSocket của backend. **Mobile không kết nối MQTT trực tiếp** | M |
 | FR-5.7 | Owner/Controller đổi tên nhà, phòng, thiết bị | S |
-| FR-5.8 | Xem snapshot camera cửa. Live view là tuỳ chọn | C |
+| FR-5.8 | Xem snapshot camera cửa. Live view là tuỳ chọn. *Trạng thái (2026-11-13): live view trên **web user** đã hiện thực (backend `modules/camera/features/live-relay/` + `@shh/devices`, chưa thử đầu-cuối với phần cứng); cập nhật 2026-11-15: **Mobile đã có giao diện** xem trực tiếp (WebSocket `/api/mobile/cameras/:deviceId/live`, khung `auth` đầu tiên mang access token), chưa thử đầu-cuối với backend/phần cứng thật — [API](API_DESIGN.md) §5.1, §8* | C |
 | FR-5.9 | Chỉ thành viên có quyền điều khiển (Owner/Controller/Guest trong phạm vi) mới gửi được lệnh. Mọi lệnh ghi Device Command Log | M |
+| FR-5.10 | **Hẹn giờ một lần** cho đèn, quạt, rèm, điều hoà: bật/tắt (rèm: mở/đóng 0/50/100%, điều hoà: đặt 16–30 °C) lúc HH:MM hoặc sau N phút, tối đa 7 ngày. Người dùng huỷ được trước giờ chạy; hệ thống báo kết quả (đã chạy / không cần chạy / không chạy được / bị bỏ lỡ) và không chạy bù lịch quá hạn quá 5 phút. Quyền như lệnh tay (kiểm lại lúc chạy); mỗi nhà tối đa 50 lịch đang chờ. *Trạng thái (2026-11-14): backend `modules/schedules` + web user (trang Hẹn giờ) đã hiện thực, chưa thử trên phần cứng; cập nhật 2026-11-15: **Mobile đã có giao diện** (tab Tự động có tab con "Hẹn giờ", mục "Hẹn giờ" ở chi tiết thiết bị; giờ theo múi giờ nhà), chưa thử đầu-cuối với backend/phần cứng thật — [API](API_DESIGN.md) §5.1* | S |
 
 **Nghiệm thu FR-5.3:** *Cho trước* relay đèn phòng khách đang online, *khi* Controller bấm bật, *thì* relay đổi trạng thái vật lý và UI hiển thị trạng thái đã xác nhận trong mục tiêu NFR-P1. *Khi* thiết bị không phản hồi, *thì* UI quay về trạng thái cũ và báo lỗi.
 
@@ -331,13 +332,28 @@ Quy ước: **FR-x.y**, ưu tiên **M**/**S**/**C** (Must/Should/Could). Tiêu c
 |---|---|:---:|
 | FR-7.1 | Tạo rule dạng **IF** (cảm biến vượt ngưỡng / thời gian / trạng thái thiết bị) **THEN** (bật/tắt relay / gửi thông báo) | S |
 | FR-7.2 | Bật/tắt rule, xem lịch sử lần chạy | S |
-| FR-7.3 | Mọi hành động điều khiển thủ công được ghi vào `user_behavior_logs` (ai, thiết bị, hành động, thời điểm, nguồn) | M |
+| FR-7.3 | Mọi lần đèn/quạt/rèm/điều hoà đổi trạng thái được ghi **đúng 1 dòng** vào `user_behavior_logs` (ai, thiết bị, hành động, thời điểm, nguồn, nhiệt độ/độ ẩm phòng lúc đó): lệnh thủ công, **thao tác tại chỗ** trên màn hình Gateway/Node (nguồn `local`, không có người dùng), lệnh **hẹn giờ** (FR-5.10) và Automation. Lệnh lỗi/không đổi trạng thái không sinh dòng. Dữ liệu xuất ra CSV (`npm run export:behavior`) để huấn luyện AI sau này. *Trạng thái (2026-11-14): đã hiện thực ở backend, chưa thử trên phần cứng — [API](API_DESIGN.md) §5.1, [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.12* | M |
 | FR-7.4 | **Gợi ý thói quen:** định kỳ phân tích `user_behavior_logs`. Nếu cùng một hành động trên cùng thiết bị lặp lại trong cửa sổ ±15 phút ở ít nhất 5 trong 7 ngày gần nhất, tạo gợi ý tự động hoá | S |
 | FR-7.5 | Gợi ý chỉ được thực thi sau khi người dùng **chấp nhận**. Hệ thống không bao giờ tự điều khiển thiết bị dựa trên gợi ý chưa được duyệt | M |
 | FR-7.6 | Phản hồi Chấp nhận/Bỏ qua ghi vào `user_feedback`. Mẫu đã bị bỏ qua thì không gợi ý lại trong 30 ngày | S |
 | FR-7.7 | Tối đa 1 gợi ý mới mỗi ngày cho mỗi nhà, tránh làm phiền | S |
 
 > Ngưỡng ở FR-7.4 là **giá trị khởi điểm đề xuất**, cần hiệu chỉnh khi có dữ liệu thật (xem câu hỏi mở Q3). Khung dữ liệu đầy đủ (Event Store, Feature Store, Recommendation Engine) theo [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) §18 và [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.12. V2 chỉ hiện thực phần tối thiểu ở trên.
+
+**Trợ lý AI giọng nói/chữ — đã hiện thực một phần (2026-11-14).** Các ID FR-7.8 → 7.19 lấy từ [Đề xuất AI Agent](proposals/DE_XUAT_AI_AGENT.md) §10 (đề xuất vẫn chờ giảng viên duyệt, nên các dòng dưới **chưa** là yêu cầu chính thức của PRD). Bản hiện thực **khác đề xuất ở 3 điểm**: điều phối LLM ở dịch vụ Python `agent/`; client là **web app user** (nút Trợ lý, ghi âm hoặc gõ chữ) và, từ 2026-11-15, **app Mobile** (nút mic nổi; chưa thử đầu-cuối với backend/OpenAI thật); và luật quyết định là luật "lệnh rõ → làm ngay hoặc tự hẹn giờ, còn lại xác nhận" bên dưới thay cho mức rủi ro R0–R4. Nội dung đề xuất cũ giữ nguyên ở file đề xuất; bảng này chỉ đánh dấu phần đã làm ([API](API_DESIGN.md) §5.1 "Trợ lý AI", [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8 `agent_requests`).
+
+| ID | Phần đã hiện thực (2026-11) | Chưa làm |
+|---|---|---|
+| FR-7.8 | Câu lệnh tiếng Việt bằng **giọng nói** (STT) hoặc **chữ** trên web user và Mobile (Mobile từ 2026-11-15: ghi âm PCM 16 kHz → WAV trong RAM, ≤ 30 giây, không lưu file; chưa thử đầu-cuối); trả lời bằng tiếng Việt | Từ địa phương chưa có bộ đánh giá lớn (chỉ ~30 câu `agent/eval`) |
+| FR-7.10 | Thiếu/mơ hồ ("8h" sáng hay tối, nhiều thiết bị cùng loại) → hỏi lại, tối đa 2 lần/hội thoại | — |
+| FR-7.11 | **Luật tất định ở backend** (không tin agent): quyền từng thiết bị, loại thao tác, khoảng thời gian, "lệnh rõ" (R1–R5, C1–C5), trần 50 lịch | Mức R0–R4 và catalog lệnh đầy đủ của đề xuất |
+| FR-7.12 | HITL theo luật mới (2026-11-15, người dùng chốt): lệnh người dùng nói/gõ **rõ** — backend kiểm từ câu gốc: có động từ đúng hướng + từ loại thiết bị, đúng một thiết bị (nhà có nhiều thiết bị cùng loại thì phải nói phòng/tên hoặc "hết/tất cả"), không phủ định / điều kiện / câu hỏi / kể chuyện đã qua, giờ hẹn khớp giờ trong câu ([API](API_DESIGN.md) §5.1 điều kiện R1–R5, C1–C5) — thì Trợ lý **làm ngay** (báo kết quả trong `executed`) hoặc **tự hẹn giờ** (báo ngay `AGENT_SCHEDULED`, huỷ được tới lúc chạy); không giới hạn số bước, không còn ngưỡng 2 phút. Lệnh chưa rõ / AI tự suy ra → hỏi lại hoặc thẻ xác nhận (mã `request_hash`, hết hạn 5 phút, người tạo mới xác nhận được). Rủi ro còn lại (STT nghe sai mà vẫn thành lệnh rõ thì vẫn chạy): [Bảo mật](SECURITY_ARCHITECTURE.md) §9.2. FR-7.5 vẫn đúng cho **gợi ý thói quen** (không bao giờ tự chạy khi chưa chấp nhận) | Xác thực lại mật khẩu cho lệnh nhạy cảm, hoàn tác (người dùng chốt không làm) |
+| FR-7.13 | Hành động bằng đúng quyền người đang dùng (cookie `sh_user` chuyển tiếp, `requireDeviceAccess`, GUEST chỉ thiết bị được cấp) | — |
+| FR-7.15 | Lệnh đi qua `scheduled_actions` → `sendDeviceCommand`, ghi `device_commands.source = 'ai_agent'` và `user_behavior_logs.source = 'ai_agent'`; yêu cầu lưu ở `agent_requests`, audit `AGENT_REQUEST_*` | — |
+| FR-7.19 | LLM chỉ nhận mã tạm (`r1…`, `d1…`), tên phòng/thiết bị, khí hậu, giờ nhà; **không** gửi ID thật, tên nhà, tên/email thành viên, secret, ảnh. Audio gửi OpenAI để STT, không lưu | Không có kiểm soát tên thiết bị do người dùng đặt (xử lý như dữ liệu, không như chỉ dẫn) |
+| FR-7.18 | — (luật dự phòng khi LLM lỗi: để sau; hiện chỉ báo "Trợ lý đang tạm bận", hẹn giờ thủ công vẫn chạy) | Cả mục |
+
+FR-7.9, 7.14 (`plan_hash`; bản hiện thực chỉ có `request_hash` để xác nhận đúng phiên bản thẻ đã hiển thị, chưa phải `plan_hash` đầy đủ), 7.16, 7.17 chưa tính là đã làm đủ.
 
 ### E8 — Thông báo
 
@@ -385,11 +401,11 @@ Quy ước: **FR-x.y**, ưu tiên **M**/**S**/**C** (Must/Should/Could). Tiêu c
 
 | ID | Yêu cầu | Ưu tiên |
 |---|---|:---:|
-| FR-12.1 | Giữ nguyên HMAC-SHA256 2 lớp: Node ký → Gateway xác minh lại → Backend xác minh độc lập cả 2 chữ ký | M |
-| FR-12.2 | Khoá thiết bị sau 5 lần xác thực lỗi liên tiếp (đã có, giữ nguyên) | M |
+| FR-12.1 | Giữ HMAC-SHA256 2 lớp **độc lập**: Node ký (phủ nội dung số đo + bộ đếm chống phát lại, end-to-end tới Backend); Gateway ký lại (phủ cả chữ ký Node); Backend xác minh cả 2 chữ ký. Gateway **không giữ secret Node** — chặng Node → Gateway xác thực bằng mã hoá ESP-NOW (CCMP/LMK) + timestamp + bộ đếm, nên Gateway bị chiếm cũng không giả được số đo của Node. Chuỗi ký: [API](API_DESIGN.md) §3 | M |
+| FR-12.2 | Khoá thiết bị sau 5 lần xác thực lỗi liên tiếp — chỉ tính lỗi chữ ký quy được cho bên đã xác thực (gói qua MQTT, người gửi đã qua mTLS); lỗi qua HTTP chỉ ghi audit + giới hạn theo IP để kẻ lạ không khoá được thiết bị người khác (2026-11-16) | M |
 | FR-12.3 | **MQTT Gateway ↔ Backend dùng TLS** (tối thiểu server-auth). mTLS là mục tiêu S | M |
 | FR-12.4 | Tắt `allow_anonymous` trên broker, mỗi Gateway có credential riêng và ACL giới hạn theo topic của nhà mình | M |
-| FR-12.5 | **Vá rò rỉ secret:** không endpoint nào trả secret của sensor/gateway cho client. Gateway chỉ nhận secret của Node thuộc nhà mình | M |
+| FR-12.5 | **Vá rò rỉ secret:** không endpoint nào trả secret của sensor/gateway cho client (đã gỡ `GET /api/device/sensors`, 2026-11-16). Gateway không giữ secret Node — chữ ký Node chỉ backend kiểm; Gateway chỉ giữ secret camera và LMK của thiết bị đã ghép | M |
 | FR-12.6 | Xoá WiFi và secret viết cứng khỏi firmware, chuyển sang NVS được ghi lúc flash/provision | M |
 | FR-12.7 | Chống replay: payload thiết bị có timestamp/nonce, backend từ chối gói quá hạn hoặc trùng | S |
 | FR-12.8 | `gateway_secret` mã hoá khi lưu (encrypted-at-rest), không lưu plaintext trong DB | S |
@@ -550,7 +566,7 @@ Demo liền mạch trên phần cứng thật, không cắt cảnh:
 | Q1 | Hội đồng có chấp nhận gợi ý thống kê là "AI học thói quen" không, hay cần một model ML (VD: decision tree dự đoán hành động theo giờ)? | E7 | Hỏi giảng viên hướng dẫn sớm. Nếu cần model, thêm một classifier nhẹ chạy offline trên cùng dữ liệu |
 | Q2 | Đăng ký bằng email hay số điện thoại? Có cần OTP thật không? | E1 | Email + mật khẩu, không OTP ở V2 |
 | Q3 | Ngưỡng gợi ý (±15 phút, 5/7 ngày) có hợp lý không? | FR-7.4 | Giữ làm mặc định, cấu hình được |
-| Q4 | Camera: bỏ hẳn hay demo snapshot? | FR-5.8, FR-4.6 | Có ESP32-CAM trong bộ demo → demo snapshot + xem trực tiếp trên màn hình Gateway; xem trực tiếp từ xa trên Mobile làm nếu còn thời gian ([IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.4–5.5) |
+| Q4 | Camera: bỏ hẳn hay demo snapshot? | FR-5.8, FR-4.6 | Có ESP32-CAM trong bộ demo → demo snapshot + xem trực tiếp trên màn hình Gateway; xem trực tiếp từ xa trên Mobile làm nếu còn thời gian ([IoT Node Network](firmware/IOT_NODE_NETWORK.md) §5.4–5.5). *Cập nhật 2026-11-13: xem trực tiếp từ xa đã làm trên web user; 2026-11-15: Mobile đã có giao diện xem trực tiếp, chưa thử đầu-cuối với backend/phần cứng thật* |
 | Q5 | Push qua FCM có khả thi (tài khoản Firebase, thiết bị thật)? | E8 | Có. Dự phòng bằng in-app notification qua WebSocket |
 | Q6 | Dashboard giữ mock auth hay chuyển sang auth thật ngay? | FR-1.3, FR-11.6 | Chuyển sang auth thật ở mốc M2 |
 
@@ -579,7 +595,7 @@ M1–M3 là đường găng. Nếu trễ, M4–M5 được cắt theo thứ tự
 
 | Nội dung đề tài | Yêu cầu đáp ứng |
 |---|---|
-| Nút IoT điều khiển đèn, quạt, cảm biến | FR-5.3, FR-5.4, FR-4.3 |
+| Nút IoT điều khiển đèn, quạt, cảm biến | FR-5.3, FR-5.4, FR-5.10, FR-4.3 |
 | Gateway IoT | FR-4.1 → 4.5, FR-9.1, FR-12.1 |
 | Server và Web Dashboard | E2, E9, E10, E11 |
 | Xác thực thiết bị | FR-12.1, FR-12.2, FR-12.7 |
@@ -594,7 +610,7 @@ M1–M3 là đường găng. Nếu trễ, M4–M5 được cắt theo thứ tự
 | E1, E6 | [Kiến trúc sản phẩm](SMART_HOME_PRODUCT_ARCHITECTURE.md) §2, §7, §11 · [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) |
 | E2, E3 | [Kiến trúc sản phẩm](SMART_HOME_PRODUCT_ARCHITECTURE.md) §4–6 · [Frontend](architecture/FRONTEND_REFACTOR_SMARTHOME.md) |
 | E4 | [WiFi Provisioning](firmware/SMART_HOME_WIFI_PROVISIONING.md) · [Firmware](firmware/EMBEDDED_ARCHITECTURE_ESP_IDF.md) |
-| E5, E8 | [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) · [Mobile](architecture/MOBILE_APP_ARCHITECTURE.md) |
+| E5, E8 | [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) · [Mobile](architecture/MOBILE_APP_ARCHITECTURE.md) · hẹn giờ FR-5.10: [API](API_DESIGN.md) §5.1 · [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.8 |
 | E7 | [Backend](architecture/BACKEND_REFACTOR_SMARTHOME.md) §18 · [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) §7.12 |
 | E9 | [Frontend](architecture/FRONTEND_REFACTOR_SMARTHOME.md) · [Firmware](firmware/EMBEDDED_ARCHITECTURE_ESP_IDF.md) §14–15 |
 | E10, E11 | [Database](architecture/DATABASE_REFACTOR_SMARTHOME.md) · [Frontend](architecture/FRONTEND_REFACTOR_SMARTHOME.md) |

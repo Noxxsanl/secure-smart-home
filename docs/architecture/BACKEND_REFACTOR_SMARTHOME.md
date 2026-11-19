@@ -10,7 +10,7 @@
 >
 > **Cập nhật 2026-10-27:** database đã chuyển từ MySQL 8 sang **PostgreSQL 16** (driver `pg`, vẫn SQL viết tay, không ORM). Phần 2 là phân tích **bản prototype ban đầu** nên giữ nguyên các mô tả `mysql2`/ENUM/`connectionLimit` như dữ kiện lịch sử; mọi chỗ nói về kiến trúc đích dùng PostgreSQL. DDL nguồn sự thật: `infra/postgres/migrations/001_schema.sql`.
 >
-> Toàn bộ source code backend thực tế đã được đọc: `backend/src/{app.ts,server.ts}`, `config/{db,env,migrate}.ts`, `middleware/{verifyJWT,rbac,validateDevice}.ts`, `routes/{index,auth,devices,data.routes,sensors.routes,dashboard,audit,users,notifications,health.routes}.ts`, `services/{hmacService,mqttDataService,mqttTracker,deviceStatus,notificationService,auditLogger}.ts`, `scripts/seed.ts`, `infra/postgres/migrations/001_schema.sql`, `backend/package.json`.
+> Toàn bộ source code backend thực tế đã được đọc: `backend/src/{app.ts,server.ts}`, `config/{db,env,migrate}.ts`, `middleware/{verifyJWT,rbac,validateDevice}.ts`, `routes/{index,auth,devices,data.routes,sensors.routes,dashboard,audit,users,notifications,health.routes}.ts`, `services/{hmacService,mqttDataService,mqttTracker,deviceStatus,notificationService,auditLogger}.ts`, `scripts/seed.ts`, `infra/postgres/migrations/001_schema.sql`, `backend/package.json`. (Đường dẫn ở đây là của Prototype — đợt đọc trước refactor module → feature.)
 
 ---
 
@@ -53,6 +53,8 @@ Tài liệu này thiết kế lại backend theo **kiến trúc phân lớp (Lay
 ---
 
 ## 1. REVIEW BACKEND HIỆN TẠI
+
+> **Lưu ý:** Phần 1–2 là review của code **Prototype** (trước khi chuyển sang `modules/<domain>/{domain,infrastructure,features}`), nên đường dẫn và `file:line` trong hai phần này là của Prototype, giữ nguyên như dữ kiện lịch sử. Bố cục hiện tại, quy tắc phụ thuộc và vị trí mới của từng thành phần: `backend/src/modules/README.md`.
 
 ### 1.1. Project Structure & Folder Structure
 
@@ -116,7 +118,7 @@ Không có tầng nào đứng giữa Router và Database Driver. Hệ quả tr�
 
 | Vấn đề | Chi tiết |
 |---|---|
-| 2 broker, không TLS, `allow_anonymous true` | Đã xác nhận qua đường dẫn `infra/mosquitto/broker1/mosquitto.conf`, `infra/mosquitto/broker2/mosquitto.conf` (nội dung đã thẩm định ở `SMART_HOME_WIFI_PROVISIONING.md` mục 20, điểm 11) — chấp nhận được cho demo, **không chấp nhận được cho production thương mại**. |
+| 2 broker, không TLS, `allow_anonymous true` | Đã xác nhận qua đường dẫn `infra/mosquitto/broker1/mosquitto.conf`, `infra/mosquitto/broker2/mosquitto.conf` (prototype — từ 2026-11-12 gộp thành 1 broker TLS `infra/mosquitto/mosquitto.conf`; nội dung đã thẩm định ở `SMART_HOME_WIFI_PROVISIONING.md` mục 20, điểm 11) — chấp nhận được cho demo, **không chấp nhận được cho production thương mại** (*đã xử lý 2026-11-16*: broker mTLS + ACL). |
 | Topic không namespace theo khách hàng | `gateway/+/data` (broker2), `local/sensors/+/data` (broker1) — không có `home_id` trong topic, không thể áp ACL theo khách hàng ở tầng broker (`mqttDataService.ts:174`). |
 | Chỉ có 1 topic ("data") — không có `command`/`status`/`heartbeat`/`ota`/`provision` | Toàn bộ giao tiếp hiện tại là **1 chiều** (thiết bị → cloud). Không có cơ chế gửi lệnh xuống thiết bị (bật/tắt relay), không có OTA qua MQTT, không có heartbeat riêng biệt (trạng thái online suy ra từ `last_seen` cập nhật mỗi lần có dữ liệu — không phân biệt được "thiết bị mất kết nối" và "thiết bị active nhưng không có gì để gửi"). |
 | `mqttTracker.ts` phụ thuộc vào định dạng log `$SYS` của Mosquitto | Regex parse chuỗi log (`CONNECT_RE` ở `mqttTracker.ts:6`) — cách lấy IP thiết bị **rất giòn** (brittle), phụ thuộc định dạng log nội bộ của 1 phiên bản broker cụ thể, gãy ngay khi đổi broker (EMQX/VerneMQ) hoặc đổi cấu hình log level. |
@@ -257,6 +259,8 @@ flowchart TB
 
 ## 3. NGUYÊN TẮC KIẾN TRÚC MỚI
 
+> Từ Phần 3 trở đi, khi nói "hiện tại" về file backend (`rbac.ts`, `routes/index.ts`, `mqttTracker.ts`…) là nói về Prototype; hiện trạng code xem `backend/src/modules/README.md`.
+
 1. **Phân lớp bắt buộc: Controller → Service → Repository → Domain Entity.** Controller chỉ parse/validate request và gọi Service; Service chứa toàn bộ business rule; Repository là lớp duy nhất được phép biết SQL; Domain Entity là kiểu dữ liệu thuần, không phụ thuộc Express/PostgreSQL.
 2. **1 domain = 1 module.** Mỗi module trong Phần 6 sở hữu route/controller/service/repository riêng, giao tiếp với module khác qua interface rõ ràng (không import chéo repository của module khác).
 3. **Tenant isolation là ràng buộc ở tầng Repository, không phải "nhớ lọc" ở tầng route.** Mọi query trên bảng thuộc phạm vi 1 Smart Home bắt buộc nhận `home_id` làm tham số bắt buộc (compile-time), không optional.
@@ -329,7 +333,7 @@ flowchart TB
 
     subgraph IOT["IoT / MQTT Layer"]
         BK1["Broker 1 — Sensor↔Gateway (ESP-NOW/Local, không TLS bắt buộc nội bộ)"]
-        BK2["Broker 2 — Gateway↔Backend (TLS bắt buộc, ACL theo home_id)"]
+        BK2["Broker MQTT — Gateway↔Backend (TLS bắt buộc, ACL theo home_id)"]
     end
 
     WEB --> NGX --> DAPI
@@ -399,10 +403,10 @@ erDiagram
 
 ## 6. SERVICE DESIGN — 22 MODULE
 
-| # | Service | Trách nhiệm chính | Phụ thuộc | Ghi chú kế thừa từ code hiện tại |
+| # | Service | Trách nhiệm chính | Phụ thuộc | Ghi chú kế thừa từ code Prototype |
 |---|---|---|---|---|
 | 1 | **Auth Service** | Đăng nhập Dashboard (session cookie) + Đăng nhập Mobile (JWT+Refresh), đăng xuất, refresh token rotation | User Repository, JWT util, Redis (refresh token store) | Kế thừa cơ chế chống user-enumeration (`dummyHash`) từ `auth.ts:28-31` — **giữ nguyên nguyên lý này** |
-| 2 | **RBAC Service** | Kiểm tra permission theo `role_id` + `operator_home_access`; cấp/thu hồi quyền Operator có thời hạn | Roles/Permissions Repository, Home Access Repository | Thay thế hoàn toàn `middleware/rbac.ts` hiện tại (chỉ check role tĩnh) |
+| 2 | **RBAC Service** | Kiểm tra permission theo `role_id` + `operator_home_access`; cấp/thu hồi quyền Operator có thời hạn | Roles/Permissions Repository, Home Access Repository | Thay thế hoàn toàn `middleware/rbac.ts` của Prototype (nay `modules/legacy/middleware/require-role.ts`, chỉ cho route cũ) (chỉ check role tĩnh) |
 | 3 | **Customer Service** | CRUD khách hàng, tra cứu lịch sử mua hàng/kích hoạt | Customer Repository, Smart Home Service (read-only) | Module hoàn toàn mới |
 | 4 | **Smart Home Service** | CRUD Smart Home, quản lý `smart_home_members`, chuyển quyền sở hữu | Smart Home Repository, Room Service | Module hoàn toàn mới — thay thế tư duy "devices phẳng" |
 | 5 | **Room Service** | CRUD Room trong 1 Smart Home, gán/di chuyển Device giữa các Room | Room Repository, Device Service (interface) | Module hoàn toàn mới |
@@ -512,7 +516,7 @@ flowchart LR
     P4 -- Có --> ALLOW
 ```
 
-Đây là khác biệt cốt lõi so với `middleware/rbac.ts` hiện tại: **permission check không dừng lại ở role tĩnh**, mà tiếp tục kiểm tra phạm vi tài nguyên (`home_id`) đối với Operator — giải quyết đúng vấn đề #3 ở Phần 2.
+Đây là khác biệt cốt lõi so với `middleware/rbac.ts` của Prototype (nay `modules/legacy/middleware/require-role.ts`, chỉ cho route cũ): **permission check không dừng lại ở role tĩnh**, mà tiếp tục kiểm tra phạm vi tài nguyên (`home_id`) đối với Operator — giải quyết đúng vấn đề #3 ở Phần 2.
 
 ---
 
@@ -520,7 +524,7 @@ flowchart LR
 
 ### 9.1. Nguyên tắc phân nhóm
 
-Theo đúng yêu cầu, phân nhóm namespace (thay thế hoàn toàn `routes/index.ts` hiện tại — 1 router phẳng cho mọi kênh):
+Theo đúng yêu cầu, phân nhóm namespace (thay thế hoàn toàn `routes/index.ts` của Prototype — 1 router phẳng cho mọi kênh; đã hiện thực bằng `app.module.ts` + móc `device`/`dashboard`/`customer` của từng `<m>.module.ts`):
 
 ```
 /api/auth/**            – Public (login/refresh/logout) — tách route con theo dashboard|mobile
@@ -615,7 +619,7 @@ Mọi topic đều bắt đầu bằng `home_id` — đây là thay đổi quan 
 | **Notification (local)** | `home/{home_id}/gateway/{gw}/notification` | Cloud → Gateway | 1 | Không | Dùng cho cảnh báo cục bộ (còi báo động), không thay thế Push Notification cho Mobile |
 | **Camera** | `home/{home_id}/gateway/{gw}/device/{dev}/camera/{snapshot\|event}` | Device → Cloud | 1 | Không | `event` cho motion detection, `snapshot` cho ảnh đính kèm (metadata, ảnh thật lưu Object Storage) |
 | **Pairing** | `home/{home_id}/gateway/{gw}/pairing/{request\|response}` | 2 chiều nội bộ (chủ yếu ESP-NOW, không qua MQTT cloud) | — | — | Ghi ở đây để đối chiếu — pairing thật diễn ra local (Phần 9 `SMART_HOME_WIFI_PROVISIONING.md`), MQTT chỉ nhận **kết quả** pairing báo cáo lên (`provision/node_pair_result`) |
-| **System** | `$SYS/broker/#` | Broker → nội bộ | 0 | — | Chỉ dùng cho Monitoring Service theo dõi health broker, **không dùng để suy luận IP thiết bị bằng regex** như `mqttTracker.ts` hiện tại (thay bằng field `ip` tự báo trong Heartbeat payload) |
+| **System** | `$SYS/broker/#` | Broker → nội bộ | 0 | — | Chỉ dùng cho Monitoring Service theo dõi health broker, **không dùng để suy luận IP thiết bị bằng regex** như `mqttTracker.ts` của Prototype (nay `modules/devices/features/track-device-ip/`) (thay bằng field `ip` tự báo trong Heartbeat payload) |
 
 ### 10.3. QoS & Retain — nguyên tắc chọn
 
@@ -630,7 +634,7 @@ Mọi topic đều bắt đầu bằng `home_id` — đây là thay đổi quan 
 | Hiện tại | Mới | Ghi chú |
 |---|---|---|
 | `local/sensors/+/data` (Broker 1) | Giữ nguyên tầng vật lý Sensor↔Gateway (ESP-NOW nội bộ, không qua MQTT cloud theo `SMART_HOME_WIFI_PROVISIONING.md`) | Không đổi — đây là giao tiếp cục bộ, không phải MQTT cloud |
-| `gateway/+/data` (Broker 2) | `home/{home_id}/gateway/{gw}/device/{dev}/telemetry` | Cần script migrate: gateway cũ phải update firmware để publish theo topic mới có `home_id` |
+| `gateway/+/data` (Broker MQTT) | `home/{home_id}/gateway/{gw}/device/{dev}/telemetry` | Cần script migrate: gateway cũ phải update firmware để publish theo topic mới có `home_id` |
 
 ---
 
@@ -776,6 +780,8 @@ flowchart LR
 
 ### 15.2. Kiến trúc — thay thế `deviceStatus.ts` + `mqttTracker.ts` hiện tại
 
+> Hai file này là của Prototype; nay là `modules/devices/domain/online-cache.ts` và `modules/devices/features/track-device-ip/`.
+
 ```mermaid
 flowchart LR
     HB["Heartbeat Topic\n(mỗi gateway, 15-30s)"] --> MONSVC["Monitoring Service"]
@@ -838,7 +844,7 @@ sequenceDiagram
     end
 ```
 
-**Đây là thay đổi kiến trúc quan trọng nhất ở tầng ingest:** cả 2 đường vào (MQTT/HTTP) đều gọi chung `Device Ingest Service` — xoá bỏ hoàn toàn code trùng lặp giữa `validateDevice.ts` và `mqttDataService.ts` hiện tại.
+**Đây là thay đổi kiến trúc quan trọng nhất ở tầng ingest:** cả 2 đường vào (MQTT/HTTP) đều gọi chung `Device Ingest Service` — xoá bỏ hoàn toàn code trùng lặp giữa `validateDevice.ts` và `mqttDataService.ts` của Prototype. Hiện trạng: hai đường là `modules/telemetry/features/ingest-http/` và `ingest-mqtt/`, đã dùng chung hàm HMAC của `modules/devices` và `telemetry/domain/ingest-common.ts`, nhưng pipeline vẫn ở 2 nơi — hợp nhất còn là bước tiếp theo.
 
 ### 16.4. OTA Flow — xem Phần 11.2 (đã có sequence diagram riêng).
 
@@ -869,7 +875,7 @@ sequenceDiagram
 
 | Hạng mục | Thiết kế |
 |---|---|
-| **TLS cho MQTT** | Broker 2 (Gateway↔Backend) bắt buộc TLS 1.2+ trong production — vá vấn đề #9 (hiện tại `allow_anonymous true`, không TLS). Broker 1 (Sensor↔Gateway nội bộ qua ESP-NOW) không bắt buộc TLS vì không phải giao thức IP/MQTT thật theo `SMART_HOME_WIFI_PROVISIONING.md`. |
+| **TLS cho MQTT** | Broker MQTT (Gateway↔Backend) bắt buộc TLS 1.2+ trong production — vá vấn đề #9 (Prototype `allow_anonymous true`, không TLS; *đã xử lý 2026-11-16*: mTLS + `allow_anonymous false` + ACL theo CN, xem [MQTT TLS](../guides/MQTT_TLS.md)). Broker 1 (Sensor↔Gateway nội bộ qua ESP-NOW) không bắt buộc TLS vì không phải giao thức IP/MQTT thật theo `SMART_HOME_WIFI_PROVISIONING.md`. |
 | **HTTPS** | Toàn bộ API (`/api/dashboard`, `/api/mobile`, `/api/device`) bắt buộc TLS ở tầng Nginx/Load Balancer, không có ngoại lệ. |
 | **JWT** | 2 secret riêng biệt cho Dashboard/Mobile (Phần 7.3), thời hạn ngắn cho Mobile Access Token (15 phút). |
 | **Refresh Token** | Random 256-bit, chỉ lưu hash trong DB, rotate mỗi lần dùng, phát hiện reuse → thu hồi toàn bộ session (Phần 7.3). |
@@ -1159,7 +1165,7 @@ flowchart TB
 | **Phase 1 — Vá lỗ hổng bảo mật khẩn cấp** | Vá `GET /api/device/sensors` rò rỉ secret toàn hệ thống (#1); mã hoá secret tại rest (#6); tách JWT secret Dashboard/Mobile | Rủi ro cao nhất, phải xong **trước khi có khách hàng thứ hai** dù các phase khác chưa xong |
 | **Phase 2 — Domain Customer/Home/Room** | Customer Service, Smart Home Service, Room Service, Device Service tổng quát hoá khỏi ENUM cứng | Nền tảng nghiệp vụ cốt lõi — mọi API/MQTT/Automation sau này đều tham chiếu `home_id`/`room_id` |
 | **Phase 3 — Provisioning & Activation** | Provision Service, Activation Service, Pairing Service, RBAC Service (`operator_home_access`) | Điều kiện để bắt đầu bán hàng loạt theo mô hình Claim đã thiết kế |
-| **Phase 4 — MQTT redesign** | Topic mới có `home_id`, TLS Broker 2, tách Heartbeat khỏi Telemetry, bỏ `mqttTracker.ts` regex giòn | Cần thiết trước khi scale số lượng gateway lớn |
+| **Phase 4 — MQTT redesign** | Topic mới có `home_id`, TLS Broker MQTT, tách Heartbeat khỏi Telemetry, bỏ regex giòn lấy IP từ log broker (Prototype: `mqttTracker.ts`; nay `devices/features/track-device-ip/`) | Cần thiết trước khi scale số lượng gateway lớn |
 | **Phase 5 — Gateway/Monitoring/Auth Mobile** | Gateway Service đầy đủ, Monitoring Service (Redis + WebSocket thật, tận dụng `ws`), Auth Service Mobile (Refresh Token) | Đáp ứng yêu cầu Dashboard mới (`FRONTEND_REFACTOR_SMARTHOME.md`) và Mobile App bắt đầu nối API thật |
 | **Phase 6 — OTA & Firmware** | OTA Service, Firmware Service, Job Queue (BullMQ/Redis) | Cần thiết khi fleet đủ lớn để phải cập nhật hàng loạt |
 | **Phase 7 — Logging tách bảng** | Log Service với 9+ loại log riêng, retention riêng, tách khỏi `audit_log` gộp hiện tại | Dọn nợ kỹ thuật logging, đáp ứng yêu cầu Logs Center mới ở Dashboard |

@@ -1,19 +1,13 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:smart_home_mobile/core/network/api_exception.dart';
-import 'package:smart_home_mobile/features/auth/presentation/providers/auth_providers.dart';
-import 'package:smart_home_mobile/features/devices/domain/device.dart';
-import 'package:smart_home_mobile/features/devices/domain/device_repository.dart';
-import 'package:smart_home_mobile/features/devices/presentation/providers/device_providers.dart';
-import 'package:smart_home_mobile/features/homes/domain/home.dart';
-import 'package:smart_home_mobile/features/homes/domain/home_repository.dart';
-import 'package:smart_home_mobile/features/homes/domain/home_role.dart';
-import 'package:smart_home_mobile/features/homes/domain/overview.dart';
-import 'package:smart_home_mobile/features/homes/presentation/providers/homes_providers.dart';
-import 'package:smart_home_mobile/features/rooms/domain/room.dart';
-import 'package:smart_home_mobile/features/shell/domain/realtime_event.dart';
+import 'package:smart_home_mobile/modules/auth/auth.dart';
+import 'package:smart_home_mobile/modules/devices/devices.dart';
+import 'package:smart_home_mobile/modules/homes/homes.dart';
+import 'package:smart_home_mobile/modules/realtime/realtime.dart';
 
 const _home = Home(
   id: 1,
@@ -61,11 +55,11 @@ class _FakeHomes implements HomeRepository {
 class _FakeDevices implements DeviceRepository {
   _FakeDevices(this.onCommand);
 
-  final Future<CommandResult> Function(PowerAction action) onCommand;
+  final Future<CommandResult> Function(DeviceCommand command) onCommand;
 
   @override
-  Future<CommandResult> sendCommand(int deviceId, PowerAction action) =>
-      onCommand(action);
+  Future<CommandResult> sendCommand(int deviceId, DeviceCommand command) =>
+      onCommand(command);
 
   @override
   Future<DeviceDetail> getDevice(int deviceId) => throw UnimplementedError();
@@ -77,11 +71,19 @@ class _FakeDevices implements DeviceRepository {
   @override
   Future<TelemetrySeries> telemetry(int deviceId, TelemetryRange range) =>
       throw UnimplementedError();
+
+  @override
+  Future<List<CameraSnapshot>> listSnapshots(int deviceId, {int limit = 20}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Uint8List> snapshotImage(int snapshotId) =>
+      throw UnimplementedError();
 }
 
 ProviderContainer _container(
   CustomerDevice device,
-  Future<CommandResult> Function(PowerAction) onCommand,
+  Future<CommandResult> Function(DeviceCommand) onCommand,
 ) {
   final container = ProviderContainer(
     retry: (_, _) => null,
@@ -124,9 +126,9 @@ void main() {
   test('successful command keeps the acknowledged state', () async {
     final container = _container(
       _relay(),
-      (action) async => CommandResult(
+      (command) async => CommandResult(
         id: 1,
-        action: action,
+        action: command.action,
         status: 'acked',
         device: _relay(power: true),
       ),

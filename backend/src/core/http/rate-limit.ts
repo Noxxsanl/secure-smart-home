@@ -1,0 +1,139 @@
+// Rate limit theo IP và theo định danh đăng nhập (CONTRACT_V2 §2.5). Gắn TRƯỚC router /api trong app.ts.
+// Đường dẫn ở đây phải khớp route thật — đổi route ở module thì sửa cả bảng dưới.
+import type { Express, Request } from "express";
+import rateLimit from "express-rate-limit";
+import { sha256Hex } from "../../shared/crypto";
+import { deviceDataFailKey, requestWasNotCountedFailure, snapshotFailKey } from "./fail-limiter-key";
+
+function makeLimiter(
+  windowMs: number,
+  max: number,
+  detail: string,
+  skip?: (req: Request) => boolean,
+  keyGenerator?: (req: Request) => string
+) {
+  return rateLimit({
+    windowMs,
+    max,
+    skip,
+    ...(keyGenerator ? { keyGenerator } : {}),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", detail },
+  });
+}
+
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const LOGIN_WINDOW = 15 * MINUTE;
+
+// Thêm bộ đếm theo ĐỊNH DANH đăng nhập (sha256 của username/email chữ thường): chặn dò mật khẩu một tài khoản
+// từ nhiều IP, và không phụ thuộc IP đúng hay sai. Hash để không giữ email/username bản rõ trong RAM/log.
+// Không có định danh hợp lệ (body thiếu) → bỏ qua; handler sẽ trả 400 MISSING_FIELDS.
+function loginIdentifierKey(field: "username" | "email") {
+  return (req: Request): string => {
+    const body: unknown = req.body;
+    const value = typeof body === "object" && body !== null ? (body as Record<string, unknown>)[field] : undefined;
+    return typeof value === "string" ? `login-id:${sha256Hex(value.trim().toLowerCase().slice(0, 190))}` : "login-id:none";
+  };
+}
+function hasLoginIdentifier(field: "username" | "email") {
+  return (req: Request): boolean => {
+    const body: unknown = req.body;
+    const value = typeof body === "object" && body !== null ? (body as Record<string, unknown>)[field] : undefined;
+    return !(typeof value === "string" && value.trim().length > 0);
+  };
+}
+
+export function applyRateLimits(app: Express): void {
+  // Legacy: /api/auth/login – 10 request / 15 phút (giữ nguyên cho tests/security/attack_demo*.sh)
+  const authLimiter = makeLimiter(LOGIN_WINDOW, 10, "Too many login attempts, try again later");
+  // Legacy: /api/device/data – 60 request / phút (firmware); các route khác có hạn mức riêng bên dưới
+  const deviceDataLimiter = makeLimiter(MINUTE, 60, "Device data rate limit exceeded");
+  // Ảnh camera từ gateway: 30 request / phút (mỗi ảnh tới 200 KB nên chặt hơn /device/data)
+  const cameraSnapshotLimiter = makeLimiter(MINUTE, 30, "Camera snapshot rate limit exceeded");
+  // Chung cho /api/**: 6000 request / 5 phút (20/s mỗi IP). Web khách poll 2 s (overview + thiết bị/phòng ≈ 1 req/s mỗi
+  // tab) và ở dev mọi trình duyệt sau nginx chung 1 IP (compose.yaml không bật TRUST_PROXY) — 1500 cũ chạm 429 với ~5 tab.
+  // Đăng nhập vẫn có hạn mức riêng chặt hơn bên dưới.
+  const apiLimiter = makeLimiter(
+    5 * MINUTE,
+    6000,
+    "API rate limit exceeded",
+    (req) => req.originalUrl.startsWith("/api/device/data") || req.originalUrl.startsWith("/api/device/camera/snapshot")
+  );
+
+  // Kênh dịch vụ nội bộ (AI Agent): chỉ đếm request thất bại (token sai/thiếu) — 30 lần / 15 phút / IP, chặn dò
+  // token khi cổng backend mở trong dev (compose publish :5000). Lượt hợp lệ không bị tính.
+  const serviceFailLimiter = rateLimit({
+    windowMs: LOGIN_WINDOW,
+    max: 30,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", detail: "Too many failed service requests" },
+  });
+
+  // Đường telemetry HTTP dự phòng: ai cũng POST được (không có danh tính transport) nên lỗi chữ ký ở đây KHÔNG khoá
+  // thiết bị (chống DoS "5 gói sai là khoá gateway nhà khác", telemetry/domain/ingest-auth.ts). Thay vào đó chặn theo
+  // `<ip>|<gateway_id>` (gateway_id trong body — express.json đã chạy trước limiter; core/http/fail-limiter-key.ts giải
+  // thích vì sao không chỉ theo IP): 20 gói bị từ chối xác thực (400/401/403/404) / 15 phút → 429. Gói hợp lệ và các lỗi
+  // không phải xác thực (409/413/415/5xx) không bị tính.
+  const deviceDataFailLimiter = rateLimit({
+    windowMs: LOGIN_WINDOW,
+    max: 20,
+    keyGenerator: deviceDataFailKey,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => requestWasNotCountedFailure(res.statusCode),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", detail: "Too many rejected device requests" },
+  });
+
+  // Ảnh camera từ gateway: lỗi xác thực KHÔNG khoá gateway (camera/domain/gateway-auth.ts — chống khoá-DoS: ai biết
+  // gateway_id cũng gửi được request rác) mà chặn theo `<ip>|<X-Gateway-Id>`: 20 request bị từ chối xác thực
+  // (400/401/403/404) / 15 phút → 429. Request hợp lệ và 409/413/415/5xx không bị tính. Đặt TRƯỚC cameraSnapshotLimiter
+  // để request rác vào xô đã bị chặn không tốn thêm hạn mức.
+  const cameraSnapshotFailLimiter = rateLimit({
+    windowMs: LOGIN_WINDOW,
+    max: 20,
+    keyGenerator: snapshotFailKey,
+    skipSuccessfulRequests: true,
+    requestWasSuccessful: (_req, res) => requestWasNotCountedFailure(res.statusCode),
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "TOO_MANY_REQUESTS", detail: "Too many rejected camera requests" },
+  });
+
+  app.use("/api/service", serviceFailLimiter);
+  app.use("/api/auth/login", authLimiter);
+  app.use("/api/device/data", deviceDataFailLimiter);
+  app.use("/api/device/data", deviceDataLimiter);
+  app.use("/api/device/camera/snapshot", cameraSnapshotFailLimiter);
+  app.use("/api/device/camera/snapshot", cameraSnapshotLimiter);
+
+  // Đăng nhập 3 kênh: mỗi kênh một bộ đếm riêng (10 / 15 phút) để demo đăng nhập 3 portal không
+  // ăn quota của nhau; đăng ký 10/giờ dùng chung 2 kênh; refresh 60/15 phút.
+  const LOGIN_DETAIL = "Too many login attempts, try again later";
+  for (const [path, field] of [
+    ["/api/dashboard/auth/login", "username"],
+    ["/api/portal/auth/login", "email"],
+    ["/api/mobile/auth/login", "email"],
+  ] as const) {
+    app.post(path, makeLimiter(LOGIN_WINDOW, 10, LOGIN_DETAIL));
+    app.post(path, makeLimiter(LOGIN_WINDOW, 10, LOGIN_DETAIL, hasLoginIdentifier(field), loginIdentifierKey(field)));
+  }
+  const registerLimiter = makeLimiter(HOUR, 10, "Too many registrations, try again later");
+  app.post("/api/portal/auth/register", registerLimiter);
+  app.post("/api/mobile/auth/register", registerLimiter);
+  app.post("/api/mobile/auth/refresh", makeLimiter(LOGIN_WINDOW, 60, "Too many token refreshes, try again later"));
+  // Claim: 20/giờ theo IP (giới hạn theo mã/tài khoản của FR-3.6 nằm ở feature claim-home)
+  const claimLimiter = makeLimiter(HOUR, 20, "Too many activation attempts, try again later");
+  app.post("/api/mobile/claim", claimLimiter);
+  app.post("/api/portal/claim", claimLimiter);
+  // Lệnh điều khiển thiết bị: 60/phút
+  const commandLimiter = makeLimiter(MINUTE, 60, "Too many device commands, try again later");
+  app.post("/api/mobile/devices/:deviceId/commands", commandLimiter);
+  app.post("/api/portal/devices/:deviceId/commands", commandLimiter);
+
+  app.use("/api", apiLimiter);
+}

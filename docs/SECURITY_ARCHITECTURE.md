@@ -9,6 +9,21 @@
 >
 > Toàn bộ source code hệ thống (Backend 22 file, Database schema gốc, Frontend ~60 file, Mobile 16 file, Firmware gateway-node/sensor-node) đã được đọc đầy đủ trong quá trình biên soạn các tài liệu trên — phần Review dưới đây tổng hợp lại đúng các bằng chứng cụ thể (file:line) đã phát hiện, nhìn dưới góc độ bảo mật xuyên suốt toàn hệ thống thay vì theo từng thành phần riêng lẻ.
 
+> **Cập nhật hiện trạng 2026-11-16 (đợt sửa bảo mật luồng thiết bị).** Phần 1–2 và 16 bên dưới là bản **đánh giá Prototype** (giữ làm lịch sử và lý do thiết kế); các mục sau đã xử lý trong code, ghi chú "đã xử lý" ở từng chỗ:
+>
+> | Mục | Trước | Nay (code là nguồn sự thật) |
+> |---|---|---|
+> | Rò rỉ secret qua `GET /api/device/sensors` (#1) | Trả secret node cho gateway | **Đã gỡ**; Gateway không giữ secret Node, chữ ký Node chỉ backend kiểm |
+> | Secret plaintext trong DB (#2) | `devices.secret_key` dạng rõ | **Đã mã hoá** AES-256-GCM (`enc1:…`, khoá `DEVICE_SECRET_KEY`, AAD = `device_id`), FR-12.8; mã hoá dần dòng cũ. Còn lại: secret trong NVS/binary firmware (NVS/Flash Encryption chưa làm) |
+> | MQTT không TLS / anonymous / ACL (#3, #7) | `allow_anonymous true` | **mTLS bắt buộc** (CN chứng chỉ = username = client id), `allow_anonymous false`, ACL theo CN, CRL thu hồi, bỏ log `$SYS` (FR-12.3, FR-12.4); xem [MQTT TLS](guides/MQTT_TLS.md) |
+> | HTTP không TLS (#3) | `http://` | nginx HTTPS :443 (`web.crt`), 80 → 301; Gateway gọi HTTPS và kiểm chứng bằng CA |
+> | Chữ ký telemetry không phủ nội dung, replay trong ±300 s | `HMAC(secret, "<device_id>:<ts>")` | **Chữ ký v2** phủ `sha256(data_raw)` + bộ đếm `sn_ctr` tăng ngặt, Gateway ký phủ cả chữ ký Node ([API](API_DESIGN.md) §3); phát lại → `401 REPLAYED` |
+> | Khoá thiết bị làm DoS | Mọi lỗi HMAC tăng `fail_count` | Chỉ `HMAC_MISMATCH` qua MQTT telemetry (đã qua mTLS) mới khoá (FR-12.2); lỗi qua HTTP chỉ audit + giới hạn theo `ip|gateway_id` 20 gói bị từ chối xác thực/15 phút → 429; đường camera (`POST /device/camera/snapshot`, `WS /device/camera/live`) không còn khoá gateway, chỉ audit + 20 lỗi/15 phút/IP → 429 |
+> | Heartbeat, ack, `camera/event`, Camera ↔ Gateway ký chuỗi ngắn, phát lại được | `<gateway_id>:<ts>`, `<command_id>:<status>:<ts>`, `<device_id>:motion:<ts>`, `<device_id>:<ts>` | **Chữ ký v2** `v2\|hb` (có `ctr` + sha256 `body_raw`, phủ cả `nodes[]`/`ip`), `v2\|ack`, `v2\|evt`, `v2\|cam-up`/`v2\|cam-stream` (có `ctr`) ([API](API_DESIGN.md) §3); dạng cũ chỉ khi `DEVICE_HMAC_V1=true` (Camera ↔ Gateway không còn dạng cũ) |
+> | Gateway bị nhân bản (2 board cùng cert + secret) không ai biết | Không phát hiện | Backend nghi nhân bản từ heartbeat đúng chữ ký (uptime lùi, IP đổi qua lại, `ctr` phát lại) → audit `GATEWAY_DUPLICATE_SUSPECTED` + thông báo nhân viên, không tự khoá |
+>
+> **Chưa làm (quy trình/việc sau):** NVS Encryption, Flash Encryption, Secure Boot (phải đốt eFuse, không đảo ngược); ghép nối ECDH/PMK riêng cho từng node; OTA thiết bị; `v2|ack` và `v2|evt` chưa có `ctr` (ack dùng 1 lần theo `command_id`, sự kiện camera chống lặp 60 giây); cấp cert client bằng CSR trên thiết bị (hiện cấp bằng script rồi nạp NVS); ACL theo `home_id`.
+
 ---
 
 ## MỤC LỤC
@@ -41,9 +56,9 @@ Hệ thống hiện tại đã có **3 nền tảng bảo mật đúng hướng*
 
 Tuy nhiên, khi nhìn xuyên suốt toàn hệ thống (không chỉ 1 thành phần), lộ ra **4 lỗ hổng cấu trúc nghiêm trọng nhất**, đủ để loại bỏ khả năng thương mại hoá nếu không vá trước khi có khách hàng thứ hai:
 
-1. **Rò rỉ secret toàn hệ thống**: `GET /api/device/sensors` trả `secret_key` **plaintext của mọi sensor `active` trong toàn bộ hệ thống** cho bất kỳ gateway nào xác thực HMAC hợp lệ — không phân biệt khách hàng nào sở hữu gateway nào (`sensors.routes.ts:24-26`).
-2. **Secret lưu plaintext ở cả 3 tầng**: Database (`devices.secret_key VARCHAR(64)` không mã hoá), Firmware (`config_gw.h`/`config_1.h` hard-code compile vào binary — file đã `.gitignore` nên không commit, nhưng secret vẫn plaintext trong binary), và UI (`RegisterModal.tsx` hiển thị secret dạng chữ để copy trên Dashboard).
-3. **Không có TLS ở bất kỳ đâu trong toàn bộ luồng thiết bị**: MQTT không TLS (`allow_anonymous true`), HTTP không TLS (`http://` cho `BACKEND_SENSORS_URL`), Backend↔Frontend chưa xác nhận bắt buộc HTTPS ở tầng ứng dụng.
+1. **Rò rỉ secret toàn hệ thống**: `GET /api/device/sensors` trả `secret_key` **plaintext của mọi sensor `active` trong toàn bộ hệ thống** cho bất kỳ gateway nào xác thực HMAC hợp lệ — không phân biệt khách hàng nào sở hữu gateway nào (Prototype: `sensors.routes.ts:24-26`; bản 2026-10-31 từng giữ lại làm ngoại lệ có chủ đích của bất biến 1). **Đã xử lý 2026-11-16: endpoint đã gỡ**; Gateway không giữ secret Node nữa (NVS `nodes/<i>_secret` chỉ còn cho camera), chữ ký Node chỉ backend kiểm ([API Design](API_DESIGN.md) §14 Q1).
+2. **Secret lưu plaintext ở cả 3 tầng**: Database (`devices.secret_key VARCHAR(64)` không mã hoá), Firmware (`config_gw.h`/`config_1.h` hard-code compile vào binary — file đã `.gitignore` nên không commit, nhưng secret vẫn plaintext trong binary), và UI (`RegisterModal.tsx` hiển thị secret dạng chữ để copy trên Dashboard). *Đã xử lý một phần 2026-11-16:* cột DB mã hoá AES-256-GCM (FR-12.8); secret trong NVS/binary vẫn dạng rõ (NVS/Flash Encryption chưa làm).
+3. **Không có TLS ở bất kỳ đâu trong toàn bộ luồng thiết bị**: MQTT không TLS (`allow_anonymous true`), HTTP không TLS (`http://` cho `BACKEND_SENSORS_URL`), Backend↔Frontend chưa xác nhận bắt buộc HTTPS ở tầng ứng dụng. *Đã xử lý 2026-11-16:* MQTT mTLS + ACL, `allow_anonymous false`; nginx HTTPS :443; endpoint `BACKEND_SENSORS_URL` đã gỡ.
 4. **RBAC không có khái niệm phạm vi tài nguyên**: Operator có quyền ngang Admin trên **mọi thiết bị của mọi khách hàng** — không có ràng buộc theo `home_id`, vi phạm nguyên tắc least-privilege bắt buộc cho SOC2/ISO 27001 nếu sản phẩm mở rộng sang thị trường yêu cầu tuân thủ.
 
 Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transport/Application/Device/Cloud/Identity/Audit) để vá triệt để 4 vấn đề trên và các vấn đề nhỏ hơn, đồng thời giữ nguyên các quyết định bảo mật đã đúng.
@@ -64,16 +79,16 @@ Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transpo
 
 ### 1.2. Authorization
 
-`middleware/rbac.ts` — `requireRole(...roles)` chỉ so khớp `user.role` tĩnh, **không kiểm tra phạm vi tài nguyên**: `requireRole("admin", "operator")` cho Operator quyền thao tác trên `PATCH /api/devices/:id/status` và `DELETE` **không giới hạn theo chủ sở hữu thiết bị** (`devices.ts:196-199, 271-274`) — đây là lỗ hổng leo thang đặc quyền theo chiều ngang (horizontal privilege escalation) tiềm ẩn ngay khi có nhiều khách hàng: Operator được giao xử lý ticket của khách hàng A hoàn toàn có thể (về mặt kỹ thuật) thao tác trên thiết bị của khách hàng B mà không có bất kỳ rào cản nào.
+`middleware/rbac.ts` (Prototype; nay `modules/legacy/middleware/require-role.ts`, chỉ còn cho route cũ) — `requireRole(...roles)` chỉ so khớp `user.role` tĩnh, **không kiểm tra phạm vi tài nguyên**: `requireRole("admin", "operator")` cho Operator quyền thao tác trên `PATCH /api/devices/:id/status` và `DELETE` **không giới hạn theo chủ sở hữu thiết bị** (`devices.ts:196-199, 271-274`) — đây là lỗ hổng leo thang đặc quyền theo chiều ngang (horizontal privilege escalation) tiềm ẩn ngay khi có nhiều khách hàng: Operator được giao xử lý ticket của khách hàng A hoàn toàn có thể (về mặt kỹ thuật) thao tác trên thiết bị của khách hàng B mà không có bất kỳ rào cản nào.
 
 ### 1.3. MQTT
 
 | Vấn đề | Bằng chứng |
 |---|---|
-| Không TLS | `infra/mosquitto/broker1/mosquitto.conf`, `broker2/mosquitto.conf` — `allow_anonymous true`, không cấu hình `cafile`/`certfile`/`keyfile` |
-| Không phân quyền theo topic (ACL) | Không có file ACL nào được cấu hình — bất kỳ client nào kết nối được vào broker đều subscribe/publish được mọi topic |
+| Không TLS *(prototype; đã xử lý)* | `infra/mosquitto/broker1/mosquitto.conf`, `broker2/mosquitto.conf` — `allow_anonymous true`, không cấu hình `cafile`/`certfile`/`keyfile`. Nay chỉ còn `infra/mosquitto/mosquitto.conf`: TLS 8883, `require_certificate true`, `allow_anonymous false` |
+| Không phân quyền theo topic (ACL) *(prototype; đã xử lý 2026-11-16)* | Trước: không có file ACL — bất kỳ client nào kết nối được đều subscribe/publish được mọi topic. Nay: `infra/mosquitto/acl` theo CN chứng chỉ (gateway chỉ topic của chính nó; backend 4 tài khoản) |
 | Topic không namespace theo khách hàng | `gateway/+/data`, `local/sensors/+/data` — không có `home_id`, không thể áp ACL theo khách hàng dù có cấu hình ACL sau này |
-| Firmware dùng `PubSubClient` không TLS | `mqtt_client.cpp`/`mqtt_sender.cpp` dùng `WiFiClient` thuần (không phải `WiFiClientSecure`) |
+| Firmware dùng `PubSubClient` không TLS *(Arduino cũ, đã gỡ)* | `mqtt_client.cpp`/`mqtt_sender.cpp` dùng `WiFiClient` thuần (không phải `WiFiClientSecure`). Gateway ESP-IDF hiện dùng `esp-mqtt` + mbedTLS, kiểm chứng CA, trình cert client |
 
 ### 1.4. API
 
@@ -126,14 +141,14 @@ Tài liệu này thiết kế mô hình bảo mật **7 lớp** (Network/Transpo
 
 | # | Lỗ hổng | Mức độ | Vị trí | Loại (theo Threat Model Phần 15) |
 |---|---|---|---|---|
-| 1 | Rò rỉ secret_key toàn hệ thống qua `/api/device/sensors` | **Critical** | `sensors.routes.ts:24-26` | Information Disclosure |
-| 2 | Secret lưu plaintext (DB + Firmware + hiển thị UI) | **Critical** | `001_schema.sql`, `config_gw.h`, `RegisterModal.tsx` | Information Disclosure |
-| 3 | Không TLS toàn bộ luồng thiết bị (MQTT + HTTP) | **Critical** | mosquitto conf, `mqtt_client.cpp`, `sensor_registry.cpp` | Tampering, Information Disclosure |
-| 4 | RBAC không giới hạn phạm vi tài nguyên (Operator = Admin trên mọi dữ liệu) | **Critical** | `rbac.ts`, mọi route dùng `requireRole` | Elevation of Privilege |
+| 1 | Rò rỉ secret_key toàn hệ thống qua `/api/device/sensors` — **đã xử lý (endpoint gỡ 2026-11-16)** | **Critical** | Prototype `sensors.routes.ts:24-26` | Information Disclosure |
+| 2 | Secret lưu plaintext (DB + Firmware + hiển thị UI) — **DB đã mã hoá (FR-12.8); firmware NVS chưa** | **Critical** | `001_schema.sql`, `config_gw.h`, `RegisterModal.tsx` | Information Disclosure |
+| 3 | Không TLS toàn bộ luồng thiết bị (MQTT + HTTP) — **đã xử lý (mTLS MQTT, HTTPS nginx)** | **Critical** | mosquitto conf, `mqtt_client.cpp`, `sensor_registry.cpp` | Tampering, Information Disclosure |
+| 4 | RBAC không giới hạn phạm vi tài nguyên (Operator = Admin trên mọi dữ liệu) | **Critical** | Prototype `rbac.ts` (nay `legacy/middleware/require-role.ts`), mọi route dùng `requireRole` | Elevation of Privilege |
 | 5 | WiFi credential hard-code compile vào binary | **Critical** | `config_gw.h`, `config_1.h` | Information Disclosure, Tampering |
 | 6 | Không Refresh Token, không revoke JWT phía server | High | `auth.ts` | Spoofing (kéo dài cửa sổ tấn công nếu token bị đánh cắp) |
-| 7 | MQTT broker `allow_anonymous true`, không ACL | High | mosquitto conf | Spoofing, Tampering |
-| 8 | Rate limiter/cache in-memory không scale ngang | Medium | `app.ts`, `deviceStatus.ts` | Denial of Service (gián tiếp) |
+| 7 | MQTT broker `allow_anonymous true`, không ACL — **đã xử lý 2026-11-16 (mTLS + ACL + CRL)** | High | mosquitto conf | Spoofing, Tampering |
+| 8 | Rate limiter/cache in-memory không scale ngang | Medium | `app.ts`, `core/http/rate-limit.ts`; Prototype `deviceStatus.ts` (nay `devices/domain/online-cache.ts`) | Denial of Service (gián tiếp) |
 | 9 | Không Soft Delete — mất dữ liệu điều tra vĩnh viễn | Medium | `devices.ts:291-293` | Repudiation |
 | 10 | 1 bảng log gộp mọi loại sự kiện, không tách Security/Attack Log | Medium | `001_schema.sql:79-90` | Repudiation (khó điều tra) |
 | 11 | Không Secure Boot/Flash Encryption | Medium (Reserved) | Firmware | Tampering |
@@ -181,8 +196,8 @@ flowchart TB
 | Broker | Kênh | TLS | Xác thực Client | Ghi chú |
 |---|---|---|---|---|
 | Broker 1 (nội bộ Gateway↔Node) | ESP-NOW (không phải MQTT/IP theo thiết kế đã chốt ở `SMART_HOME_WIFI_PROVISIONING.md`) | N/A (không phải TCP/IP) | Challenge-Response + Session Key (ECDH) ở tầng ESP-NOW | Không áp dụng TLS vì không phải giao thức IP |
-| Broker 2 (Gateway↔Backend) | MQTT over TLS 1.2+ | **Bắt buộc** | **mTLS** — mỗi Gateway có client certificate riêng ký bởi Internal CA, cấp lúc Provisioning | Đây là kết nối quan trọng nhất cần bảo vệ — Gateway là điểm biên duy nhất giữa nhà khách hàng và Cloud |
-| Backend↔Broker (nội bộ Cloud) | MQTT over TLS (hoặc trust theo VPC riêng nếu cùng private network) | Khuyến nghị bật | Username/password nội bộ hoặc mTLS service-to-service | Backend là client MQTT duy nhất (đã chốt ở `MOBILE_APP_ARCHITECTURE.md` Phần 11 — Mobile không bao giờ kết nối MQTT trực tiếp) |
+| Broker MQTT (Gateway↔Backend) | MQTT over TLS 1.2+ | **Bắt buộc** (đã làm) | **mTLS** (đã làm 2026-11-16) — mỗi Gateway có client certificate riêng ký bởi Internal CA (hiện cấp bằng `infra/pki/gen_mqtt_client.sh` rồi nạp NVS; đích: cấp lúc Provisioning bằng CSR) | Đây là kết nối quan trọng nhất cần bảo vệ — Gateway là điểm biên duy nhất giữa nhà khách hàng và Cloud |
+| Backend↔Broker (nội bộ Cloud) | MQTT over TLS (hoặc trust theo VPC riêng nếu cùng private network) | Đã bật | mTLS service-to-service (đã làm): 4 chứng chỉ `iot-backend-data\|commands\|heartbeat\|camera`, mỗi cái đúng quyền ACL | Backend là client MQTT duy nhất (đã chốt ở `MOBILE_APP_ARCHITECTURE.md` Phần 11 — Mobile không bao giờ kết nối MQTT trực tiếp) |
 
 ### 4.2. Vì sao chọn mTLS cho Gateway↔Broker (không chỉ username/password)
 
@@ -194,7 +209,8 @@ flowchart TB
 
 Kế thừa Topic Design đã chốt ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 10 (`home/{home_id}/gateway/{gw}/...`). ACL thực thi theo nguyên tắc: **mỗi Gateway chỉ được publish/subscribe đúng namespace `home_id` của chính nó** — cấu hình qua:
 
-- **MVP:** Mosquitto Dynamic Security Plugin (built-in từ Mosquitto 2.x) — quản lý user/role/ACL qua API, không cần restart broker khi thêm Gateway mới.
+- **Hiện trạng (2026-11-16):** `acl_file` tĩnh theo CN chứng chỉ (`infra/mosquitto/acl`, `pattern ... %u` cho gateway; 4 tài khoản `iot-backend-*` cho backend) — mỗi gateway chỉ đụng topic mang đúng `gateway_id` của nó; backend còn kiểm `home_id` topic = nhà của gateway (heartbeat). Thu hồi bằng `ca.crl` (cần khởi động lại broker). Chưa ràng buộc theo `home_id` ở tầng broker.
+- **MVP (đích):** Mosquitto Dynamic Security Plugin (built-in từ Mosquitto 2.x) — quản lý user/role/ACL qua API, không cần restart broker khi thêm Gateway mới.
 - **Khi scale lớn:** cân nhắc chuyển sang **EMQX**/**VerneMQ** — hỗ trợ multi-tenant ACL native, HTTP Auth/ACL hook (broker gọi ngược Backend để xác thực mỗi lần connect/subscribe/publish, cho phép Backend là nguồn sự thật duy nhất về quyền hạn thay vì đồng bộ 2 nơi).
 
 ### 4.4. QoS & Reconnect Strategy
@@ -213,7 +229,8 @@ Kế thừa Topic Design đã chốt ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 
 flowchart LR
     A["Factory\n(sinh Factory Key, Device UUID, flash vào NVS)"] --> B["Provision\n(ECDH handshake, nhận cấu hình mạng — không lộ WiFi thật cho Node)"]
     B --> C["Activation\n(Gateway/Node được gắn với 1 home_id cụ thể qua Pairing whitelist)"]
-    C --> D["Authentication\n(mỗi lần gửi dữ liệu: HMAC(Device Secret, device_id:timestamp))"]
+    C --> D["Authentication
+(mỗi lần gửi dữ liệu: HMAC v2 phủ nội dung + bộ đếm chống phát lại)"]
     D --> E["Online\n(Backend verify HMAC + timestamp window ±300s → chấp nhận)"]
 ```
 
@@ -222,7 +239,7 @@ flowchart LR
 | Factory | Factory Key duy nhất/thiết bị, không dùng trực tiếp mã hoá vận hành — chỉ ký chứng minh "hàng chính hãng" | Giả mạo thiết bị lạ tự xưng là hàng chính hãng |
 | Provision | ECDH (Curve25519) thiết lập Session Key tạm thời, WiFi Password mã hoá bằng Session Key này trước khi gửi | Nghe lén WiFi Password trong lúc Provisioning |
 | Activation | Whitelist `node_uid` theo `home_id` cụ thể (không phải whitelist toàn cục) | Node của khách hàng B bị "câu" nhầm vào Gateway của khách hàng A |
-| Authentication | HMAC-SHA256(Device Secret, `device_id:timestamp`), cửa sổ ±300s, `timingSafeEqual` | Giả mạo Device (không biết secret), Replay Attack (timestamp cũ) |
+| Authentication | Telemetry v2 (đã có): Node ký HMAC-SHA256(secret node, `v2\|sn\|<sensor_id>\|<ts>\|<ctr>\|<sha256(data_raw)>`), Gateway ký lại phủ cả chữ ký Node; cửa sổ ±300s + bộ đếm `sn_ctr` tăng ngặt (`last_ctr`), `timingSafeEqual`. Heartbeat (`v2\|hb`, có `ctr`), ack (`v2\|ack`), sự kiện camera (`v2\|evt`) ký HMAC(secret gateway); ảnh Gateway → Server ký chuỗi riêng có sha256 ảnh; Camera ↔ Gateway ký `v2\|cam-up`/`v2\|cam-stream` (secret camera, có `ctr`) | Giả mạo Device (không biết secret), sửa số đo dọc đường (chữ ký phủ nội dung), Replay Attack kể cả trong cùng cửa sổ 300 s (bộ đếm) |
 | Online | Backend kiểm tra `device_type` đúng vai trò (sensor không được tự xưng gateway), `status='active'` | Privilege Escalation qua giả mạo loại thiết bị |
 
 **Nguyên tắc:** mỗi bước sinh ra 1 loại khoá/token khác nhau với vòng đời khác nhau (Factory Key vĩnh viễn, Session Key theo phiên Provisioning ~10 phút, Device Secret theo vòng đời thiết bị, HMAC theo từng request) — không dùng 1 khoá duy nhất cho mọi mục đích (đúng Key Hierarchy đã thiết kế ở `SMART_HOME_WIFI_PROVISIONING.md` Phần 6, nay chính thức hoá thành 1 flow xuyên suốt).
@@ -234,7 +251,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant GW as Gateway
-    participant BK as MQTT Broker 2
+    participant BK as MQTT broker
     participant BE as Backend
 
     Note over GW,BK: Kết nối transport
@@ -259,6 +276,8 @@ sequenceDiagram
         end
     end
 ```
+
+**Chính sách khoá (FR-12.2, đã có):** để một kẻ ngoài không khoá được gateway thật bằng gói giả, chỉ lỗi `HMAC_MISMATCH` tới qua **MQTT** (người gửi đã qua mTLS + ACL) mới tăng `fail_count`/khoá thiết bị; lỗi qua HTTP chỉ audit và bị giới hạn theo `ip|gateway_id` (20 gói bị từ chối xác thực/15 phút → 429); lệch giờ, phát lại, giao thức v1 bị tắt không bao giờ khoá. Gói MQTT còn phải khớp topic = `gateway_id` và node phải thuộc gateway.
 
 **2 lớp độc lập:** lớp transport (mTLS — chứng minh "đây đúng là kết nối từ 1 thiết bị đã được cấp chứng chỉ hợp lệ") và lớp application (HMAC — chứng minh "mỗi gói tin cụ thể đúng là do Gateway sở hữu `gateway_secret` tạo ra, chưa bị replay"). Loại bỏ 1 lớp không làm sập lớp còn lại.
 
@@ -371,7 +390,7 @@ flowchart TD
 
 | Hạng mục | Thiết kế |
 |---|---|
-| **HTTPS** | Bắt buộc TLS 1.2+ ở tầng Nginx/Load Balancer cho toàn bộ `/api/**`, không có endpoint ngoại lệ chạy HTTP thuần (kể cả `/api/device/**` — hiện tại `BACKEND_SENSORS_URL` dùng `http://` cần chuyển hẳn sang HTTPS) |
+| **HTTPS** | Bắt buộc TLS 1.2+ ở tầng Nginx/Load Balancer cho toàn bộ `/api/**`, không có endpoint ngoại lệ chạy HTTP thuần (kể cả `/api/device/**` — đã làm 2026-11-16: nginx :443 + 80 → 301; endpoint `BACKEND_SENSORS_URL` đã gỡ) |
 | **JWT** | 2 secret riêng biệt Dashboard/Mobile (đã chốt ở `BACKEND_REFACTOR_SMARTHOME.md` Phần 7.3) — 1 secret bị lộ không ảnh hưởng kênh còn lại |
 | **Rate Limit** | Chuyển từ `express-rate-limit` in-memory sang **Redis-backed** (`rate-limit-redis`) — đúng khi scale nhiều instance; giữ nguyên chiến lược phân tầng đã có (login: 10/15 phút/IP, device data: 60/phút/IP, API chung: 100/15 phút/IP) |
 | **Input Validation** | Schema validation tập trung (zod/joi) ở tầng Controller cho mọi endpoint mới — thay thế `sanitize()` tự viết rải rác |
@@ -380,6 +399,42 @@ flowchart TD
 | **XSS** | React/Next.js tự escape JSX (đã có) + bổ sung **Content-Security-Policy** header tường minh qua Helmet, giới hạn nguồn script/style |
 | **SQL Injection** | Parameter binding nhất quán 100% (loại bỏ hoàn toàn pattern nội suy chuỗi như `devices.ts:139`) |
 | **Response Envelope** | Không rò rỉ stack trace/chi tiết lỗi nội bộ ra response production (hiện tại error handler `app.ts:70-77` trả `err.message` trực tiếp — cần ẩn message chi tiết ở production, chỉ log server-side) |
+
+### 9.1. Xem trực tiếp camera (live view) — hiện trạng 2026-11-13
+
+Luồng: Camera —HTTP MJPEG trong Local AP (WPA2)→ Gateway —WSS `/api/device/camera/live`→ Backend —WSS `/api/portal/cameras/:deviceId/live`→ trình duyệt. Hợp đồng chi tiết: [API](API_DESIGN.md) §5.1, §8, §9.1. Code: `backend/src/modules/camera/features/live-relay/`, `backend/src/core/ws/upgrade-router.ts`.
+
+| Mối đe doạ | Kiểm soát đã có |
+|---|---|
+| Chiếm phiên xem qua trang web lạ (CSWSH — WebSocket xác thực bằng cookie, trình duyệt tự gửi cookie) | Bắt buộc header `Origin`: host phải trùng `Host`/`X-Forwarded-Host` hoặc nằm trong `FRONTEND_URL`; sai/thiếu → 403 trước upgrade. Cookie `sh_user` là `HttpOnly`, `SameSite=strict` |
+| Xem camera của nhà khác / leo thang quyền | Kiểm sau upgrade bằng mã đóng: không thuộc nhà → `4404` (không lộ sự tồn tại, bất biến 6), role GUEST → `4403`; Admin/Operator không có endpoint xem live (quyền riêng tư). Kiểm lại phiên + quyền nhà mỗi 30 giây (`4401`/`4403` khi token đổi, khoá tài khoản, mất quyền) |
+| Giả mạo gateway đẩy hình lên | HMAC gateway trên `<gateway_id>:<ts>:<device_id>:<session_id>` (bất biến 5), `ts` ±300 giây, **và** `session_id` do Backend tạo (UUID v4) phải khớp camera + gateway; sai → dùng chung đường audit với `POST /device/camera/snapshot`, **không** khoá gateway (kẻ ngoài biết `gateway_id` sẽ khoá oan được gateway thật) mà giới hạn theo `ip|gateway_id` (sau nginx không bật TRUST_PROXY thì chỉ theo IP sẽ gộp mọi gateway vào một xô): 20 lỗi/15 phút → `429` |
+| Replay yêu cầu upgrade trong cửa sổ ±300 giây | Giảm nhẹ, không loại bỏ: uplink thứ hai của cùng phiên chỉ thay được uplink đang chạy khi uplink đó đã im ≥ 3 giây (409 `LIVE_UPLINK_BUSY`), nên kẻ phát lại không chiếm được luồng thật đang chạy; replay còn cần `session_id` đang sống (404 nếu không) |
+| Dò/brute force, làm nghẽn upgrade (upgrade không đi qua rate limit của Express) | Giới hạn theo IP đếm **trước** mọi truy vấn DB: uplink 30 upgrade/phút/IP, viewer 60 upgrade/phút/IP (429); mỗi user tối đa 2 luồng và 10 lần mở/phút (`4429`); mỗi camera tối đa 4 người xem (`4409`) |
+| Lộ hình ảnh lưu trữ | Backend chỉ chuyển tiếp trong RAM, không ghi khung xuống đĩa/DB; khung lớn hơn 200 KB bị bỏ; người xem chậm bị bỏ khung (bộ đệm ≤ 256 KB) |
+| Chối bỏ / truy vết | Audit `CAMERA_LIVE_VIEW_START` / `CAMERA_LIVE_VIEW_END` (`{duration_s, reason}`); log không chứa chữ ký, secret, `session_id` |
+| Nghe lén chặng trong nhà | Camera → Gateway là HTTP thường nhưng chạy trong WPA2 Local AP của Gateway, mỗi yêu cầu `/stream` ký `v2\|cam-stream` bằng secret camera (có `ctr` tăng ngặt, chống phát lại) và mỗi ảnh camera → Gateway ký `v2\|cam-up`; Gateway → Backend là TLS với CA nội bộ, không tắt kiểm chứng (bất biến 3) |
+
+**Rủi ro còn lại:**
+- *(Đã giảm 2026-11-16: broker nay mTLS + ACL — topic `.../command` chỉ backend publish được, gateway chỉ đọc topic của chính nó, xem [MQTT TLS](guides/MQTT_TLS.md). Đoạn dưới là phân tích trước khi có ACL, còn đúng nếu backend/broker bị chiếm.)* Broker MQTT chưa có ACL (trước đây `allow_anonymous true`): kẻ có thể publish vào broker có thể gửi `live_start` giả. Lệnh vẫn phải qua kiểm HMAC + `ts` của Gateway; nếu qua, Gateway chỉ mở uplink tới **Backend thật**, và Backend từ chối (404 `LIVE_SESSION_NOT_FOUND`) vì không có phiên khớp `session_id` — hình không rời nhà tới nơi khác, nhưng Gateway bị buộc kéo luồng camera tạm thời (tốn tài nguyên). Rủi ro này đã được ACL theo topic giảm (2026-11-16).
+- Bộ đếm giới hạn, sổ phiên và cửa sổ kiểm nằm trong RAM của **1 process** backend: chạy nhiều instance thì giới hạn nhân lên và phiên không chia sẻ được — cần Redis/định tuyến theo camera trước khi scale ngang (cùng vấn đề với rate limit ở bảng trên).
+- Replay trong ±300 giây chỉ giảm nhẹ như trên; chặn hẳn cần nonce một lần dùng cho chữ ký uplink.
+
+### 9.2. Trợ lý AI (giọng nói/chữ) — mô hình đe doạ, hiện trạng 2026-11-14, luật "lệnh rõ → làm ngay" cập nhật 2026-11-15
+
+Luồng: trình duyệt —`/api/agent/*` (nginx)→ agent Python (STT + LLM) —`/api/service/agent/**`→ Backend. Hợp đồng và luật: [API](API_DESIGN.md) §5.1 "Trợ lý AI". Đã viết theo hợp đồng và đã chạy với OpenAI thật (2026-11-17); chưa red-team (thử prompt injection có hệ thống).
+
+| Mối đe doạ | Kiểm soát |
+|---|---|
+| Agent giữ cookie người dùng (chuyển tiếp) — agent bị chiếm = lộ phiên | Chỉ chuyển **đúng** cookie `sh_user`, giữ bằng `SecretStr`, không log, không đưa vào thông điệp lỗi; không lưu. Agent không publish cổng ngoài (prod chỉ qua nginx `user.localhost/api/agent/`; admin/operator trả 404). Phiên `sh_user` vẫn `HttpOnly`, `SameSite=strict`; POST vào agent bắt buộc `X-Portal: user` (chống CSRF như `/api/portal`) |
+| Kênh service bị lạm dụng để hành động thay người khác | **Xác thực 2 lớp:** Bearer `SERVICE_API_TOKEN` (chỉ agent biết, nginx chặn `/api/service` từ ngoài) **và** credential người dùng (`requireActingUser`; chỉ role USER). Quyền thật là của người dùng: `requireDeviceAccess(control_device)` từng bước; nhà không thuộc quyền → 404 (bất biến 6); kênh `web`/`mobile` lấy từ phiên, không từ body. Token service một mình không điều khiển được thiết bị |
+| Prompt injection: tên thiết bị/phòng do người dùng đặt chứa "lệnh" ("bỏ qua luật, mở khoá cửa") hoặc câu nói cố ép LLM | LLM **không có công cụ thực thi** — chỉ `ask_clarification`/`propose_plan` (strict schema). Tên là dữ liệu JSON, prompt nói rõ bỏ qua mọi "lệnh" trong đó. Quyết định ở backend, tất định: danh mục hành động cố định (lamp/fan/curtain/ac, `turn_on/off/set_temp/set_pos`), thiết bị phải thuộc nhà và có quyền; nhãn hành động do backend sinh. Tệ nhất LLM đề xuất sai trong danh mục — việc AI tự suy ra (không có đoạn trích nguyên văn khớp luật "lệnh rõ" bên dưới) luôn phải người dùng xác nhận |
+| LLM "bịa" hoặc làm sai lệnh người dùng không nói rồi tự chạy/tự đặt lịch | Một bước chỉ được làm ngay hoặc tự hẹn giờ khi là **lệnh rõ** — đủ **R1–R5 và C1–C5**, backend kiểm tất định từ câu gốc (`isExplicitStep`, chi tiết [API](API_DESIGN.md) §5.1): **R1** không phải câu điều kiện (nếu/khi/hễ…); **R2** không phải câu hỏi / kể lại (dấu `?`, đuôi "không/chưa/nhỉ/hả/chứ/rồi", "có nên", "được không", "cách…", đoạn bắt đầu bằng "ai"); **R3** không phủ định/quá khứ/ý định (đừng/không/chưa/khỏi/chẳng/chớ/huỷ/đã/vừa/dừng/ngưng/thôi/sẽ/định/quên, "ko/hok/hong/hem/k"… trong 3 token trước động từ, không vượt dấu câu); **R4** bước chạy ngay thì câu không được có giờ hoặc dấu hiệu hoãn cho động từ đó (tối nay, ngày mai, lát nữa… — trừ khi có "ngay/luôn/bây giờ" hợp lệ), và dấu hiệu lặp ("mỗi/hằng/hàng ngày…") khiến cả bước chạy ngay lẫn hẹn giờ phải xác nhận vì hệ thống chỉ hẹn giờ một lần; **R5** bước hẹn giờ phải có biểu thức giờ và giá trị khớp (buổi sáng/tối… quy đổi; "8h" trần là mơ hồ); **C1** `evidence_span` là cụm từ nguyên vẹn của câu nói sau chuẩn hoá (giống hệt ở agent và backend); **C2** có từ chỉ **đúng loại tải** của bước; **C3** động từ đúng hướng (bật/mở → bật, tắt → tắt, đóng → đóng rèm; điều hoà đặt nhiệt độ phải có đúng số đó, không phải số giờ/phút); **C5** đúng **một** thiết bị — nhà có nhiều thiết bị cùng loại thì vùng đối tượng của động từ phải có phòng/tên khớp duy nhất thiết bị đó hoặc lượng từ "hết/tất cả". Chặn "bật đèn" khi nhà có 2 đèn, "đừng tắt đèn", "nếu trời tối thì bật đèn", "đèn đã bật chưa", "8h bật đèn" (sáng hay tối?), "tắt đèn và bật quạt" bị LLM đảo thành tắt quạt. Việc AI tự suy ra, thiếu động từ, mơ hồ thiết bị → chờ xác nhận. Lệnh rõ vẫn kiểm quyền như người dùng bấm tay (`requireDeviceAccess(control_device)` từng bước), ghi `scheduled_actions` (`origin = ai_agent`) + `device_commands` (`source = ai_agent`) + `user_behavior_logs` + audit `AGENT_REQUEST_CREATED` (chỉ id/số bước); lịch hẹn giờ có báo ngay (`AGENT_SCHEDULED`), huỷ được tới lúc chạy, trần 50 lịch/nhà. Bước chờ xác nhận gắn `request_hash` (xác nhận đúng phiên bản thẻ đã hiển thị; các bước chờ không bao giờ bị sửa sau khi tạo) + hết hạn 5 phút; chỉ người tạo xác nhận (khác → 404) và `UPDATE … WHERE status='pending'` chống xác nhận 2 lần |
+| Dữ liệu gửi OpenAI | LLM nhận: giờ nhà, vai trò trong nhà, tên phòng/thiết bị, trạng thái, khí hậu, **mã tạm** (`r1`, `d1`) và lịch sử hội thoại hiện tại. **Không** nhận ID thật, tên nhà, tên/email thành viên, `user_id`, secret, ảnh. Audio và câu nói chữ gửi OpenAI để STT/LLM — web hiện dòng thông báo ở lần mở đầu; **không** lưu audio, câu nói gốc hay transcript ở bất kỳ tầng nào (`agent_requests` chỉ có `summary` ≤ 200 ký tự) |
+| Tốn tiền / DoS qua STT, LLM | Backend xác thực người dùng + nhà (`context`) **trước** khi gọi STT; rate limit ở agent theo credential + theo người (10/phút) + 200/ngày/nhà (RAM agent), thêm 30 req/phút/IP ở nginx (`limit_req`); thời hạn tổng ~40 s/request; audio ≤ 1 MB, nginx chặn thân > 2 MB; chi phí LLM/STT được theo dõi ở tab AI Usage |
+| Rò thông tin qua log | Không log cookie/token/audio/câu nói; audit `AGENT_REQUEST_*` chỉ id, số bước, mã lỗi; số liệu AI Usage không có nội dung (API §7.1) |
+
+**Rủi ro còn lại (chấp nhận — người dùng chốt 2026-11-15, bỏ ngưỡng độ tin cậy STT, ngưỡng hẹn giờ ≥ 2 phút và giới hạn 3 bước/yêu cầu; không có nút hoàn tác):** STT nghe sai mà câu sai vẫn đủ R1–R5 và C1–C5 (VD nghe "bật đèn" thay vì câu khác) thì lệnh **vẫn chạy ngay**; một yêu cầu có thể gồm nhiều bước chạy ngay, không giới hạn số bước (chỉ giới hạn 10 bước/yêu cầu ở schema). Thiệt hại bị giới hạn bởi: danh mục hành động cố định (đèn/quạt/rèm/điều hoà, không có khoá cửa), quyền thật của người dùng, chỉ bước có đoạn trích nguyên văn đủ luật trên, audit + `user_behavior_logs` để truy vết, lịch hẹn giờ huỷ được tới lúc chạy và có thông báo; người dùng tự bật/tắt lại thủ công. **Giới hạn đã biết của luật "lệnh rõ"** (luật nghiêng về hỏi xác nhận khi không chắc, nên các ca dưới đây thường chỉ làm người dùng phải xác nhận thêm chứ không chạy nhầm): "tắt cả đèn lẫn quạt" bị "tắt cả" ≈ "tất cả" làm mất động từ → hỏi xác nhận; người gõ không dấu bị xét bảo thủ (VD "da bat den" bị coi là "đã", "toi" là buổi tối); "chớ", "bỏ" không dấu không được nhận làm phủ định vì trùng "cho (mình)", "toàn bộ"; hai thiết bị cùng loại cùng phòng nêu trong một câu ("bật đèn trần phòng khách và đèn bàn") — chấm điểm theo độ dài chọn đèn trần, bước đèn bàn phải xác nhận; "12 giờ tối", "1 giờ trưa", "8 giờ kém 15" coi là mơ hồ; hai mệnh đề cùng đoạn có thể lẫn phạm vi giờ ("bật quạt 5 phút nữa rồi tắt quạt 10 phút nữa"); tên thiết bị trùng chữ tên phòng ("Đèn ngủ" trong "Phòng ngủ") được chấm điểm theo độ dài ký tự nên có thể chọn nhầm; ký tự vô hình (ZWSP) chèn giữa từ chưa được xử lý riêng; "ngay 30 phút nữa" viết rời bị coi là "ngày 30" → hỏi lại; từ "mốt/thứ/mỗi/hàng" không dấu không được nhận làm dấu hiệu hoãn/lặp vì trùng "một/thử"…; trợ từ/diễn đạt chưa có trong danh sách (phủ định, điều kiện, câu hỏi lạ) vẫn có thể lọt — danh sách từ khoá là tĩnh. Ngoài ra: giới hạn tần suất của agent nằm trong RAM của 1 process (chạy nhiều bản thì nhân lên, như rate limit backend); kẻ có thể chạy lệnh trong mạng Docker và biết `SERVICE_API_TOKEN` vẫn cần thêm cookie người dùng hợp lệ mới tác động được; agent bị chiếm vẫn gửi được câu gốc (`utterance`) tuỳ ý để qua luật "lệnh rõ" — nằm ngoài mô hình đe doạ vì vẫn cần cookie người dùng + token dịch vụ; audit `AGENT_REQUEST_CREATED` ghi IP/UA của container agent chứ không phải của người dùng; nginx không phụ thuộc agent (agent tắt chỉ làm `/api/agent/` trả 502); microphone/OpenAI là bên thứ ba — người dùng cần được báo (đã có dòng thông báo trên web).
 
 ---
 
@@ -454,7 +509,8 @@ flowchart TD
 
 | Điều kiện | Hành động tự động |
 |---|---|
-| ≥5 lần auth fail liên tiếp (Gateway/Device) trong 5 phút | Auto-block thiết bị (đã có — giữ nguyên `BLOCK_THRESHOLD=5`), ghi Attack Log |
+| ≥5 lần auth fail liên tiếp (Gateway/Device) trong 5 phút | Auto-block thiết bị (đã có — giữ nguyên `BLOCK_THRESHOLD=5`, chỉ cho lỗi `HMAC_MISMATCH` qua MQTT telemetry; đường camera không khoá, xem Phần 9.1), ghi Attack Log |
+| Heartbeat đúng chữ ký nhưng uptime lùi / IP đổi qua lại / `ctr` phát lại lặp lại trong 10 phút (nghi Gateway nhân bản) | Audit `GATEWAY_DUPLICATE_SUSPECTED` + thông báo nhân viên, tối đa 1 lần/gateway/giờ; không tự khoá (đã có, 2026-11-16) |
 | ≥10 lần login fail/IP trong 15 phút (đã có rate-limit chặn, bổ sung ghi nhận) | Ghi Security Log mức Warning, cảnh báo Admin nếu lặp lại nhiều IP khác nhau cùng pattern (dấu hiệu botnet) |
 | ≥5 lần thử Activation Code sai/mã/giờ (đã thiết kế ở `SMART_HOME_PRODUCT_ARCHITECTURE.md` mục 5.2) | Khoá tạm 15 phút + ghi Attack Log |
 | Refresh Token reuse phát hiện | Thu hồi toàn bộ session user, cảnh báo **Critical** tới Admin ngay lập tức (không chờ batch report) |
@@ -482,8 +538,9 @@ flowchart TD
 ### 16.1. Giả mạo Gateway (Gateway Spoofing)
 
 **Kịch bản:** Kẻ tấn công dựng 1 thiết bị ESP32 tự xưng là Gateway của khách hàng khác, cố gắng publish dữ liệu giả hoặc đọc trộm dữ liệu qua topic không thuộc về mình.
-**Mức độ khả thi hiện tại:** Trung bình — topic không namespace theo `home_id` (mục 1.3), không mTLS, chỉ cần biết `gateway_id` + `secret_key` (mà `secret_key` từng lộ qua endpoint `/api/device/sensors` — dù endpoint đó vốn để trả **sensor** secret, không phải gateway, nhưng cùng dạng lỗ hổng thiết kế).
-**Giảm thiểu:** mTLS bắt buộc (Phần 4.2) + Topic ACL theo `home_id` (Phần 4.3) + HMAC vẫn giữ (Phần 5) — kẻ tấn công phải vượt qua **cả 3 lớp** đồng thời, không chỉ 1.
+**Mức độ khả thi (Prototype):** Trung bình — topic không namespace theo `home_id` (mục 1.3), không mTLS, chỉ cần biết `gateway_id` + `secret_key` (mà `secret_key` từng lộ qua endpoint `/api/device/sensors` — dù endpoint đó vốn để trả **sensor** secret, không phải gateway, nhưng cùng dạng lỗ hổng thiết kế).
+**Hiện trạng 2026-11-16:** Thấp — kết nối MQTT cần chứng chỉ client do CA nội bộ ký (chưa thu hồi), ACL cho gateway chỉ đụng topic của chính nó, `gateway_id` payload phải khớp topic; kết hợp chữ ký HMAC gateway. Đã kiểm trên broker thật (`tests/security/check_mqtt_acl.sh`).
+**Giảm thiểu:** mTLS bắt buộc (Phần 4.2, **đã làm**) + Topic ACL (Phần 4.3, đã làm theo CN; theo `home_id` còn là thiết kế đích) + HMAC vẫn giữ (Phần 5) — kẻ tấn công phải vượt qua **cả 3 lớp** đồng thời, không chỉ 1.
 
 ### 16.2. Giả mạo Device/Node (Device Spoofing)
 
@@ -494,8 +551,8 @@ flowchart TD
 ### 16.3. Replay Attack
 
 **Kịch bản:** Kẻ tấn công bắt được 1 gói tin HMAC hợp lệ, gửi lại nhiều lần để giả mạo dữ liệu hoặc gây nhiễu.
-**Mức độ khả thi hiện tại:** Thấp — cửa sổ timestamp ±300s + kiểm tra `TIMESTAMP_EXPIRED` đã có ở cả Backend (`hmacService.ts`) và Firmware (`forwarder.cpp:73-80`) — **điểm mạnh hiện tại, giữ nguyên**.
-**Cải thiện thêm:** cân nhắc bổ sung **nonce** (giá trị dùng 1 lần, lưu cache ngắn hạn ở Backend) cho các lệnh điều khiển quan trọng (mở khoá cửa) — dù timestamp window đã giảm rủi ro, nonce loại bỏ hoàn toàn khả năng replay trong cùng cửa sổ 300s.
+**Mức độ khả thi hiện tại:** Rất thấp với telemetry — cửa sổ timestamp ±300s + `TIMESTAMP_EXPIRED` (Backend `modules/devices/domain/hmac.service.ts`) **và** bộ đếm `sn_ctr` tăng ngặt (`devices.last_ctr`, `401 REPLAYED` + audit `REPLAY_ATTACK`) loại bỏ phát lại ngay trong cùng cửa sổ 300 s (2026-11-16). Heartbeat (`v2|hb`) cũng có `ctr` trên `devices.last_ctr` của dòng gateway; Camera ↔ Gateway có `ctr` (RAM) từ 2026-11-16. Ack lệnh (`v2|ack`) và `camera/event` (`v2|evt`) chưa có `ctr`, chỉ cửa sổ timestamp (nay chỉ chính gateway publish được nhờ mTLS + ACL; ack chỉ khớp được `command_id` đang chờ, 1 lần).
+**Cải thiện thêm (cho lệnh điều khiển):** cân nhắc bổ sung **nonce** (giá trị dùng 1 lần, lưu cache ngắn hạn ở Backend) cho các lệnh điều khiển quan trọng (mở khoá cửa) — dù timestamp window đã giảm rủi ro, nonce loại bỏ hoàn toàn khả năng replay trong cùng cửa sổ 300s.
 
 ### 16.4. MITM (Man-in-the-Middle)
 
@@ -512,8 +569,9 @@ flowchart TD
 ### 16.6. Credential Leak (Rò rỉ Secret)
 
 **Kịch bản:** Secret Key bị lộ qua (a) endpoint API thiết kế sai (`/api/device/sensors`), (b) firmware bị dump/đọc ngược, (c) commit nhầm vào git, (d) hiển thị plaintext trên Dashboard UI.
-**Mức độ khả thi hiện tại:** **Rất cao — đã xảy ra ở cả 4 điểm** (mục 1.1-1.2 của Phần 2, đã xác nhận bằng bằng chứng code cụ thể).
-**Giảm thiểu:** Vá endpoint (whitelist theo `home_id` — Phần 5), mã hoá tại rest (Phần 10), Flash Encryption (Phần 13), loại bỏ hiển thị secret trên UI (đã chốt ở `FRONTEND_REFACTOR_SMARTHOME.md`).
+**Mức độ khả thi (Prototype):** **Rất cao — đã xảy ra ở cả 4 điểm** (mục 1.1-1.2 của Phần 2, đã xác nhận bằng bằng chứng code cụ thể).
+**Hiện trạng 2026-11-16:** (a) endpoint đã gỡ, Gateway không giữ secret Node; (d) Dashboard không hiển thị secret (bất biến 1); secret trong DB mã hoá AES-256-GCM (FR-12.8). **Còn mở:** (b) NVS chưa mã hoá, Flash Encryption/Secure Boot chưa bật (đốt eFuse, quy trình sản xuất), mất `DEVICE_SECRET_KEY` = đăng ký lại thiết bị.
+**Giảm thiểu:** Vá endpoint (**đã làm**), mã hoá tại rest (Phần 10, DB đã làm), Flash Encryption (Phần 13, chưa), loại bỏ hiển thị secret trên UI (đã chốt ở `FRONTEND_REFACTOR_SMARTHOME.md`).
 
 ### 16.7. API Abuse
 
@@ -601,8 +659,8 @@ sequenceDiagram
 
 | Phase | Nội dung | Vì sao ưu tiên |
 |---|---|---|
-| **Phase 0 — Vá khẩn cấp (trước mọi việc khác)** | Vá `/api/device/sensors` (whitelist theo `home_id`), loại bỏ hiển thị secret trên Dashboard UI, xoá WiFi/Secret hard-code khỏi firmware compile vào binary | 4 vấn đề Critical ở Phần 2 — rủi ro khai hoả ngay khi có khách hàng thứ 2 |
-| **Phase 1 — TLS toàn diện** | HTTPS bắt buộc mọi API, MQTT TLS cho Broker 2, mTLS Gateway | Nền tảng cho mọi lớp bảo mật khác — không có TLS thì HMAC chỉ chống giả mạo, không chống nghe lén |
+| **Phase 0 — Vá khẩn cấp (trước mọi việc khác)** | Vá `/api/device/sensors` (**đã gỡ endpoint 2026-11-16**; thiết kế đích: whitelist theo `home_id`), loại bỏ hiển thị secret trên Dashboard UI, xoá WiFi/Secret hard-code khỏi firmware compile vào binary | 4 vấn đề Critical ở Phần 2 — rủi ro khai hoả ngay khi có khách hàng thứ 2 |
+| **Phase 1 — TLS toàn diện** | HTTPS bắt buộc mọi API, MQTT TLS cho Broker MQTT, mTLS Gateway | Nền tảng cho mọi lớp bảo mật khác — không có TLS thì HMAC chỉ chống giả mạo, không chống nghe lén |
 | **Phase 2 — RBAC theo phạm vi (`operator_home_access`)** | Middleware kiểm tra phạm vi Home cho mọi hành động Operator | Vá Privilege Escalation nghiêm trọng nhất |
 | **Phase 3 — Secret Management tập trung** | Mã hoá tại rest (KMS/Vault), tách bảng secret, least-privilege DB user | Điều kiện để Phase 0 không tái diễn dưới hình thức khác |
 | **Phase 4 — Mobile Auth + Refresh Token** | JWT Bearer + Refresh Token rotation, Secure Storage, Biometric unlock | Điều kiện để Mobile App thật kết nối an toàn (`MOBILE_APP_ARCHITECTURE.md` V1) |

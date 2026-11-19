@@ -1,0 +1,7 @@
+dependencies:
+  idf:
+    version: ">=5.1.0"
+
+  # Giải nén JPEG RGB565 trực tiếp (có tối ưu cho ESP32-S3, thu nhỏ 1/2 - 1/4 - 1/8). Component manager tải 1 lần
+  # vào managed_components/; sau đó chép sang components/espressif__esp_new_jpeg/ (gitignore, như lvgl) để build offline.
+  espressif/esp_new_jpeg: "^1.0.2"

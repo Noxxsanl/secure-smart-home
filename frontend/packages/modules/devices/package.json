@@ -1,0 +1,25 @@
+{
+  "name": "@shh/devices",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thiết bị + gateway + bộ mô phỏng (console); danh sách/chi tiết/điều khiển thiết bị (cổng khách).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@shh/api-client": "*",
+    "@shh/auth": "*",
+    "@shh/ui": "*",
+    "@shh/utils": "*",
+    "lucide-react": "^1.16.0",
+    "swr": "^2.4.1"
+  },
+  "peerDependencies": {
+    "next": "16.2.5",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}

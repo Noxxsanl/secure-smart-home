@@ -1,0 +1,122 @@
+// Truy vấn chỉ-đọc khách hàng cho console: danh sách, chi tiết, bảo hành (claimed_at + 12 tháng), lịch sử kích hoạt.
+// Có JOIN/SELECT bảng của module homes (smart_home_members, smart_homes, activation_logs) nên nằm ở read model.
+import {
+  placeholders,
+  queryOne,
+  queryRows,
+  sqlLimit,
+  toIsoRequired,
+  type Queryable,
+  type SqlParam,
+} from "../../../infrastructure/database/db";
+import pool from "../../../infrastructure/database/pool";
+import type { PackageCode } from "../../../shared/types/domain";
+import { likePattern } from "../../../infrastructure/database/like-pattern";
+import type { ActivationRecord, Warranty } from "../../homes";
+import type { Customer } from "../domain/console-identity.types";
+import { toActivation, toCustomer, type ActivationRow, type CustomerRow } from "../domain/customer.mapper";
+
+// homes_count = số nhà mà khách là thành viên hiệu lực (kể cả chủ nhà)
+const CUSTOMER_SELECT_SQL = `
+  SELECT c.id, c.user_id, c.full_name, c.user_tag, u.email, c.phone, c.address, c.created_at,
+         u.status AS user_status, u.last_login,
+         (SELECT COUNT(*) FROM smart_home_members m
+           WHERE m.user_id = c.user_id AND (m.expires_at IS NULL OR m.expires_at > NOW())) AS homes_count
+    FROM customers c
+    JOIN users u ON u.id = c.user_id`;
+
+/**
+ * Tập user_id (trong `userIds`) là thành viên hiệu lực của ít nhất một nhà trong `homeIds` — dùng để biết
+ * Operator có grant cho "ít nhất một nhà của khách" (mở che email/phone/address).
+ */
+export async function listUserIdsInHomes(homeIds: readonly number[], userIds: readonly number[]): Promise<Set<number>> {
+  if (homeIds.length === 0 || userIds.length === 0) return new Set();
+  const rows = await queryRows<{ user_id: number }>(
+    `SELECT DISTINCT m.user_id FROM smart_home_members m
+      WHERE m.home_id IN (${placeholders(homeIds.length)}) AND m.user_id IN (${placeholders(userIds.length)})
+        AND (m.expires_at IS NULL OR m.expires_at > NOW())`,
+    [...homeIds, ...userIds]
+  );
+  return new Set(rows.map((row) => row.user_id));
+}
+
+/** `contactSearch=false` (Operator): chỉ tìm theo tên/user_tag — nếu không, LIKE trên email/phone bị dùng làm oracle dò dữ liệu đã che. */
+export async function listCustomers(q: string | undefined, contactSearch = true): Promise<Customer[]> {
+  const params: SqlParam[] = [];
+  let where = "";
+  if (q !== undefined) {
+    const pattern = likePattern(q);
+    if (contactSearch) {
+      where = `WHERE (unaccent(c.full_name) ILIKE unaccent(?) OR unaccent(c.user_tag) ILIKE unaccent(?)
+                  OR unaccent(u.email) ILIKE unaccent(?) OR unaccent(c.phone) ILIKE unaccent(?))`;
+      params.push(pattern, pattern, pattern, pattern);
+    } else {
+      where = "WHERE (unaccent(c.full_name) ILIKE unaccent(?) OR unaccent(c.user_tag) ILIKE unaccent(?))";
+      params.push(pattern, pattern);
+    }
+  }
+  const rows = await queryRows<CustomerRow>(`${CUSTOMER_SELECT_SQL} ${where} ORDER BY c.id DESC LIMIT 500`, params);
+  return rows.map(toCustomer);
+}
+
+export async function getCustomerById(id: number, db: Queryable = pool): Promise<Customer | null> {
+  const row = await queryOne<CustomerRow>(`${CUSTOMER_SELECT_SQL} WHERE c.id = ?`, [id], db);
+  return row ? toCustomer(row) : null;
+}
+
+export async function getCustomerByUserId(userId: number, db: Queryable = pool): Promise<Customer | null> {
+  const row = await queryOne<CustomerRow>(`${CUSTOMER_SELECT_SQL} WHERE c.user_id = ?`, [userId], db);
+  return row ? toCustomer(row) : null;
+}
+
+/** user_tag so khớp không phân biệt hoa/thường (LOWER vì PostgreSQL phân biệt hoa/thường); chỉ tài khoản đang active. */
+export async function findCustomerByTag(userTag: string): Promise<Customer | null> {
+  const row = await queryOne<CustomerRow>(`${CUSTOMER_SELECT_SQL} WHERE LOWER(c.user_tag) = LOWER(?) AND u.status = 'active'`, [userTag]);
+  return row ? toCustomer(row) : null;
+}
+
+export async function findActiveCustomerById(id: number): Promise<Customer | null> {
+  const row = await queryOne<CustomerRow>(`${CUSTOMER_SELECT_SQL} WHERE c.id = ? AND u.status = 'active'`, [id]);
+  return row ? toCustomer(row) : null;
+}
+
+/** Nhà khách là chủ → bảo hành 12 tháng kể từ ngày claim. */
+export async function listWarranties(userId: number): Promise<Warranty[]> {
+  const rows = await queryRows<{ id: number; name: string; package_code: PackageCode; claimed_at: Date }>(
+    `SELECT id, name, package_code, claimed_at FROM smart_homes
+      WHERE owner_user_id = ? AND claimed_at IS NOT NULL ORDER BY claimed_at DESC`,
+    [userId]
+  );
+  return rows.map((row) => {
+    const end = new Date(row.claimed_at.getTime());
+    end.setUTCMonth(end.getUTCMonth() + 12);
+    return {
+      id: row.id,
+      home_id: row.id,
+      home_name: row.name,
+      package: row.package_code,
+      starts_at: toIsoRequired(row.claimed_at),
+      expires_at: end.toISOString(),
+    };
+  });
+}
+
+const ACTIVATION_SELECT_SQL = `
+  SELECT l.id, c.id AS customer_id, c.full_name AS customer_name, l.home_id, h.name AS home_name,
+         l.created_at, l.result, l.method, l.reason
+    FROM activation_logs l
+    LEFT JOIN customers c ON c.user_id = l.user_id
+    LEFT JOIN smart_homes h ON h.id = l.home_id`;
+
+export async function listActivationsForUser(userId: number, limit: number): Promise<ActivationRecord[]> {
+  const rows = await queryRows<ActivationRow>(`${ACTIVATION_SELECT_SQL} WHERE l.user_id = ? ORDER BY l.id DESC LIMIT ?`, [
+    userId,
+    sqlLimit(limit),
+  ]);
+  return rows.map(toActivation);
+}
+
+export async function listRecentActivations(limit: number): Promise<ActivationRecord[]> {
+  const rows = await queryRows<ActivationRow>(`${ACTIVATION_SELECT_SQL} ORDER BY l.id DESC LIMIT ?`, [sqlLimit(limit)]);
+  return rows.map(toActivation);
+}

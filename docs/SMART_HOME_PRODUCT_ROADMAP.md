@@ -295,18 +295,18 @@ flowchart TB
 
 | # | Module | Vấn đề cốt lõi | Cần refactor trước phiên bản nào | Tài liệu chi tiết |
 |---|---|---|---|---|
-| 1 | `GET /api/device/sensors` | Rò rỉ secret_key toàn hệ thống | **V1 (khẩn cấp)** | `SECURITY_ARCHITECTURE.md` #1 |
+| 1 | `GET /api/device/sensors` (đã gỡ 2026-11-16) | Rò rỉ secret_key toàn hệ thống | **V1 (khẩn cấp)** | `SECURITY_ARCHITECTURE.md` #1 |
 | 2 | Firmware config (`config_gw.h`/`config_1.h`) | WiFi/Secret hard-code compile vào binary (file đã `.gitignore`, không commit git) | **V1 (khẩn cấp)** | `EMBEDDED_ARCHITECTURE_ESP_IDF.md`, `SECURITY_ARCHITECTURE.md` |
 | 3 | `devices` table (schema gốc) | Gộp Gateway+Sensor, không Customer/Home/Room | **V1→V2** | `DATABASE_REFACTOR_SMARTHOME.md` |
-| 4 | `middleware/rbac.ts` | Không giới hạn phạm vi Home cho Operator | **V2** | `SECURITY_ARCHITECTURE.md` #4 |
-| 5 | `validateDevice.ts` vs `mqttDataService.ts` | Logic xác thực trùng lặp 2 nơi | **V1→V2** | `BACKEND_REFACTOR_SMARTHOME.md` |
+| 4 | `middleware/rbac.ts` (Prototype; nay `modules/legacy/middleware/require-role.ts`) | Không giới hạn phạm vi Home cho Operator | **V2** | `SECURITY_ARCHITECTURE.md` #4 |
+| 5 | Prototype `validateDevice.ts` vs `mqttDataService.ts` (nay `modules/telemetry/features/ingest-http/` vs `ingest-mqtt/`) | Logic xác thực trùng lặp 2 nơi — từ refactor module → feature hai đường đã dùng chung hàm HMAC của `modules/devices` và `telemetry/domain/ingest-common.ts`, pipeline vẫn 2 nơi | **V1→V2** | `BACKEND_REFACTOR_SMARTHOME.md` |
 | 6 | 3 project PlatformIO (`gateway-node`/`sensor-node`/`sensor-node-2`) | Copy-paste thay vì tham số hoá (bản sao `sensor-node-2` đã gỡ 2026-10-26; cơ chế 1 codebase nhiều target vẫn chưa có) | **V1** | `EMBEDDED_ARCHITECTURE_ESP_IDF.md` |
 | 7 | `Sidebar.tsx`/`constants.ts` (Frontend) | Điều hướng theo thiết bị, 2 nguồn nav lệch nhau | **V2** | `FRONTEND_REFACTOR_SMARTHOME.md` |
 | 8 | `RegisterModal.tsx` | Hiển thị secret plaintext trên Dashboard | **V2** | `FRONTEND_REFACTOR_SMARTHOME.md`, `SECURITY_ARCHITECTURE.md` |
 | 9 | Mobile `MockAuthService` | Phụ thuộc cứng, không interface, chặn viết test | **V2** | `MOBILE_APP_ARCHITECTURE.md` |
 | 10 | `audit_log` (1 bảng gộp) | Gộp bảo mật + nghiệp vụ + dữ liệu tần suất cao | **V2** | `DATABASE_REFACTOR_SMARTHOME.md`, `BACKEND_REFACTOR_SMARTHOME.md` |
 | 11 | `sensor_data` giới hạn cứng 150 bản ghi | Phá huỷ dữ liệu lịch sử cần cho AI | **V2 (trước khi có AI thật ở V3)** | `DATABASE_REFACTOR_SMARTHOME.md` mục 7.12 |
-| 12 | Rate-limit/cache in-memory (`app.ts`, `deviceStatus.ts`) | Không scale ngang nhiều instance | **Commercial** | `BACKEND_REFACTOR_SMARTHOME.md`, `SECURITY_ARCHITECTURE.md` |
+| 12 | Rate-limit/cache in-memory (`app.ts`, `devices/domain/online-cache.ts`; Prototype: `deviceStatus.ts`) | Không scale ngang nhiều instance | **Commercial** | `BACKEND_REFACTOR_SMARTHOME.md`, `SECURITY_ARCHITECTURE.md` |
 | 13 | Mosquitto đơn lẻ, không TLS, không ACL | Không HA, không bảo mật transport | **V2 (TLS) → Commercial (Cluster)** | `SECURITY_ARCHITECTURE.md` |
 | 14 | Không Soft Delete toàn hệ thống | Mất dữ liệu điều tra vĩnh viễn | **V2→V3** | `SECURITY_ARCHITECTURE.md`, `DATABASE_REFACTOR_SMARTHOME.md` |
 | 15 | Không CI/CD, deploy thủ công | Rủi ro lỗi người khi release | **Commercial** | Phần 5.1 |
@@ -404,7 +404,7 @@ quadrantChart
 
 | Thứ tự | Hạng mục | Lý do xếp trước/sau |
 |---|---|---|
-| 1 | Vá rò rỉ secret (`/api/device/sensors`) | Impact cực cao, effort cực thấp — không có lý do trì hoãn |
+| 1 | Vá rò rỉ secret (`/api/device/sensors` — đã làm 2026-11-16) | Impact cực cao, effort cực thấp — không có lý do trì hoãn |
 | 2 | NVS hoá cấu hình firmware | Điều kiện tiên quyết cho Provisioning — không thể làm Provisioning nếu credential vẫn hard-code |
 | 3 | Customer/Home/Room schema mới | Mọi tính năng V2 khác (Dashboard, Mobile, RBAC) đều phụ thuộc mô hình dữ liệu này |
 | 4 | RBAC theo Home + tách 2 Dashboard | Phụ thuộc bước 3, là nền tảng phân quyền cho mọi API sau đó |

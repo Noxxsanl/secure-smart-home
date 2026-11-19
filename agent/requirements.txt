@@ -1,0 +1,9 @@
+# Phụ thuộc chạy của agent — ghim bản đã kiểm (pytest + ruff qua) ngày 2026-11-01.
+# Đồng bộ với [project.dependencies] trong pyproject.toml khi nâng cấp.
+# Docker và CI cài từ file này; local: pip install -r requirements-dev.txt
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.2
+pydantic-settings==2.16.2
+openai==3.42.0
+httpx==0.28.1

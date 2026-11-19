@@ -1,0 +1,161 @@
+// Facade của module devices: những hàm/kiểu mà module khác được gọi (qua index.ts). Chỉ re-export hoặc bọc mỏng.
+//
+// Bảng devices và secret_key chỉ module này được ghi/đọc (quy tắc T1, invariant 1) — telemetry và control không tự
+// UPDATE devices mà gọi các hàm "ghi trạng thái" bên dưới, truyền `db` khi đang trong transaction của mình.
+import { toBoolOrNull, type Queryable } from "../../infrastructure/database/db";
+import type { DeviceRow } from "./domain/device.types";
+import {
+  lockApplianceState,
+  markProvisioned,
+  orAcCodes,
+  updateAcSetpoint,
+  updateCurtainPos,
+  updatePowerState,
+} from "./infrastructure/device.repository";
+
+// ── Đọc thiết bị (read model) ───────────────────────────────────────────────
+export {
+  buildReading,
+  getDeviceRow,
+  getDeviceRowByUid,
+  getGatewayCounts,
+  latestReadings,
+  listDeviceRowsByIds,
+  listHomeDeviceRows,
+  toConsoleDevice,
+  toDeviceStateEvent,
+  toDeviceStateSnapshot,
+  toGateway,
+} from "./infrastructure/device.read-model";
+export { listGatewayAndSensorTypeStatus } from "./infrastructure/device.repository";
+export type { DeviceTypeStatus } from "./infrastructure/device.repository";
+
+// ── Quyền / tra cứu dùng chung giữa các module ──────────────────────────────
+export { requireDeviceAccess } from "./domain/device-access";
+export { ensureHomeAccess, requireDevice, requireGateway } from "./domain/console-access";
+export { toCustomerDeviceOne, toCustomerDevices } from "./domain/device-view";
+
+// ── Xác thực HMAC thiết bị (dùng chung HTTP + MQTT — invariant 4) ───────────
+export {
+  isCounterInRange,
+  isDeviceIp,
+  isHmacHex,
+  isSafeDeviceId,
+  isTimestampValid,
+  isUnixSeconds,
+  isValidCounter,
+  isWellFormedUid,
+  jsonHasNul,
+  verifyDeviceHMAC,
+  verifyGatewayHMAC,
+  verifyGatewayTelemetryV2,
+  verifySensorTelemetryV2,
+} from "./domain/hmac.service";
+export type {
+  GatewayTelemetryFieldsV2,
+  HMACVerifyResult,
+  SensorTelemetryFieldsV2,
+  VerifiedDevice,
+} from "./domain/hmac.service";
+/**
+ * Chống phát lại v2 theo thiết bị: nhận ctr chỉ khi lớn hơn last_ctr của dòng đó (gọi sau khi chữ ký đã hợp lệ).
+ * Dùng cho telemetry Node (dòng node) và heartbeat Gateway (dòng gateway).
+ */
+export { claimDeviceCounter } from "./infrastructure/device.repository";
+/** Chuỗi ký v2 của ack lệnh và sự kiện camera (Gateway → Server) — control/camera dùng với GatewaySigner.verify. */
+export { ackMessageV2, cameraEventMessageV2 } from "./domain/signature-v2";
+export type { AckFieldsV2, CameraEventFieldsV2 } from "./domain/signature-v2";
+/** Giá trị cột secret_key khi GHI (mã hoá nếu có DEVICE_SECRET_KEY) — route legacy tạo thiết bị dùng. */
+export { sealForStorage } from "./infrastructure/device-secret.repository";
+export { registerAuthFailure } from "./domain/auth-failure";
+export type { AuthFailureResult } from "./domain/auth-failure";
+/** Ký/kiểm HMAC bằng secret gateway (lệnh, OTA, ack) — secret không rời module devices (invariant 1, 2). */
+export { getGatewaySigner } from "./domain/gateway-signer";
+export type { GatewaySigner } from "./domain/gateway-signer";
+
+// ── Ghi trạng thái thiết bị (chủ sở hữu bảng devices) ───────────────────────
+export {
+  deleteDevicesForTransfer,
+  findDevicesByUids,
+  findGatewayChildren,
+  insertDevice,
+  upsertHardwareDevice,
+  upsertNodeAppliance,
+} from "./infrastructure/device-provisioning.repository";
+export type {
+  ExistingDeviceRef,
+  HardwareDeviceRecord,
+  NodeApplianceRecord,
+} from "./infrastructure/device-provisioning.repository";
+/** Đã nhận số đo hợp lệ: last_seen = NOW(), fail_count = 0, (tuỳ chọn) last_ip. */
+export { markDeviceSeen } from "./infrastructure/device.repository";
+
+/** provision_status 'pending' → 'provisioned' cho những dòng đang pending (lần đầu được thấy). */
+export async function markDevicesProvisioned(rows: readonly DeviceRow[], db?: Queryable): Promise<void> {
+  await markProvisioned(
+    rows.filter((row) => row.provision_status === "pending").map((row) => row.id),
+    db
+  );
+}
+
+/** Trạng thái relay sau khi thiết bị ack lệnh bật/tắt. */
+export async function setDevicePowerState(deviceDbId: number, power: boolean, db?: Queryable): Promise<void> {
+  await updatePowerState(deviceDbId, power, db);
+}
+
+/** Trạng thái tải của một thiết bị tại thời điểm khoá dòng (power null = server chưa biết). */
+export interface DeviceLoadState {
+  power: boolean | null;
+  acSetpoint: number | null;
+  curtainPos: number | null;
+}
+
+/**
+ * Khoá dòng devices (`SELECT … FOR UPDATE`) rồi đọc trạng thái hiện tại — gọi TRONG transaction (db = client của giao dịch),
+ * TRƯỚC khi setDevicePowerState/setDeviceAcSetpoint/setDeviceCurtainPos. Giá trị trả về là "trạng thái trước" đáng tin
+ * cho nhật ký hành vi: dòng devices là trọng tài duy nhất giữa đường lệnh và đường telemetry (appliance-sync cũng khoá
+ * cùng cách), nên chỉ bên thật sự làm đổi trạng thái mới ghi dòng. Thiết bị không còn → null.
+ */
+export async function lockDeviceLoadState(deviceDbId: number, db: Queryable): Promise<DeviceLoadState | null> {
+  const row = await lockApplianceState(deviceDbId, db);
+  if (!row) return null;
+  return { power: toBoolOrNull(row.power_state), acSetpoint: row.ac_setpoint, curtainPos: row.curtain_pos };
+}
+
+/** Đánh dấu một ô mã IR đã học: ac_codes = COALESCE(ac_codes, 0) | mask (NULL coi như 0). */
+export async function setDeviceAcCodesBit(deviceDbId: number, mask: number, db?: Queryable): Promise<void> {
+  await orAcCodes(deviceDbId, mask, db);
+}
+
+/** Nhiệt độ đặt của điều hoà sau khi thiết bị ack lệnh set_temp. */
+export async function setDeviceAcSetpoint(deviceDbId: number, setpoint: number, db?: Queryable): Promise<void> {
+  await updateAcSetpoint(deviceDbId, setpoint, db);
+}
+
+/** % mở của rèm sau khi Node ack lệnh set_pos/turn_on/turn_off. */
+export async function setDeviceCurtainPos(deviceDbId: number, position: number, db?: Queryable): Promise<void> {
+  await updateCurtainPos(deviceDbId, position, db);
+}
+
+// ── Điều hoà IR / rèm / relay thật của Node ─────────────────────────────────
+export {
+  AC_SETPOINT_MAX,
+  AC_SETPOINT_MIN,
+  CURTAIN_POS_MAX,
+  CURTAIN_POS_MIN,
+  isValidAcCodes,
+  isValidAcSetpoint,
+  isValidCurtainPos,
+  learnSlotMask,
+  parseLearnAction,
+  parseReportedCurtainPos,
+  parseSetPosAction,
+  parseSetTempAction,
+  toLearnAction,
+  toSetPosAction,
+  toSetTempAction,
+} from "./domain/appliance";
+export type { LearnSlot } from "./domain/appliance";
+/** Telemetry của Node → last_seen + trạng thái các relay thật của nó (điều hoà); dùng chung ingest HTTP + MQTT. */
+export { syncNodeAppliances } from "./domain/appliance-sync";
+export type { NodeApplianceReport } from "./domain/appliance-sync";

@@ -120,7 +120,7 @@ Host is up.
 ### Bước 3.2 — Quét port mục tiêu Windows
 
 ```bash
-nmap -sV -p 3000,5000,1883,8883,5432,5433 $WINDOWS_IP
+nmap -sV -p 3000,5000,8883,5432,5433 $WINDOWS_IP
 ```
 
 Kết quả mong đợi:
@@ -129,7 +129,7 @@ Kết quả mong đợi:
 PORT     STATE  SERVICE  VERSION
 3000/tcp open   http     Node.js (Next.js frontend)
 5000/tcp open   http     Node.js (Express backend API)
-1883/tcp open   mqtt     Mosquitto MQTT broker
+8883/tcp open   ssl/mqtt Mosquitto MQTT broker (TLS)
 ```
 
 ### Bước 3.3 — Quét chi tiết OS và service version

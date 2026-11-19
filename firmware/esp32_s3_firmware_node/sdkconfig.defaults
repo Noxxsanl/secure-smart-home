@@ -1,0 +1,55 @@
+# sdkconfig.defaults — Node phòng khách ESP32-S3 (docs/guides/ESP_IDF_BUILD.md §3)
+# KHÔNG đặt device_id, secret, LMK ở đây — file này được commit (ESP_IDF_BUILD §7.1).
+# Sửa file này khi đã có sdkconfig thì phải xoá sdkconfig (hoặc chạy lại set-target) rồi build.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Tối ưu kích thước (-Os). sdkconfig cũ còn -Og thì firmware/cmake/fw_build.cmake vẫn ép -Os
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Flash 16 MB (theo sdkconfig hiện tại của board)
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# PSRAM Octal: PCB dùng ESP32-S3-WROOM-1 N16R8 (esptool: "Embedded PSRAM 8MB (AP_3v3)"). Để Quad thì boot lỗi PSRAM.
+# PSRAM Octal chiếm GPIO33–37: không dùng các chân này (README, mục "Ràng buộc chân").
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+
+# PCB nạp và xem log qua USB native (GPIO19/20, USB-Serial-JTAG), không có chip USB-UART → console chính là USB,
+# để log của bootloader và panic cũng hiện trên cổng COM đó
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Bảng phân vùng riêng: 2 slot OTA + log (ESP_IDF_BUILD §4)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_node.csv"
+
+# OTA: rollback nếu app mới không xác nhận boot thành công
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Tick 1 ms — driver cảm biến chờ đo theo ms (SHT3x 15 ms); tick 10 ms mặc định làm tròn xuống sai
+CONFIG_FREERTOS_HZ=1000
+
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+
+# Bảo mật nhẹ, không đốt eFuse (README, mục "Bảo mật"):
+# - phát hiện tràn stack bằng canary
+CONFIG_COMPILER_STACK_CHECK_MODE_NORM=y
+# - driver WiFi không lưu cấu hình xuống NVS (node không giữ WiFi, chỉ dùng radio cho ESP-NOW)
+CONFIG_ESP_WIFI_NVS_ENABLED=n
+
+# ---- LVGL 8.4 (cùng bản Gateway; components/drivers/idf_component.yml, drv_display) ----------------------------
+# RGB565 theo thứ tự byte CPU: drv_ili9488 tự đổi sang RGB666. Bật đảo byte thì sai màu (drv_display.c chặn lúc build)
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_COLOR_16_SWAP=n
+# Bộ nhớ LVGL lấy từ heap (malloc), khối lớn tự vào PSRAM — như Gateway
+CONFIG_LV_MEM_CUSTOM=y
+CONFIG_LV_MEMCPY_MEMSET_STD=y
+CONFIG_LV_USE_LOG=y
+CONFIG_LV_LOG_PRINTF=y
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+# Font Montserrat có sẵn chỉ có ASCII. Font tiếng Việt sinh bằng lv_font_conv (như ui/fonts/gen_fonts.sh của Gateway)
+# là font nén RLE → cần tuỳ chọn này
+CONFIG_LV_USE_FONT_COMPRESSED=y
+# Số lớn của ô nhiệt độ/độ ẩm (node_ui FONT_BIG), như Gateway
+CONFIG_LV_FONT_MONTSERRAT_40=y

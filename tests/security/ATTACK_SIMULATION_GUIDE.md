@@ -15,6 +15,58 @@ File nay duoc viet dua tren cac script hien co:
 
 ---
 
+## 0. Cap nhat 2026-11-16: kich ban telemetry chu ky v2 va kiem mTLS/ACL
+
+> Phan huong dan nap firmware Arduino (config_gw.h, MQTT 1883) o cac muc sau la ban cu. Firmware hien tai la ESP-IDF
+> (xem `docs/guides/LEN_SERVER.md`), broker chi con mTLS cong 8883. Cac script duoi day da viet lai theo giao thuc v2
+> ([API_DESIGN](../../docs/API_DESIGN.md) muc 3).
+
+**`attack_demo.sh`** (S0-S8, gui goi v2 do script tu ky bang openssl vao `POST /api/device/data`; S8 vao `POST /api/device/camera/snapshot`):
+
+```bash
+bash tests/security/attack_demo.sh [BACKEND_URL] [GW_ID] [GW_SECRET] [SN_ID] [SN_SECRET] [CAM_ID]
+# qua nginx HTTPS: BACKEND_URL=https://localhost (script tu dung infra/mosquitto/certs/ca.crt lam --cacert)
+# CAM_ID (tham so 6 hoac bien moi truong CAM_ID) tuy chon: camera that thuoc GW_ID, de S8 gui them 1 anh hop le sau chuoi rac
+```
+
+| # | Kich ban | Ky vong |
+|---|---|---|
+| S0 | Goi v2 hop le | 200 |
+| S1 | Gia mao: `gw_hmac` bia | 401 `GATEWAY_AUTH_FAIL` / `HMAC_MISMATCH` |
+| S2 | Sua `data_raw`, giu nguyen 2 chu ky (chu ky Node phu noi dung) | 401 `SENSOR_AUTH_FAIL` / `HMAC_MISMATCH` |
+| S3 | Replay nguyen goi S0 trong cua so 300 s (chong bang `sn_ctr` / `last_ctr`) | 401 `SENSOR_AUTH_FAIL` / `REPLAYED` |
+| S4 | Replay qua han: timestamp -700 s, chu ky dung | 401 `TIMESTAMP_EXPIRED` (audit `REPLAY_ATTACK`) |
+| S5 | Node doi vai Gateway | 403 `INVALID_DEVICE_TYPE` |
+| S6 | Ha cap ve chu ky v1 `<id>:<ts>` | 401 `PROTOCOL_V1_DISABLED` (khi `DEVICE_HMAC_V1=false`) |
+| S7 | Brute force 20 goi chu ky ngau nhien qua HTTP | 401 roi 429; thiet bi **khong** bi khoa (chong DoS khoa gateway that) |
+| S8 | Khoa-DoS duong camera: 25 request rac (ts cu, chu ky bua) vao `POST /api/device/camera/snapshot` voi `gateway_id` THAT | 401 ... roi 429 (IP vuot 20 loi/15 phut); gateway van `active`, **khong** tang `fail_count`; neu co CAM_ID thi anh hop le gui ngay sau 6 request rac khong bi `403 DEVICE_BLOCKED`. Audit co `GATEWAY_AUTH_FAIL`/`REPLAY_ATTACK` |
+
+Sau S8, IP cua may chay script bi gioi han duong camera 15 phut (429) - cho het cua so hoac khoi dong lai backend truoc khi thu lai duong anh that tu cung IP.
+
+**Tu kiem chu ky v2 cua script** (khong can backend/DB): `bash tests/security/lib_v2.sh --selftest` - so chu ky heartbeat (`v2|hb`), ack (`v2|ack`) va su kien camera (`v2|evt`) do `lib_v2.sh` ky bang openssl voi vector co dinh ma `backend/src/modules/devices/domain/signature-v2.test.ts` cung khang dinh (in PASS/FAIL tung dong, exit 1 neu lech). Chay khi doi chuoi ky de bash va backend khong lech nhau; ham `build_heartbeat_v2`/`build_ack_v2`/`build_camera_event_v2` trong `lib_v2.sh` dung de publish bang `mosquitto_pub` thu heartbeat/ack/su kien camera v2.
+
+Luu y: chay voi secret that thi cac goi hop le day `last_ctr` cua node len ~ gio hien tai (ms); node that van gui tiep binh thuong vi bo dem cua no cung bam theo gio. SN_ID phai la node da gan vao GW_ID (sau `npm run hw:register`).
+
+**`attack_demo_extended.sh`** (S5-S10): quan trong nhat la **S5 - Gateway bi chiem** (ke tan cong co secret gateway) bia so do cua Node: chu ky Node la lop doc lap, Gateway khong giu secret Node nen khong tao duoc chu ky Node hop le -> bi chan 401 `SENSOR_AUTH_FAIL`. Cac kich ban con lai: replay timestamp tuong lai, thiet bi da khoa, thiet bi chua dang ky, thiet bi inactive, vi pham RBAC REST (S9, S10 can `ADMIN_USER`/`ADMIN_PASS`).
+
+**`check_mqtt_tls.sh`** (5 phep thu mTLS: bat tay dung CA + cert client, khong cert client -> khong CONNACK, TLS 1.1 bi tu choi, client khong tin CA bi loai, MQTT plaintext vao cong TLS bi loai):
+
+```bash
+bash tests/security/check_mqtt_tls.sh 192.168.1.100      # ky vong: 5 dat, 0 khong dat
+```
+
+**`check_mqtt_acl.sh <gateway_id>`** (kiem ACL + thu hoi tren broker dang chay trong Docker; can da cap cert gateway bang `infra/pki/gen_mqtt_client.sh <gateway_id>`; chay `mosquitto_sub/pub` trong container tam):
+
+```bash
+bash tests/security/check_mqtt_acl.sh <gateway_id>       # hoac: make test-mqtt-acl GW=<gateway_id>
+```
+
+Kiem: khong co chung chi client -> bi tu choi; gateway publish `gateway/<id khac>/data` -> `Not authorized`; gateway nghe `#`, `$SYS/#`, lenh gateway khac -> khong nhan gi (chi nhan lenh cua chinh no); gia client id cua backend -> client id bi ep ve CN chung chi. Luu y: dung cert cua gateway that thi gateway do bi broker ngat vai giay roi tu noi lai.
+
+Ca hai script check can broker/backend dang chay (Docker). Backend can `npm test` (node:test) rieng cho phan chu ky/envelope: `cd backend && npm test`.
+
+---
+
 ## 1. Tong quan thu tu demo
 
 ```text
@@ -70,8 +122,7 @@ Toi thieu:
 | Backend | `http://localhost:5000` |
 | Backend health | `http://localhost:5000/api/health` |
 | PostgreSQL tren host | `localhost:5433` |
-| MQTT Broker 1 (Sensor↔GW) | `localhost:1883` |
-| MQTT Broker 2 (GW→Backend) | `localhost:8883` (TLS) |
+| MQTT broker (GW→Backend) | `localhost:8883` (TLS) |
 
 ---
 
@@ -144,8 +195,7 @@ docker compose ps
 Can thay cac container chay:
 
 - `iot-postgres`
-- `iot-mqtt-broker-1`
-- `iot-mqtt-broker-2`
+- `iot-mosquitto`
 - `iot-nginx`
 - `iot-backend`
 - `iot-frontend`
@@ -162,8 +212,7 @@ Kiem tra log neu co loi:
 docker compose logs -f backend
 docker compose logs -f frontend
 docker compose logs -f postgres
-docker compose logs -f mqtt-broker-1
-docker compose logs -f mqtt-broker-2
+docker compose logs -f mqtt-broker
 ```
 
 Dung toan bo stack:
@@ -190,14 +239,13 @@ dung Docker chi cho PostgreSQL va Mosquitto, hoac cai PostgreSQL/Mosquitto local
 Neu muon chi dung Docker cho ha tang:
 
 ```powershell
-docker compose up -d postgres mqtt-broker-1 mqtt-broker-2
+docker compose up -d postgres mqtt-broker
 ```
 
 Voi cach nay, tren host:
 
 - PostgreSQL la `localhost:5433`
-- MQTT Broker 1 (Sensor↔Gateway) la `localhost:1883`
-- MQTT Broker 2 (Gateway→Backend) la `localhost:8883` (chi MQTT over TLS, CA: `infra/mosquitto/certs/ca.crt`)
+- MQTT broker (Gateway→Backend) la `localhost:8883` (chi MQTT over TLS, CA: `infra/mosquitto/certs/ca.crt`)
 
 ### 5.2 Cau hinh Backend local
 
@@ -354,7 +402,7 @@ Sua cac gia tri:
 #define MQTT_BROKER1_HOST  "192.168.1.100"
 #define MQTT_BROKER1_PORT  1883
 
-// Broker 2 - Publish du lieu len Backend
+// Broker MQTT - Publish du lieu len Backend
 #define MQTT_BROKER2_HOST  "192.168.1.100"
 #define MQTT_BROKER2_PORT  8883
 
@@ -392,7 +440,7 @@ IoT Gateway Node - Starting
 Gateway ID : ESP32-GW-...
 Backend URL: http://192.168.1.100:3000/api/device/data
 [MQTT-SUB] Broker 1: 192.168.1.100:1883
-[MQTT-PUB] Broker 2: 192.168.1.100:8883 (TLS)
+[MQTT-PUB] Broker MQTT: 192.168.1.100:8883 (TLS)
 [MAIN] Ready - listening for sensor data...
 ```
 
@@ -874,9 +922,9 @@ DB_PORT=5433
 Kiem tra:
 
 - ESP32 va may Docker cung mang WiFi.
-- `MQTT_BROKER1_HOST` / `MQTT_BROKER2_HOST` la IP LAN cua may, khong phai `localhost`.
-- Cong `1883` (Broker 1) va `8883` (Broker 2, TLS) khong bi firewall chan.
-- Ca hai container `iot-mqtt-broker-1` va `iot-mqtt-broker-2` dang chay.
+- Host MQTT cua gateway (NVS `cloud/mqtt_uri`) la IP LAN cua may, khong phai `localhost`.
+- Cong `8883` (Broker MQTT, TLS) khong bi firewall chan.
+- Container `iot-mosquitto` dang chay.
 
 ### Gateway forward fail
 

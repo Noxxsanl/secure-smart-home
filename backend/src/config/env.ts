@@ -73,6 +73,67 @@ function readSecret(name: string, derivationLabel: string): string {
 // TRUST_PROXY → giá trị cho app.set("trust proxy", …). Mặc định false (không tin X-Forwarded-For).
 // Nhận: số hop ("1"), hoặc danh sách subnet/IP/từ khoá loopback|linklocal|uniquelocal phân tách bằng dấu phẩy.
 // KHÔNG nhận "true" (tin mọi proxy → client giả IP để né rate limit) — coi như chưa cấu hình.
+/**
+ * Token của kênh dịch vụ nội bộ /api/service/** (AI Agent gửi số liệu dùng LLM). Không đặt hoặc ngắn hơn 32 ký tự →
+ * null = kênh tắt (503). Không bao giờ log giá trị.
+ */
+function readServiceToken(): string | null {
+  const value = process.env.SERVICE_API_TOKEN?.trim();
+  if (!value) return null;
+  if (value.length < 32) {
+    console.warn("[startup] SERVICE_API_TOKEN is shorter than 32 characters – service channel disabled");
+    return null;
+  }
+  return value;
+}
+
+const DEFAULT_AI_PRICING_SOURCE =
+  "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+
+/** Nguồn JSON giá LLM (nút "Đồng bộ giá"): chỉ chấp nhận https. */
+function readPricingSource(): string {
+  const value = process.env.AI_PRICING_SOURCE_URL?.trim();
+  if (!value) return DEFAULT_AI_PRICING_SOURCE;
+  if (!/^https:\/\/[^\s]+$/.test(value)) {
+    console.warn("[startup] AI_PRICING_SOURCE_URL must be an https URL – using the default LiteLLM source");
+    return DEFAULT_AI_PRICING_SOURCE;
+  }
+  return value;
+}
+
+/**
+ * FRONTEND_URL = danh sách origin (phân tách dấu phẩy) của web được gọi thẳng backend: dùng cho CORS (app.ts) và kiểm
+ * Origin của WebSocket dùng cookie (camera live — chống CSWSH). Mặc định http://localhost:3000; bỏ "*" và mục rỗng.
+ */
+function readFrontendOrigins(): readonly string[] {
+  return (process.env.FRONTEND_URL || "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0 && origin !== "*");
+}
+
+/**
+ * DEVICE_SECRET_KEY = 64 ký tự hex (32 byte): khoá AES-256-GCM mã hoá cột devices.secret_key (FR-12.8,
+ * modules/devices/domain/secret-box.ts). Production bắt buộc; dev thiếu thì chạy tiếp với secret dạng rõ (cảnh báo).
+ * MẤT KHOÁ = mọi thiết bị phải đăng ký lại (secret đã mã hoá không mở được). Không bao giờ log giá trị.
+ */
+function readDeviceSecretKey(): Buffer | null {
+  const raw = process.env.DEVICE_SECRET_KEY?.trim();
+  if (!raw) {
+    if (isProduction) {
+      console.error("[startup] DEVICE_SECRET_KEY is required in production (64 hex chars, see .env.example)");
+      process.exit(1);
+    }
+    console.warn("[startup] DEVICE_SECRET_KEY not set – device secrets stay in plaintext (FR-12.8). Generate: openssl rand -hex 32");
+    return null;
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
+    console.error("[startup] DEVICE_SECRET_KEY must be exactly 64 hex characters (32 bytes)");
+    process.exit(1);
+  }
+  return Buffer.from(raw, "hex");
+}
+
 function readTrustProxy(): boolean | number | string {
   const raw = process.env.TRUST_PROXY?.trim();
   if (!raw || raw.toLowerCase() === "false" || raw === "0") return false;
@@ -95,6 +156,8 @@ function readTrustProxy(): boolean | number | string {
 }
 
 export interface AppEnv {
+  /** Origin web hợp lệ (FRONTEND_URL, tách dấu phẩy) — CORS và kiểm Origin của WebSocket cookie. */
+  frontendOrigins: readonly string[];
   /** Giá trị `trust proxy` của Express (false | số hop | danh sách subnet). */
   trustProxy: boolean | number | string;
   nodeEnv: string;
@@ -117,9 +180,25 @@ export interface AppEnv {
   firmwareStorageDir: string;
   /** Số ngày giữ sensor_data (job retention hằng giờ). */
   telemetryRetentionDays: number;
+  /** Thư mục lưu ảnh chụp camera (tương đối theo thư mục chạy backend; cùng kiểu với firmwareStorageDir). */
+  snapshotStorageDir: string;
+  /** Số ngày giữ ảnh chụp camera (job purge-old-snapshots hằng giờ; thêm trần 500 ảnh / camera). */
+  cameraSnapshotRetentionDays: number;
+  /** Token Bearer của kênh /api/service/** (AI Agent → backend); null = kênh tắt. */
+  serviceApiToken: string | null;
+  /** Nguồn JSON giá LLM cho nút "Đồng bộ giá" (mặc định kho giá công khai của LiteLLM). */
+  aiPricingSourceUrl: string;
+  /**
+   * Nhận telemetry chữ ký v1 ("<id>:<ts>", không ký nội dung, không chống phát lại) — chỉ bật tạm khi phần cứng chưa nạp
+   * firmware v2 (DEVICE_HMAC_V1=true). Mặc định false: gói v1 bị từ chối 401 PROTOCOL_V1_DISABLED.
+   */
+  deviceHmacV1: boolean;
+  /** Khoá AES-256-GCM (32 byte) mã hoá devices.secret_key; null = chưa cấu hình (dev) → lưu bản rõ. */
+  deviceSecretKey: Buffer | null;
 }
 
 export const env: Readonly<AppEnv> = Object.freeze({
+  frontendOrigins: readFrontendOrigins(),
   trustProxy: readTrustProxy(),
   nodeEnv,
   isProduction,
@@ -132,4 +211,10 @@ export const env: Readonly<AppEnv> = Object.freeze({
   activationCodeTtlDays: readInt("ACTIVATION_CODE_TTL_DAYS", 180, 1, 3650),
   firmwareStorageDir: process.env.FIRMWARE_STORAGE_DIR?.trim() || "storage/firmware",
   telemetryRetentionDays: readInt("TELEMETRY_RETENTION_DAYS", 8, 1, 3650),
+  snapshotStorageDir: process.env.SNAPSHOT_STORAGE_DIR?.trim() || "storage/snapshots",
+  cameraSnapshotRetentionDays: readInt("CAMERA_SNAPSHOT_RETENTION_DAYS", 7, 1, 3650),
+  serviceApiToken: readServiceToken(),
+  aiPricingSourceUrl: readPricingSource(),
+  deviceHmacV1: readBool("DEVICE_HMAC_V1", false),
+  deviceSecretKey: readDeviceSecretKey(),
 });
